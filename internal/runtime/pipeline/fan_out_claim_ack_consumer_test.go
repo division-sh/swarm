@@ -88,6 +88,7 @@ func TestFanOutPreparationBlockAckSuppressesReleaseDespiteCleanupError(t *testin
 	owner := &fanOutAcknowledgedBlockOwner{
 		fault: fault,
 		fanOutClaimOutcomeOwner: &fanOutClaimOutcomeOwner{
+			loadDisposition: FanOutReadDefect,
 			claimFn: func(context.Context, FanOutClaimRequest) (fanoutobligation.Intent, fanoutobligation.Claim, bool, error) {
 				return fanoutobligation.Intent{Request: fanoutobligation.IntentRequest{Key: claim.Key}}, claim, true, nil
 			},

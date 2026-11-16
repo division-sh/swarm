@@ -449,11 +449,7 @@ func TestRootConnectedTemplatePublicationRollbackIsAtomicAcrossSelectedStores(t 
 				Invariant: "public_input.selected_store_atomicity",
 				Reason:    "prove root-connected private template lifecycle and publication facts roll back on late delivery failure",
 			}
-			if backend == servedparity.BackendExplicitPostgres {
-				testsql.InstallPostgresEventDeliveryFailureAfterFlowMaterialization(t, context.Background(), db, claim, "telegram-chat")
-			} else {
-				testsql.InstallSQLiteEventDeliveryFailureAfterFlowMaterialization(t, context.Background(), db, claim, "telegram-chat")
-			}
+			storetest.InstallEventDeliveryFailureAfterFlowMaterialization(t, context.Background(), rt.Bus.Store(), claim, "telegram-chat")
 
 			idempotencyKey := "public-input-rollback-" + string(backend)
 			response := requestServedJSONRPC(t, endpoint, "event.publish", map[string]any{
@@ -492,21 +488,13 @@ func TestRootConnectedTemplatePublicationRollbackIsAtomicAcrossSelectedStores(t 
 func TestRootConnectedTemplatePublicationRollsBackAfterDeliveryAndCompletionAcrossSelectedStores(t *testing.T) {
 	stages := []struct {
 		name    string
-		install func(testing.TB, context.Context, *sql.DB, testsql.EventCorruptionClaim, string, servedparity.Backend)
+		install func(testing.TB, context.Context, any, testsql.EventCorruptionClaim, string)
 	}{
-		{name: "replay_scope", install: func(t testing.TB, ctx context.Context, db *sql.DB, claim testsql.EventCorruptionClaim, flow string, backend servedparity.Backend) {
-			if backend == servedparity.BackendExplicitPostgres {
-				testsql.InstallPostgresReplayScopeFailureAfterDelivery(t, ctx, db, claim, flow)
-			} else {
-				testsql.InstallSQLiteReplayScopeFailureAfterDelivery(t, ctx, db, claim, flow)
-			}
+		{name: "replay_scope", install: func(t testing.TB, ctx context.Context, selected any, claim testsql.EventCorruptionClaim, flow string) {
+			storetest.InstallReplayScopeFailureAfterDelivery(t, ctx, selected, claim, flow)
 		}},
-		{name: "api_completion", install: func(t testing.TB, ctx context.Context, db *sql.DB, claim testsql.EventCorruptionClaim, flow string, backend servedparity.Backend) {
-			if backend == servedparity.BackendExplicitPostgres {
-				testsql.InstallPostgresAPICompletionFailureAfterPublication(t, ctx, db, claim, flow)
-			} else {
-				testsql.InstallSQLiteAPICompletionFailureAfterPublication(t, ctx, db, claim, flow)
-			}
+		{name: "api_completion", install: func(t testing.TB, ctx context.Context, selected any, claim testsql.EventCorruptionClaim, flow string) {
+			storetest.InstallAPICompletionFailureAfterPublication(t, ctx, selected, claim, flow)
 		}},
 	}
 	for _, backend := range servedparity.RequiredBackends {
@@ -524,7 +512,7 @@ func TestRootConnectedTemplatePublicationRollsBackAfterDeliveryAndCompletionAcro
 					t.Fatal(err)
 				}
 				claim := testsql.EventCorruptionClaim{Invariant: "public_input.selected_store_atomicity", Reason: "prove rollback at " + stage.name + " after prior publication facts exist"}
-				stage.install(t, context.Background(), db, claim, "telegram-chat", backend)
+				stage.install(t, context.Background(), rt.Bus.Store(), claim, "telegram-chat")
 				idempotencyKey := "public-input-" + stage.name + "-" + string(backend)
 				rpcErr := requireServedJSONRPCError(t, endpoint, "event.publish", map[string]any{
 					"bundle_hash": bundleHash, "event_name": publicTelegramMockApprovalInput,

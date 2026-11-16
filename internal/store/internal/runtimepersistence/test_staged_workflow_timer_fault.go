@@ -2,7 +2,7 @@ package runtimepersistence
 
 import (
 	"context"
-	"database/sql"
+	"fmt"
 
 	"github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
 )
@@ -19,7 +19,12 @@ func CorruptStagedWorkflowTimerForTest(ctx context.Context, selected any, runID,
 	if _, err := eventFixtureDialectForTest(selected); err != nil {
 		return err
 	}
-	return runUnrevisionedEventFixtureTransactionForTest(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		return pipelinepersistence.CorruptStagedWorkflowTimerTxForTest(ctx, tx, runID, activationID, fault)
-	})
+	switch owner := selected.(type) {
+	case *PostgresStore:
+		return owner.pipelinePostgresOwner.CorruptStagedWorkflowTimerForTest(ctx, runID, activationID, fault)
+	case *SQLiteRuntimeStore:
+		return owner.pipelineSQLiteOwner.CorruptStagedWorkflowTimerForTest(ctx, runID, activationID, fault)
+	default:
+		return fmt.Errorf("event fixture store %T is unsupported", selected)
+	}
 }

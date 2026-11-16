@@ -248,7 +248,7 @@ func TestCLI_ServeOwnsRuntimeStartupFlags(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("serve help code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
-	for _, want := range []string{"Start the Swarm runtime", "[directory]", "--config", "--backend", "openai_responses", "--workspace-backend", "--api-listen-addr", "API, WebSocket, health, and readiness routes", "--mcp-listen-addr", "MCP and tools routes", "--store", "--self-check", "--dev", "--shutdown-grace", "--verbose"} {
+	for _, want := range []string{"For serve-owned HTTPS, opt in through the deployment's `swarm.yaml` under `serve.public_webhook`. With neither `certificate_file` nor `private_key_file` configured, serve uses autocert with Let's Encrypt for exactly the configured name, accepting its terms; contact is omitted unless `email` is set.", "[directory]", "--config", "--backend", "openai_responses", "--workspace-backend", "--api-listen-addr", "API, WebSocket, health, and readiness routes", "--mcp-listen-addr", "MCP and tools routes", "--store", "--self-check", "--dev", "--shutdown-grace", "--verbose"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("serve help missing %q:\n%s", want, stdout.String())
 		}
@@ -759,7 +759,7 @@ func TestSourceFreeCommandsDoNotRequireSourceCheckout(t *testing.T) {
 		{name: "root help", args: []string{"--help"}, want: "Usage:"},
 		{name: "version", args: []string{"version"}, want: "Swarm dev"},
 		{name: "completion", args: []string{"completion", "bash"}, want: "swarm"},
-		{name: "serve help", args: []string{"serve", ".", "--help"}, want: "Start the Swarm runtime"},
+		{name: "serve help", args: []string{"serve", ".", "--help"}, want: "For serve-owned HTTPS, opt in through the deployment's `swarm.yaml` under `serve.public_webhook`. With neither `certificate_file` nor `private_key_file` configured, serve uses autocert with Let's Encrypt for exactly the configured name, accepting its terms; contact is omitted unless `email` is set."},
 		{name: "verify help", args: []string{"verify", "--help"}, want: "Validate contract files or compare a run's state with its history"},
 		{name: "run help", args: []string{"run", "start", "--help"}, want: "Publish into a served flow's live run, or reattach to one."},
 	} {

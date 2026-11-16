@@ -43,14 +43,14 @@ func TestEnginePublicationPreparationBindsExactAdmittedSource(t *testing.T) {
 		descriptors: []runtimebus.ActiveAgentDescriptor{testActiveAgentDescriptor(t, "reviewer", entityID, "")},
 	}}
 	eb := newOutboxPublicationBus(t, store)
-	runtimebustest.Subscribe(t, eb, "reviewer")
+	runtimebustest.Subscribe(t, eb, "reviewer", "custom.emitted")
 	now := time.Now().UTC()
 	makeEvent := func(id, run, payload string, at time.Time) events.Event {
 		return eventtest.RunCreatingRootIngress(id, "custom.emitted", "", "", []byte(payload), 0, run, "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), at)
 	}
 	id := eventtest.UUID("prepared-source-event")
 	original := makeEvent(id, runtimebustest.DefaultRunID, `{"value":1}`, now)
-	plans, err := eb.PrepareEnginePublications(context.Background(), []runtimeengine.EmitIntent{{Event: original, Recipients: []string{"reviewer"}}})
+	plans, err := eb.PrepareEnginePublications(context.Background(), []runtimeengine.EmitIntent{{Event: original}})
 	if err != nil {
 		t.Fatal(err)
 	}

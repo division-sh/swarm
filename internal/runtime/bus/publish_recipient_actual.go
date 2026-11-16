@@ -42,7 +42,7 @@ func (p PublishRecipientPlan) RecipientActuals() ([]PublishRecipientActual, erro
 func (p RoutePlan) recipientActuals() ([]PublishRecipientActual, error) {
 	out := make([]PublishRecipientActual, 0, len(p.DeliveryIntents))
 	for index, intent := range p.DeliveryIntents {
-		if !intent.Persist {
+		if !intent.Persist || intent.pendingNodeCandidate() {
 			continue
 		}
 		if err := validateRecipientIntentProducer(intent); err != nil {

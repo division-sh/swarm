@@ -83,7 +83,7 @@ func VerifyFanOutUnacknowledgedCommitCannotBorrowSuccessorForTest(t *testing.T, 
 						if intent.ClaimOwner != "" || !intent.LeaseExpiresAt.IsZero() || intent.Cursor != 1 || intent.NextChunkSize != fanoutobligation.MaxChunkSize || intent.LastServedAt.IsZero() {
 							t.Fatalf("successor observed non-atomic publication/release: %+v", intent)
 						}
-						if err := claimFanOutIntentRow(ctx, tx, runtimepipeline.FanOutClaimRequest{Owner: "successor", Lease: time.Minute}, time.Now().UTC(), &intent, &successor); err != nil {
+						if err := claimFanOutIntentRow(ctx, tx, backend == "postgres", runtimepipeline.FanOutClaimRequest{Owner: "successor", Lease: time.Minute}, time.Now().UTC(), &intent, &successor); err != nil {
 							t.Fatal(err)
 						}
 						if err := tx.Commit(); err != nil {
@@ -91,11 +91,11 @@ func VerifyFanOutUnacknowledgedCommitCannotBorrowSuccessorForTest(t *testing.T, 
 						}
 						switch disposition {
 						case "advanced":
-							if _, err := db.Exec(`UPDATE fan_out_intents SET cursor=2,status='closed',claim_owner=NULL,lease_expires_at=NULL`); err != nil {
+							if _, err := db.Exec(`UPDATE fan_out_intents SET cursor=2,status='closed',claim_owner=NULL,lease_expires_at=NULL,read_retry_not_before=NULL,read_retry_delay_ms=NULL,read_retry_since=NULL,read_retry_failure=NULL`); err != nil {
 								t.Fatal(err)
 							}
 						case "canceled":
-							if _, err := db.Exec(`UPDATE fan_out_intents SET status='canceled',blocked_reason='run_stopped',claim_owner=NULL,lease_expires_at=NULL`); err != nil {
+							if _, err := db.Exec(`UPDATE fan_out_intents SET status='canceled',blocked_reason='run_stopped',claim_owner=NULL,lease_expires_at=NULL,read_retry_not_before=NULL,read_retry_delay_ms=NULL,read_retry_since=NULL,read_retry_failure=NULL`); err != nil {
 								t.Fatal(err)
 							}
 						}

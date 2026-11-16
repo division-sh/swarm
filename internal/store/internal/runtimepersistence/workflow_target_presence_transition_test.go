@@ -160,6 +160,11 @@ func TestWorkflowEngineConstructedTransitionAtomicOnBothStores(t *testing.T) {
 
 func newWorkflowTargetConstructionFixture(t *testing.T, backend string, restartable ...bool) (receiverConfigActivationFixture, runtimepipeline.FlowInstanceActivationPlan) {
 	t.Helper()
+	return newWorkflowTargetConstructionFixtureDocuments(t, backend, len(restartable) == 1 && restartable[0], nil)
+}
+
+func newWorkflowTargetConstructionFixtureDocuments(t *testing.T, backend string, withAgents bool, extra map[string]string) (receiverConfigActivationFixture, runtimepipeline.FlowInstanceActivationPlan) {
+	t.Helper()
 	documents := map[string]string{
 		"schema.yaml":        "stages: []\n",
 		"review/schema.yaml": "instance: account_id\nstages:\n  active: {}\n  done: {}\n  settled: {}\ninputs: [review.created]\n",
@@ -172,12 +177,14 @@ func newWorkflowTargetConstructionFixture(t *testing.T, backend string, restarta
     advances_to: settled
 `, "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "review/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 	}
-	withAgents := len(restartable) == 1 && restartable[0]
 	if withAgents {
 		documents["review/schema.yaml"] = strings.Replace(documents["review/schema.yaml"], "  active: {}", "  active:\n    timers:\n      - {after: 1h, emit: timer.elapsed}", 1)
 		documents["review/schema.yaml"] = strings.Replace(documents["review/schema.yaml"], "  done: {}", "  done: {final: true}", 1)
 		documents["review/events.yaml"] += "timer.elapsed:\ntask.started:\n"
 		documents["review/agents.yaml"] = "reviewer:\n  model: regular\n  memory: true\n  intent: {inline: Review the task.}\n  subscriptions: [task.started]\n"
+	}
+	for name, contents := range extra {
+		documents[name] = contents
 	}
 	var f receiverConfigActivationFixture
 	if withAgents {
@@ -212,12 +219,16 @@ func newWorkflowTargetConstructionFixture(t *testing.T, backend string, restarta
 }
 
 func workflowTargetMutationEntry(t *testing.T, f receiverConfigActivationFixture, record runtimepipeline.WorkflowEngineStateRecord, localEvent string, capture ...*runtimedelivery.Claim) runtimepipeline.WorkflowEngineStateRecord {
+	return workflowTargetMutationEntryPayload(t, f, record, localEvent, []byte(`{}`), capture...)
+}
+
+func workflowTargetMutationEntryPayload(t *testing.T, f receiverConfigActivationFixture, record runtimepipeline.WorkflowEngineStateRecord, localEvent string, payload json.RawMessage, capture ...*runtimedelivery.Claim) runtimepipeline.WorkflowEngineStateRecord {
 	t.Helper()
 	// This is the native writer/contender proof, not handler execution: retain
 	// stage-entry authority from an actual declared and claimed occurrence.
 	flowID := record.Identity.Route.ScopeKey
 	node := mustPersistenceNode(flowID, "progress")
-	event := eventtest.ExistingRunRootIngress(uuid.NewString(), events.EventType(flowID+"/"+localEvent), "fixture", "", []byte(`{}`), 0, record.Identity.RunID, events.EventEnvelope{}, record.UpdatedAt)
+	event := eventtest.ExistingRunRootIngress(uuid.NewString(), events.EventType(flowID+"/"+localEvent), "fixture", "", payload, 0, record.Identity.RunID, events.EventEnvelope{}, record.UpdatedAt)
 	target, err := events.MustExistingEntityTarget(events.RouteIdentity{FlowID: flowID, FlowInstance: record.Identity.Route.InstancePath, EntityID: record.EntityID}).WithLife(record.Life)
 	if err != nil {
 		t.Fatal(err)

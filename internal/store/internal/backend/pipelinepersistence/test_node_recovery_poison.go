@@ -5,30 +5,50 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"sync"
 )
 
-func (s *PipelinePostgresOwner) InstallNodeRecoveryPoisonMutationForTest(ctx context.Context, runID, entityID string) error {
-	return s.backend.RunTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
+type NodeRecoveryPoisonCleanup struct {
+	postgres *PipelinePostgresOwner
+	sqlite   *PipelineSQLiteOwner
+	once     sync.Once
+	err      error
+}
+
+func (r *NodeRecoveryPoisonCleanup) Remove(ctx context.Context) error {
+	// Repeating an old cleanup must not remove a later installation.
+	r.once.Do(func() {
+		if r.postgres != nil {
+			r.err = r.postgres.backend.RunTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
+				return RemoveNodeRecoveryPoisonMutationTx(ctx, tx, true)
+			})
+		} else {
+			r.err = r.sqlite.backend.RunTransaction(ctx, "unrevisioned event fixture", func(ctx context.Context, tx *sql.Tx) error {
+				return RemoveNodeRecoveryPoisonMutationTx(ctx, tx, false)
+			})
+		}
+	})
+	return r.err
+}
+
+func (s *PipelinePostgresOwner) InstallNodeRecoveryPoisonMutationForTest(ctx context.Context, runID, entityID string) (*NodeRecoveryPoisonCleanup, error) {
+	err := s.backend.RunTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		return InstallNodeRecoveryPoisonMutationTx(ctx, tx, true, runID, entityID)
 	})
+	if err != nil {
+		return nil, err
+	}
+	return &NodeRecoveryPoisonCleanup{postgres: s}, nil
 }
 
-func (s *PipelineSQLiteOwner) InstallNodeRecoveryPoisonMutationForTest(ctx context.Context, runID, entityID string) error {
-	return s.backend.RunTransaction(ctx, "unrevisioned event fixture", func(ctx context.Context, tx *sql.Tx) error {
+func (s *PipelineSQLiteOwner) InstallNodeRecoveryPoisonMutationForTest(ctx context.Context, runID, entityID string) (*NodeRecoveryPoisonCleanup, error) {
+	err := s.backend.RunTransaction(ctx, "unrevisioned event fixture", func(ctx context.Context, tx *sql.Tx) error {
 		return InstallNodeRecoveryPoisonMutationTx(ctx, tx, false, runID, entityID)
 	})
-}
-
-func (s *PipelinePostgresOwner) RemoveNodeRecoveryPoisonMutationForTest(ctx context.Context) error {
-	return s.backend.RunTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		return RemoveNodeRecoveryPoisonMutationTx(ctx, tx, true)
-	})
-}
-
-func (s *PipelineSQLiteOwner) RemoveNodeRecoveryPoisonMutationForTest(ctx context.Context) error {
-	return s.backend.RunTransaction(ctx, "unrevisioned event fixture", func(ctx context.Context, tx *sql.Tx) error {
-		return RemoveNodeRecoveryPoisonMutationTx(ctx, tx, false)
-	})
+	if err != nil {
+		return nil, err
+	}
+	return &NodeRecoveryPoisonCleanup{sqlite: s}, nil
 }
 
 // The selected fixture owner validates canonical identities before this fixed

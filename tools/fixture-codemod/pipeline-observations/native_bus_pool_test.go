@@ -22,7 +22,7 @@ return nil
 	if err != nil || parseErr != nil || got != want {
 		t.Fatal("pool fixture changed its exact four-slot cut or bypassed original reservation/refusal owner")
 	}
-	actual = selectedCausalObservationBody(t, "internal/store/internal/backend/pipelinepersistence/owner_operations.go", "FixtureDecisionRouteStatusTx")
+	actual = selectedCausalObservationBody(t, "internal/store/internal/backend/pipelinepersistence/test_pipeline_scope_fixture.go", "readDecisionRouteStatusTx")
 	if !strings.Contains(actual, "`SELECT status FROM decision_card_route_obligations WHERE event_id=$1`") ||
 		!strings.Contains(actual, "eventID).Scan(&status)") || strings.Contains(actual, "LIMIT") {
 		t.Fatal("decision route witness lost its exact event-only row predicate")

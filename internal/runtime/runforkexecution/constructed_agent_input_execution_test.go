@@ -43,7 +43,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	runforkrevision "github.com/division-sh/swarm/internal/store/testutil/runforkrevisionfixture"
 	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/tests/support/testutil"
 	"github.com/division-sh/swarm/tests/support/testutil/sourceartifactfixture"
@@ -361,22 +360,7 @@ func proveSelectedConstructedAgentInput(t *testing.T, backend string, nested, fi
 		storetest.CommitSemanticEventWithRoutes(t, writeCtx, selected, audit, auditRoutes, pipelineobligation.ScopeSubscribed)
 		eventID = audit.ID()
 	}
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer tx.Rollback()
-	if backend == "sqlite" {
-		_, err = runforkrevision.CaptureSQLite(ctx, tx, runID, runforkrevision.AllFamilies()...)
-	} else {
-		_, err = runforkrevision.Capture(ctx, tx, runID, runforkrevision.AllFamilies()...)
-	}
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatal(err)
-	}
+	storetest.CaptureRunForkSnapshot(t, ctx, selected, runID)
 	if nested {
 		plan, err := selected.(interface {
 			PlanRunFork(context.Context, runfork.RunForkPlanRequest) (runfork.RunForkPlan, error)
@@ -502,6 +486,9 @@ func proveSelectedConstructedAgentInput(t *testing.T, backend string, nested, fi
 		fresh := q1ComponentSnapshot(t, selected)
 		for table, want := range map[string]int{"agent_sessions": 1, "agent_conversation_audits": 1, "agent_turns": 2} {
 			if count := len(q1ComponentRowsWithIdentity(t, fresh, table, "run_id", forkRunID)); count != want {
+				for _, name := range []string{"agent_sessions", "agent_conversation_audits", "agent_turns"} {
+					t.Logf("fresh snapshot %s rows=%d", name, len(q1ComponentRowsWithIdentity(t, fresh, name, "run_id", forkRunID)))
+				}
 				t.Fatalf("fresh %s rows=%d want=%d", table, count, want)
 			}
 		}

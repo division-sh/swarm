@@ -10,6 +10,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/http/httputil"
@@ -61,7 +62,18 @@ func TestStandingRootTreePublicRestartAndResetBothStores(t *testing.T) {
 			assertFullLifecycleVerifySuccess(t, verify)
 			start := func(source, storedHash string) *releaseServeProcess {
 				t.Helper()
-				native.listener.Store(fmt.Sprintf("127.0.0.1:%d", freeReleaseTCPPort(t)))
+				var listener *net.TCPListener
+				if storedHash != "" {
+					var err error
+					listener, err = net.ListenTCP("tcp", &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1)})
+					if err != nil {
+						t.Fatal(err)
+					}
+					defer listener.Close()
+					native.listener.Store(listener.Addr().String())
+				} else {
+					native.listener.Store(fmt.Sprintf("127.0.0.1:%d", freeReleaseTCPPort(t)))
+				}
 				spec := releaseProcessSpec{BinaryPath: binary, WorkingDir: root, Source: source,
 					ConfigPath: config, Store: backend, TokenFile: token, Token: goldenAPIToken, Env: env,
 					PublicWebhookBaseURL: native.endpoint.URL, PublicWebhookListen: native.listener.Load().(string),
@@ -69,6 +81,7 @@ func TestStandingRootTreePublicRestartAndResetBothStores(t *testing.T) {
 				if storedHash != "" {
 					spec.InternalMockLifecycleBinary, spec.RetainedBundleHash = retainedBinary, storedHash
 					spec.RetainedLiveExecution = true
+					spec.PublicWebhookListener = listener
 				}
 				p := startReleaseServe(t, spec)
 				ctx, cancel := context.WithTimeout(context.Background(), goldenStartupTimeout)

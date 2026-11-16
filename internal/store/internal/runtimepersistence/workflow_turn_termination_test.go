@@ -241,6 +241,11 @@ func seedTurnTerminationHeader(t *testing.T, fixture completionSettlementFixture
 
 func seedTurnTerminationHeaderForDeclaration(t *testing.T, fixture completionSettlementFixture, owner flowidentity.RunScopedFlowInstance, entity string, now time.Time, declaration contracts.FlowSchemaDocument, key string) pipeline.WorkflowEngineStateRecord {
 	t.Helper()
+	return seedTurnTerminationHeaderForOwner(t, fixture.original, fixture.store.(agentFixtureFlowStore), owner, entity, now, declaration, key)
+}
+
+func seedTurnTerminationHeaderForOwner(t *testing.T, original context.Context, selected agentFixtureFlowStore, owner flowidentity.RunScopedFlowInstance, entity string, now time.Time, declaration contracts.FlowSchemaDocument, key string) pipeline.WorkflowEngineStateRecord {
+	t.Helper()
 	fields := map[string]any{}
 	entityType := ""
 	if !declaration.Instance.Empty() {
@@ -270,8 +275,8 @@ func seedTurnTerminationHeaderForDeclaration(t *testing.T, fixture completionSet
 			if err != nil {
 				t.Fatal(err)
 			}
-			ctx := correlation.WithRunID(fixture.original, owner.RunID)
-			observed, found, err := fixture.store.(pipeline.FlowInstanceIndexReader).LookupFlowInstance(ctx, request)
+			ctx := correlation.WithRunID(original, owner.RunID)
+			observed, found, err := selected.(pipeline.FlowInstanceIndexReader).LookupFlowInstance(ctx, request)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -288,7 +293,7 @@ func seedTurnTerminationHeaderForDeclaration(t *testing.T, fixture completionSet
 				if err != nil {
 					t.Fatal(err)
 				}
-				commitPreparedWorkflowAggregateFixture(t, ctx, fixture.store.(agentFixtureFlowStore), owner.RunID, pipeline.WorkflowInstance{
+				commitPreparedWorkflowAggregateFixture(t, ctx, selected, owner.RunID, pipeline.WorkflowInstance{
 					InstanceID: root.InstanceID, StorageRef: root.InstancePath, EntityID: root.EntityID,
 					WorkflowName: ".", WorkflowVersion: source.WorkflowVersion(), Mode: "static", Fields: map[string]any{},
 					StageDefined: graph.StageCount() != 0, CurrentState: stage.ID(), CreatedAt: now, EnteredStageAt: now,
@@ -304,5 +309,5 @@ func seedTurnTerminationHeaderForDeclaration(t *testing.T, fixture completionSet
 			instance.EntityID = owner.RunID
 		}
 	}
-	return commitPreparedWorkflowAggregateFixture(t, fixture.original, fixture.store.(agentFixtureFlowStore), owner.RunID, instance, now)
+	return commitPreparedWorkflowAggregateFixture(t, original, selected, owner.RunID, instance, now)
 }

@@ -44,6 +44,9 @@ func LoadBundlePackRuntime(ctx context.Context, cfgResult RuntimeConfigLoadResul
 		Plans: plans, Bindings: bindings,
 		credentialSources: sources,
 	}
+	if err := ValidateServePublicWebhookPort(cfgResult.Config, channels); err != nil {
+		return BundlePackRuntimeLoad{}, err
+	}
 	return BundlePackRuntimeLoad{ProviderTriggers: triggers, Connectors: projection.ProviderConnectors, Channels: channels}, nil
 }
 

@@ -446,7 +446,7 @@ func TestTemplateInstanceConnectLifecyclePublishRollbackDoesNotLeakInstanceOrRou
 	t.Cleanup(cleanup)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	ctx := seedRuntimeTestRunForSource(t, pg, source)
-	testsql.InstallPostgresEventDeliveryFailureAfterFlowMaterialization(t, ctx, db, testsql.EventCorruptionClaim{
+	storetest.InstallEventDeliveryFailureAfterFlowMaterialization(t, ctx, pg, testsql.EventCorruptionClaim{
 		Invariant: "store.event_record.named_operation_atomicity",
 		Reason:    "prove late delivery failure rolls back the event and connect-created lifecycle facts",
 	}, "consumer")

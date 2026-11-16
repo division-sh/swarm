@@ -435,7 +435,7 @@ func (o *singleTurnFanOutOwner) BeginFanOutEvaluation(ctx context.Context, claim
 		return input, nil, &FanOutEvaluationLoadError{Cause: err}
 	}
 	if err := validate(input); err != nil {
-		return input, nil, &FanOutEvaluationLoadError{Cause: err, Stage: "validate_evaluation"}
+		return input, nil, &FanOutEvaluationLoadError{Cause: err, Stage: "validate_evaluation", Disposition: FanOutReadDefect}
 	}
 	group, err := o.BeginFanOutPublicationGroup(ctx, claim)
 	return input, group, err

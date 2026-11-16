@@ -118,11 +118,11 @@ func TestRunForkRevisionFreshEffectsStayInsideRetryOwners(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := map[string]int{
-		revisionProtocolPath + "|NewBaseline":                                           1,
-		"internal/store/internal/backend/runforkrevision/effects.go|ForRun":             1,
-		"internal/store/internal/backend/runforkrevision/finalizer.go|validateComplete": 1,
-		"internal/store/testutil/runforkrevisionfixture/revision.go|Capture":            1,
-		"internal/store/testutil/runforkrevisionfixture/revision.go|CaptureSQLite":      1,
+		revisionProtocolPath + "|NewBaseline":                                                                                                  1,
+		"internal/store/internal/backend/runforkrevision/effects.go|ForRun":                                                                    1,
+		"internal/store/internal/backend/runforkrevision/finalizer.go|validateComplete":                                                        1,
+		"internal/store/internal/backend/runforkpersistence/test_exact_snapshot.go|RunForkPostgresOwner.CaptureSelectedRunForkRevisionForTest": 1,
+		"internal/store/internal/backend/runforkpersistence/test_exact_snapshot.go|RunForkSQLiteOwner.CaptureSelectedRunForkRevisionForTest":   1,
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("new effects allocator escaped protocol, projection verifier, or test fixture: got=%v want=%v", got, want)

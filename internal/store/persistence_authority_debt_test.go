@@ -215,6 +215,297 @@ func debtWithS1RetainedSourceConstructors(sites map[string]authorityDebtSite) ma
 	return out
 }
 
+// R241: #3010/6882876227, source-only gate 6883111532; retire under #3078.
+// Only the destination is outside the fingerprint, as for the two prior additions.
+const debtR241CollectorFrom = "3acef74e89c4bf99f03cc63649c398e3706fb3b833240ecbfe21b40655dbb041"
+
+func debtR241NamedSites() [23]struct {
+	Site  authorityDebtSite
+	Prior int
+} {
+	return [23]struct {
+		Site  authorityDebtSite
+		Prior int
+	}{
+		{Site: authorityDebtSite{
+			Kind:         "raw-operation",
+			File:         "internal/serveapp/channel_source_lifecycle_supported_surface_test.go",
+			Declaration:  "TestChannelSourceLifecyclePublicJourney",
+			Operation:    "call:github.com/division-sh/swarm/internal/serveapp.waitChannelAnchorDecision",
+			Resolved:     "func=func(t *testing.T, db *database/sql.DB, cardID string)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=string|results=()",
+			Family:       "channel",
+			Replacement:  "selected channel/delivery owner and named channel fault/readback",
+			Multiplicity: 3,
+		}, Prior: 2},
+		{Site: authorityDebtSite{
+			Kind:         "raw-operation",
+			File:         "internal/serveapp/mailbox_gate_replay_projection_test.go",
+			Declaration:  "TestMailboxGateReplayProjectionBothStores",
+			Operation:    "call:database/sql.(*database/sql.DB).ExecContext",
+			Resolved:     "func=func(ctx context.Context, query string, args ...any) (database/sql.Result, error)|recv=*database/sql.DB|arg=context.Context|arg=string|arg=[]byte|arg=string|results=(database/sql.Result,error)",
+			Family:       "mailbox",
+			Replacement:  "selected mailbox/completion owner and named mailbox fault/readback",
+			Multiplicity: 2,
+		}, Prior: 0},
+		{Site: authorityDebtSite{
+			Kind:         "raw-operation",
+			File:         "internal/serveapp/mailbox_gate_replay_projection_test.go",
+			Declaration:  "TestMailboxGateReplayProjectionBothStores",
+			Operation:    "call:database/sql.(*database/sql.DB).QueryRow",
+			Resolved:     "func=func(query string, args ...any) *database/sql.Row|recv=*database/sql.DB|arg=string|arg=string|arg=github.com/division-sh/swarm/internal/apiidempotency.ActorKind|arg=string|arg=string|results=(*database/sql.Row)",
+			Family:       "mailbox",
+			Replacement:  "selected mailbox/completion owner and named mailbox fault/readback",
+			Multiplicity: 1,
+		}, Prior: 0},
+		{Site: authorityDebtSite{
+			Kind:         "raw-operation",
+			File:         "internal/serveapp/mailbox_gate_replay_projection_test.go",
+			Declaration:  "TestMailboxGateReplayProjectionBothStores",
+			Operation:    "call:database/sql.(*database/sql.Row).Scan",
+			Resolved:     "func=func(dest ...any) error|recv=*database/sql.Row|arg=*int|results=(error)",
+			Family:       "mailbox",
+			Replacement:  "selected mailbox/completion owner and named mailbox fault/readback",
+			Multiplicity: 1,
+		}, Prior: 0},
+		{Site: authorityDebtSite{
+			Kind:         "raw-operation",
+			File:         "internal/serveapp/mailbox_gate_replay_projection_test.go",
+			Declaration:  "TestMailboxGateReplayProjectionBothStores",
+			Operation:    "call:github.com/division-sh/swarm/internal/serveapp.gateCompletionRead",
+			Resolved:     "func=func(t *testing.T, rt github.com/division-sh/swarm/internal/serveapp.servedControlProofRuntime, phase string, runID string, cardID string, domain github.com/division-sh/swarm/internal/serveapp.gateCompletionDomain) github.com/division-sh/swarm/internal/serveapp.gateCompletionSnapshot|recv=<nil>|arg=*testing.T|arg=github.com/division-sh/swarm/internal/serveapp.servedControlProofRuntime|arg=string|arg=string|arg=string|arg=github.com/division-sh/swarm/internal/serveapp.gateCompletionDomain|results=(github.com/division-sh/swarm/internal/serveapp.gateCompletionSnapshot)",
+			Family:       "mailbox",
+			Replacement:  "selected mailbox/completion owner and named mailbox fault/readback",
+			Multiplicity: 2,
+		}, Prior: 0},
+		{Site: authorityDebtSite{
+			Kind:         "raw-operation",
+			File:         "internal/serveapp/mailbox_gate_replay_projection_test.go",
+			Declaration:  "TestMailboxGateReplayProjectionBothStores",
+			Operation:    "call:github.com/division-sh/swarm/internal/serveapp.joinAndAssertExit",
+			Resolved:     "func=func()|recv=github.com/division-sh/swarm/internal/serveapp.servedControlProofRuntime|results=()",
+			Family:       "mailbox",
+			Replacement:  "selected mailbox/completion owner and named mailbox fault/readback",
+			Multiplicity: 1,
+		}, Prior: 0},
+		{Site: authorityDebtSite{
+			Kind:         "raw-operation",
+			File:         "internal/serveapp/mailbox_gate_replay_projection_test.go",
+			Declaration:  "TestMailboxGateReplayProjectionBothStores",
+			Operation:    "call:github.com/division-sh/swarm/internal/serveapp.mailboxCompletionFixtureInRuntime",
+			Resolved:     "func=func(t *testing.T, rt github.com/division-sh/swarm/internal/serveapp.servedControlProofRuntime, owner github.com/division-sh/swarm/internal/serveapp.cursorMailboxStore) github.com/division-sh/swarm/internal/serveapp.cursorMailboxFixture|recv=<nil>|arg=*testing.T|arg=github.com/division-sh/swarm/internal/serveapp.servedControlProofRuntime|arg=github.com/division-sh/swarm/internal/serveapp.cursorMailboxStore|results=(github.com/division-sh/swarm/internal/serveapp.cursorMailboxFixture)",
+			Family:       "mailbox",
+			Replacement:  "selected mailbox/completion owner and named mailbox fault/readback",
+			Multiplicity: 2,
+		}, Prior: 0},
+		{Site: authorityDebtSite{
+			Kind:         "raw-operation",
+			File:         "internal/serveapp/mailbox_gate_replay_projection_test.go",
+			Declaration:  "TestMailboxGateReplayProjectionBothStores",
+			Operation:    "call:github.com/division-sh/swarm/internal/serveapp.mailboxCompletionRunEffects",
+			Resolved:     "func=func(t *testing.T, rt github.com/division-sh/swarm/internal/serveapp.servedControlProofRuntime, runID string) []string|recv=<nil>|arg=*testing.T|arg=github.com/division-sh/swarm/internal/serveapp.servedControlProofRuntime|arg=string|results=([]string)",
+			Family:       "mailbox",
+			Replacement:  "selected mailbox/completion owner and named mailbox fault/readback",
+			Multiplicity: 2,
+		}, Prior: 0},
+		{Site: authorityDebtSite{
+			Kind:         "raw-operation",
+			File:         "internal/serveapp/mailbox_gate_replay_projection_test.go",
+			Declaration:  "TestMailboxGateReplayProjectionBothStores",
+			Operation:    "call:github.com/division-sh/swarm/internal/serveapp.mailboxPrincipalRequest",
+			Resolved:     "func=func(t *testing.T, rt github.com/division-sh/swarm/internal/serveapp.servedControlProofRuntime, method string, params map[string]any) github.com/division-sh/swarm/internal/apiidempotency.Request|recv=<nil>|arg=*testing.T|arg=github.com/division-sh/swarm/internal/serveapp.servedControlProofRuntime|arg=string|arg=map[string]any|results=(github.com/division-sh/swarm/internal/apiidempotency.Request)",
+			Family:       "mailbox",
+			Replacement:  "selected mailbox/completion owner and named mailbox fault/readback",
+			Multiplicity: 1,
+		}, Prior: 0},
+		{Site: authorityDebtSite{
+			Kind:         "raw-operation",
+			File:         "internal/serveapp/mailbox_gate_replay_projection_test.go",
+			Declaration:  "TestMailboxGateReplayProjectionBothStores",
+			Operation:    "call:github.com/division-sh/swarm/internal/serveapp.newMailboxCompletionRuntime",
+			Resolved:     "func=func(t *testing.T, backend github.com/division-sh/swarm/internal/servedparity.Backend) (github.com/division-sh/swarm/internal/serveapp.servedControlProofRuntime, github.com/division-sh/swarm/internal/serveapp.cursorMailboxStore)|recv=<nil>|arg=*testing.T|arg=github.com/division-sh/swarm/internal/servedparity.Backend|results=(github.com/division-sh/swarm/internal/serveapp.servedControlProofRuntime,github.com/division-sh/swarm/internal/serveapp.cursorMailboxStore)",
+			Family:       "mailbox",
+			Replacement:  "selected mailbox/completion owner and named mailbox fault/readback",
+			Multiplicity: 1,
+		}, Prior: 0},
+		{Site: authorityDebtSite{
+			Kind:         "raw-operation",
+			File:         "internal/serveapp/mailbox_gate_replay_projection_test.go",
+			Declaration:  "TestMailboxGateReplayProjectionBothStores",
+			Operation:    "call:github.com/division-sh/swarm/internal/serveapp.selectedMailboxFixtureStore",
+			Resolved:     "func=func(rt github.com/division-sh/swarm/internal/serveapp.servedControlProofRuntime) any|recv=<nil>|arg=github.com/division-sh/swarm/internal/serveapp.servedControlProofRuntime|results=(any)",
+			Family:       "mailbox",
+			Replacement:  "selected mailbox/completion owner and named mailbox fault/readback",
+			Multiplicity: 2,
+		}, Prior: 0},
+		{Site: authorityDebtSite{
+			Kind:         "local-raw-type",
+			File:         "internal/serveapp/mailbox_gate_replay_projection_test.go",
+			Declaration:  "TestMailboxGateReplayProjectionBothStores",
+			Operation:    "local:rt",
+			Resolved:     "github.com/division-sh/swarm/internal/serveapp.servedControlProofRuntime",
+			Family:       "mailbox",
+			Replacement:  "selected mailbox/completion owner and named mailbox fault/readback",
+			Multiplicity: 1,
+		}, Prior: 0},
+		{Site: authorityDebtSite{
+			Kind:         "raw-operation",
+			File:         "internal/serveapp/mailbox_gate_upgrade_test.go",
+			Declaration:  "TestMailboxUnchangedGateUpgradeAnswerBothStores",
+			Operation:    "call:database/sql.(*database/sql.DB).QueryRow",
+			Resolved:     "func=func(query string, args ...any) *database/sql.Row|recv=*database/sql.DB|arg=string|arg=string|results=(*database/sql.Row)",
+			Family:       "mailbox",
+			Replacement:  "selected mailbox/completion owner and named mailbox fault/readback",
+			Multiplicity: 1,
+		}, Prior: 0},
+		{Site: authorityDebtSite{
+			Kind:         "raw-operation",
+			File:         "internal/serveapp/mailbox_gate_upgrade_test.go",
+			Declaration:  "TestMailboxUnchangedGateUpgradeAnswerBothStores",
+			Operation:    "call:database/sql.(*database/sql.Row).Scan",
+			Resolved:     "func=func(dest ...any) error|recv=*database/sql.Row|arg=*int|results=(error)",
+			Family:       "mailbox",
+			Replacement:  "selected mailbox/completion owner and named mailbox fault/readback",
+			Multiplicity: 1,
+		}, Prior: 0},
+		{Site: authorityDebtSite{
+			Kind:         "raw-operation",
+			File:         "internal/serveapp/mailbox_gate_upgrade_test.go",
+			Declaration:  "TestMailboxUnchangedGateUpgradeAnswerBothStores",
+			Operation:    "call:github.com/division-sh/swarm/internal/serveapp.gateCompletionRead",
+			Resolved:     "func=func(t *testing.T, rt github.com/division-sh/swarm/internal/serveapp.servedControlProofRuntime, phase string, runID string, cardID string, domain github.com/division-sh/swarm/internal/serveapp.gateCompletionDomain) github.com/division-sh/swarm/internal/serveapp.gateCompletionSnapshot|recv=<nil>|arg=*testing.T|arg=github.com/division-sh/swarm/internal/serveapp.servedControlProofRuntime|arg=string|arg=string|arg=string|arg=github.com/division-sh/swarm/internal/serveapp.gateCompletionDomain|results=(github.com/division-sh/swarm/internal/serveapp.gateCompletionSnapshot)",
+			Family:       "mailbox",
+			Replacement:  "selected mailbox/completion owner and named mailbox fault/readback",
+			Multiplicity: 3,
+		}, Prior: 0},
+		{Site: authorityDebtSite{
+			Kind:         "raw-operation",
+			File:         "internal/serveapp/mailbox_gate_upgrade_test.go",
+			Declaration:  "TestMailboxUnchangedGateUpgradeAnswerBothStores",
+			Operation:    "call:github.com/division-sh/swarm/internal/serveapp.joinAndAssertExit",
+			Resolved:     "func=func()|recv=github.com/division-sh/swarm/internal/serveapp.servedControlProofRuntime|results=()",
+			Family:       "mailbox",
+			Replacement:  "selected mailbox/completion owner and named mailbox fault/readback",
+			Multiplicity: 1,
+		}, Prior: 0},
+		{Site: authorityDebtSite{
+			Kind:         "raw-operation",
+			File:         "internal/serveapp/mailbox_gate_upgrade_test.go",
+			Declaration:  "TestMailboxUnchangedGateUpgradeAnswerBothStores",
+			Operation:    "call:github.com/division-sh/swarm/internal/serveapp.mailboxCompletionFixtureInRuntime",
+			Resolved:     "func=func(t *testing.T, rt github.com/division-sh/swarm/internal/serveapp.servedControlProofRuntime, owner github.com/division-sh/swarm/internal/serveapp.cursorMailboxStore) github.com/division-sh/swarm/internal/serveapp.cursorMailboxFixture|recv=<nil>|arg=*testing.T|arg=github.com/division-sh/swarm/internal/serveapp.servedControlProofRuntime|arg=github.com/division-sh/swarm/internal/serveapp.cursorMailboxStore|results=(github.com/division-sh/swarm/internal/serveapp.cursorMailboxFixture)",
+			Family:       "mailbox",
+			Replacement:  "selected mailbox/completion owner and named mailbox fault/readback",
+			Multiplicity: 1,
+		}, Prior: 0},
+		{Site: authorityDebtSite{
+			Kind:         "raw-operation",
+			File:         "internal/serveapp/mailbox_gate_upgrade_test.go",
+			Declaration:  "TestMailboxUnchangedGateUpgradeAnswerBothStores",
+			Operation:    "call:github.com/division-sh/swarm/internal/serveapp.newRetainedMailboxCompletionRuntime",
+			Resolved:     "func=func(t *testing.T, backend github.com/division-sh/swarm/internal/servedparity.Backend, root string, tokens ...string) (github.com/division-sh/swarm/internal/serveapp.servedControlProofRuntime, github.com/division-sh/swarm/internal/serveapp.cursorMailboxStore, func() (github.com/division-sh/swarm/internal/serveapp.servedControlProofRuntime, github.com/division-sh/swarm/internal/serveapp.cursorMailboxStore))|recv=<nil>|arg=*testing.T|arg=github.com/division-sh/swarm/internal/servedparity.Backend|arg=string|results=(github.com/division-sh/swarm/internal/serveapp.servedControlProofRuntime,github.com/division-sh/swarm/internal/serveapp.cursorMailboxStore,func() (github.com/division-sh/swarm/internal/serveapp.servedControlProofRuntime, github.com/division-sh/swarm/internal/serveapp.cursorMailboxStore))",
+			Family:       "mailbox",
+			Replacement:  "selected mailbox/completion owner and named mailbox fault/readback",
+			Multiplicity: 1,
+		}, Prior: 0},
+		{Site: authorityDebtSite{
+			Kind:         "raw-operation",
+			File:         "internal/serveapp/mailbox_gate_upgrade_test.go",
+			Declaration:  "TestMailboxUnchangedGateUpgradeAnswerBothStores",
+			Operation:    "call:github.com/division-sh/swarm/internal/serveapp.requireServedEventPublishEntityState",
+			Resolved:     "func=func(t *testing.T, db *database/sql.DB, backend string, runID string, entityID string, wantState string) string|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=string|arg=string|arg=string|arg=string|results=(string)",
+			Family:       "mailbox",
+			Replacement:  "selected mailbox/completion owner and named mailbox fault/readback",
+			Multiplicity: 1,
+		}, Prior: 0},
+		{Site: authorityDebtSite{
+			Kind:         "raw-operation",
+			File:         "internal/serveapp/mailbox_gate_upgrade_test.go",
+			Declaration:  "TestMailboxUnchangedGateUpgradeAnswerBothStores",
+			Operation:    "call:github.com/division-sh/swarm/internal/serveapp.restart",
+			Resolved:     "func=func() (github.com/division-sh/swarm/internal/serveapp.servedControlProofRuntime, github.com/division-sh/swarm/internal/serveapp.cursorMailboxStore)|recv=<nil>|results=(github.com/division-sh/swarm/internal/serveapp.servedControlProofRuntime,github.com/division-sh/swarm/internal/serveapp.cursorMailboxStore)",
+			Family:       "mailbox",
+			Replacement:  "selected mailbox/completion owner and named mailbox fault/readback",
+			Multiplicity: 1,
+		}, Prior: 0},
+		{Site: authorityDebtSite{
+			Kind:         "raw-operation",
+			File:         "internal/serveapp/mailbox_gate_upgrade_test.go",
+			Declaration:  "TestMailboxUnchangedGateUpgradeAnswerBothStores",
+			Operation:    "call:github.com/division-sh/swarm/internal/serveapp.servedControlProofAuthorActivityContext",
+			Resolved:     "func=func(t *testing.T, rt github.com/division-sh/swarm/internal/serveapp.servedControlProofRuntime) context.Context|recv=<nil>|arg=*testing.T|arg=github.com/division-sh/swarm/internal/serveapp.servedControlProofRuntime|results=(context.Context)",
+			Family:       "mailbox",
+			Replacement:  "selected mailbox/completion owner and named mailbox fault/readback",
+			Multiplicity: 2,
+		}, Prior: 0},
+		{Site: authorityDebtSite{
+			Kind:         "local-raw-type",
+			File:         "internal/serveapp/mailbox_gate_upgrade_test.go",
+			Declaration:  "TestMailboxUnchangedGateUpgradeAnswerBothStores",
+			Operation:    "local:restart",
+			Resolved:     "func() (github.com/division-sh/swarm/internal/serveapp.servedControlProofRuntime, github.com/division-sh/swarm/internal/serveapp.cursorMailboxStore)",
+			Family:       "mailbox",
+			Replacement:  "selected mailbox/completion owner and named mailbox fault/readback",
+			Multiplicity: 1,
+		}, Prior: 0},
+		{Site: authorityDebtSite{
+			Kind:         "local-raw-type",
+			File:         "internal/serveapp/mailbox_gate_upgrade_test.go",
+			Declaration:  "TestMailboxUnchangedGateUpgradeAnswerBothStores",
+			Operation:    "local:rt",
+			Resolved:     "github.com/division-sh/swarm/internal/serveapp.servedControlProofRuntime",
+			Family:       "mailbox",
+			Replacement:  "selected mailbox/completion owner and named mailbox fault/readback",
+			Multiplicity: 2,
+		}, Prior: 0},
+	}
+}
+
+func debtR241PriorMatches(sites map[string]authorityDebtSite) bool {
+	for _, entry := range debtR241NamedSites() {
+		prior := entry.Site
+		prior.Multiplicity = entry.Prior
+		if entry.Prior == 0 {
+			if _, exists := sites[prior.identity()]; exists {
+				return false
+			}
+		} else if sites[prior.identity()] != prior {
+			return false
+		}
+	}
+	return true
+}
+
+func debtWithR241NamedSites(sites map[string]authorityDebtSite) map[string]authorityDebtSite {
+	out := make(map[string]authorityDebtSite, len(sites)+23)
+	for key, site := range sites {
+		out[key] = site
+	}
+	for _, entry := range debtR241NamedSites() {
+		out[entry.Site.identity()] = entry.Site
+	}
+	return out
+}
+
+func debtR241BaselineTransition(base, head map[string]authorityDebtSite) bool {
+	return debtR241PriorMatches(base) && authorityDebtCount(head) == authorityDebtCount(base)+32 &&
+		debtSitesEqual(head, debtWithR241NamedSites(base))
+}
+
+func debtR241Comparisons(actual, head, base, baseActual map[string]authorityDebtSite, from, to string) (map[string]authorityDebtSite, map[string]authorityDebtSite, error) {
+	if from != debtR241CollectorFrom || to != debtR241CollectorTo {
+		return base, baseActual, nil
+	}
+	if !debtR241BaselineTransition(base, head) || !debtR241PriorMatches(baseActual) {
+		return nil, nil, fmt.Errorf("R241/#3078 requires exactly the named baseline addition and original source multiplicities")
+	}
+	for _, entry := range debtR241NamedSites() {
+		if actual[entry.Site.identity()] != entry.Site {
+			return nil, nil, fmt.Errorf("R241/#3078 actual site differs from its exact initial count: %s", entry.Site.identity())
+		}
+	}
+	return debtWithR241NamedSites(base), debtWithR241NamedSites(baseActual), nil
+}
+
 // Reviewed at 2b699b9af7c05fb8f319ae190f9c2f802bd7bd10 ->
 // 762f3084c5f6f50539c9f56a3dc15a1b603822f3 (ruling 6091976606).
 // These nine unchanged calls reuse the registrar's existing selected owner.
@@ -361,6 +652,46 @@ func debtChannelCrashPreparationSignatureTransitions() [9][2]authorityDebtSite {
 	return pairs
 }
 
+// #3073/6905619550: four exact source correspondences, including real 2->1 retirement.
+func debtChannelObservationSignatureTransitions() [4][2]authorityDebtSite {
+	var pairs [4][2]authorityDebtSite
+	for index, call := range [4]struct {
+		file, declaration, operation, before, after string
+		oldCount, newCount                          int
+	}{
+		{"channel_delivery_process_supported_surface_test.go", "TestChannelDeliverySettlementWaitIncludesPlannedWork", "newChannelResponsibilityProjectionDB", "func=func(t *testing.T) *database/sql.DB|recv=<nil>|arg=*testing.T|results=(*database/sql.DB)", "func=func(t *testing.T) (*database/sql.DB, string)|recv=<nil>|arg=*testing.T|results=(*database/sql.DB,string)", 2, 1},
+		{"channel_delivery_process_supported_surface_test.go", "TestChannelDeliverySettlementWaitIncludesPlannedWork", "waitChannelDeliverySendsSettled", "func=func(t *testing.T, db *database/sql.DB, backend github.com/division-sh/swarm/internal/servedparity.Backend)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/servedparity.Backend|results=()", "func=func(t *testing.T, db *database/sql.DB, observation interface{CountUnsettledResponsibilities(context.Context) (int, error)})|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/store/storetest.ChannelObservation|results=()", 1, 1},
+		{"channel_delivery_settlement_diagnostic_test.go", "TestChannelDeliverySettlementDiagnosticBothStores", "waitChannelDeliverySendsSettled", "func=func(t *testing.T, db *database/sql.DB, backend github.com/division-sh/swarm/internal/servedparity.Backend)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/servedparity.Backend|results=()", "func=func(t *testing.T, db *database/sql.DB, observation interface{CountUnsettledResponsibilities(context.Context) (int, error)})|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/store/storetest.ChannelObservation|results=()", 1, 1},
+		{"channel_source_lifecycle_supported_surface_test.go", "TestChannelSourceLifecyclePublicJourney", "waitChannelDeliverySendsSettled", "func=func(t *testing.T, db *database/sql.DB, backend github.com/division-sh/swarm/internal/servedparity.Backend)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/servedparity.Backend|results=()", "func=func(t *testing.T, db *database/sql.DB, observation interface{CountUnsettledResponsibilities(context.Context) (int, error)})|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/store/storetest.ChannelObservation|results=()", 3, 3},
+	} {
+		old := authorityDebtSite{
+			Kind: "raw-operation", File: "internal/serveapp/" + call.file, Declaration: call.declaration,
+			Operation: "call:github.com/division-sh/swarm/internal/serveapp." + call.operation, Resolved: call.before,
+			Family: "channel", Replacement: "selected channel/delivery owner and named channel fault/readback", Multiplicity: call.oldCount,
+		}
+		current := old
+		current.Resolved, current.Multiplicity = call.after, call.newCount
+		pairs[index] = [2]authorityDebtSite{old, current}
+	}
+	return pairs
+}
+
+// Historical baseline allowances differ from actual source counts for these two keys only.
+func debtChannelCrashWaiterCountedTransitions() [2][3]authorityDebtSite {
+	return [2][3]authorityDebtSite{
+		{
+			{Kind: "raw-operation", File: "internal/serveapp/channel_ack_process_supported_surface_test.go", Declaration: "TestChannelActionAcknowledgmentAbruptProcessDeathPublicJourney", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitChannelDeliverySendsSettled", Resolved: "func=func(t *testing.T, db *database/sql.DB, backend github.com/division-sh/swarm/internal/servedparity.Backend)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/servedparity.Backend|results=()", Family: "channel", Replacement: "selected channel/delivery owner and named channel fault/readback", Multiplicity: 2},
+			{Kind: "raw-operation", File: "internal/serveapp/channel_ack_process_supported_surface_test.go", Declaration: "TestChannelActionAcknowledgmentAbruptProcessDeathPublicJourney", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitChannelDeliverySendsSettled", Resolved: "func=func(t *testing.T, db *database/sql.DB, backend github.com/division-sh/swarm/internal/servedparity.Backend)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/servedparity.Backend|results=()", Family: "channel", Replacement: "selected channel/delivery owner and named channel fault/readback", Multiplicity: 1},
+			{Kind: "raw-operation", File: "internal/serveapp/channel_ack_process_supported_surface_test.go", Declaration: "TestChannelActionAcknowledgmentAbruptProcessDeathPublicJourney", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitChannelDeliverySendsSettled", Resolved: "func=func(t *testing.T, db *database/sql.DB, observation interface{CountUnsettledResponsibilities(context.Context) (int, error)})|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/store/storetest.ChannelObservation|results=()", Family: "channel", Replacement: "selected channel/delivery owner and named channel fault/readback", Multiplicity: 1},
+		},
+		{
+			{Kind: "raw-operation", File: "internal/serveapp/channel_delivery_process_supported_surface_test.go", Declaration: "TestChannelDeliveryAbruptProcessDeathPublicJourney", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitChannelDeliverySendsSettled", Resolved: "func=func(t *testing.T, db *database/sql.DB, backend github.com/division-sh/swarm/internal/servedparity.Backend)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/servedparity.Backend|results=()", Family: "channel", Replacement: "selected channel/delivery owner and named channel fault/readback", Multiplicity: 2},
+			{Kind: "raw-operation", File: "internal/serveapp/channel_delivery_process_supported_surface_test.go", Declaration: "TestChannelDeliveryAbruptProcessDeathPublicJourney", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitChannelDeliverySendsSettled", Resolved: "func=func(t *testing.T, db *database/sql.DB, backend github.com/division-sh/swarm/internal/servedparity.Backend)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/servedparity.Backend|results=()", Family: "channel", Replacement: "selected channel/delivery owner and named channel fault/readback", Multiplicity: 1},
+			{Kind: "raw-operation", File: "internal/serveapp/channel_delivery_process_supported_surface_test.go", Declaration: "TestChannelDeliveryAbruptProcessDeathPublicJourney", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitChannelDeliverySendsSettled", Resolved: "func=func(t *testing.T, db *database/sql.DB, observation interface{CountUnsettledResponsibilities(context.Context) (int, error)})|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/store/storetest.ChannelObservation|results=()", Family: "channel", Replacement: "selected channel/delivery owner and named channel fault/readback", Multiplicity: 1},
+		},
+	}
+}
+
 func debtRunFixtureSignatureComparisons(actual, head, base, source map[string]authorityDebtSite) (map[string]authorityDebtSite, map[string]authorityDebtSite, map[string]authorityDebtSite, []string) {
 	runFixtures, selectedFixtures := debtRunFixtureSignatureTransitions(), debtSelectedFixtureSignatureTransitions()
 	w1Fixtures := debtW1RunObservationSignatureTransitions()
@@ -378,6 +709,8 @@ func debtRunFixtureSignatureComparisons(actual, head, base, source map[string]au
 	pairs = append(pairs, w2Evidence[:]...)
 	channelPreparation := debtChannelCrashPreparationSignatureTransitions()
 	pairs = append(pairs, channelPreparation[:]...)
+	channelObservation := debtChannelObservationSignatureTransitions()
+	pairs = append(pairs, channelObservation[:]...)
 	for index, pair := range pairs {
 		old, current := pair[0], pair[1]
 		for _, state := range []map[string]authorityDebtSite{actual, head, base, source} {
@@ -393,6 +726,25 @@ func debtRunFixtureSignatureComparisons(actual, head, base, source map[string]au
 			head = debtForwardQuiescenceUncertainty(head, old, current)
 			base = debtForwardQuiescenceUncertainty(base, old, current)
 			source = debtForwardQuiescenceUncertainty(source, old, current)
+		}
+	}
+	for _, row := range debtChannelCrashWaiterCountedTransitions() {
+		baselineOld, sourceOld, current := row[0], row[1], row[2]
+		for _, state := range []map[string]authorityDebtSite{actual, head, base, source} {
+			if state[sourceOld.identity()].Multiplicity > 0 && state[current.identity()].Multiplicity > 0 {
+				return head, base, source, []string{"both reviewed crash-waiter identities survive: " + sourceOld.Declaration}
+			}
+		}
+		headOld := head[baselineOld.identity()] == baselineOld && head[current.identity()].Multiplicity == 0
+		headLanded := head[current.identity()] == current && head[baselineOld.identity()].Multiplicity == 0
+		sourcePredecessor := source[sourceOld.identity()] == sourceOld && source[current.identity()].Multiplicity == 0
+		sourceLanded := source[current.identity()] == current && source[sourceOld.identity()].Multiplicity == 0
+		if actual[current.identity()] == current && actual[sourceOld.identity()].Multiplicity == 0 &&
+			base[baselineOld.identity()] == baselineOld && base[current.identity()].Multiplicity == 0 &&
+			(headOld || headLanded) && (sourcePredecessor || sourceLanded) {
+			head = debtForwardQuiescenceUncertainty(head, baselineOld, current)
+			base = debtForwardQuiescenceUncertainty(base, baselineOld, current)
+			source = debtForwardQuiescenceUncertainty(source, sourceOld, current)
 		}
 	}
 	// The selected-owner calls may already be landed while their allowance
@@ -2461,6 +2813,10 @@ func TestPersistenceAuthorityDebtRatchet(t *testing.T) {
 			t.FailNow()
 		}
 	}
+	comparisonBaseline, comparisonSource, err = debtR241Comparisons(actual, head.Sites, comparisonBaseline, comparisonSource, trusted.Collector, collector)
+	if err != nil {
+		t.Fatal(err)
+	}
 	failures := authorityDebtRatchet(actual, head.Sites, comparisonBaseline, comparisonSource)
 	if len(failures) > 0 {
 		t.Fatalf("authority debt ratchet failed: base=%s old=%d head=%d actual=%d\n%s", base, authorityDebtCount(trusted.Sites), authorityDebtCount(head.Sites), authorityDebtCount(actual), strings.Join(failures, "\n"))
@@ -2525,6 +2881,16 @@ func debtValidateCollectorIdentity(base, current string, trusted, head authority
 	}
 	if base == current && trusted.Collector == current && head.Collector == current {
 		return nil
+	}
+	if base == debtR241CollectorTo && trusted.Collector == base &&
+		current == debtChannelObservationCollectorTo && reviewedTransition == current && head.Collector == current &&
+		debtSitesEqual(head.Sites, trusted.Sites) {
+		return nil // #3073/6905619550: six exact counted correspondences; baseline bytes/sites unchanged.
+	}
+	if base == debtR241CollectorFrom && trusted.Collector == base &&
+		current == debtR241CollectorTo && authorityDebtHex(current, 64) && reviewedTransition == current && head.Collector == current &&
+		debtR241BaselineTransition(trusted.Sites, head.Sites) {
+		return nil // R241/#3078: exactly 23 named keys, +32 occurrences; no other baseline change.
 	}
 	if base == debtW2DeliveryEvidenceCollectorTo && trusted.Collector == base &&
 		current == debtChannelCrashPreparationCollectorTo && reviewedTransition == current && head.Collector == current &&

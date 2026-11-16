@@ -28,28 +28,6 @@ var (
 	sqliteDeliveryAdapter   = mustDeliveryAdapter(DialectSQLite)
 )
 
-func SetPreparedTargetConflictTx(ctx context.Context, tx *sql.Tx, postgres bool, eventID, originalIdentity, subscriberID, corruptIdentity, corruptTarget string) (int64, error) {
-	if tx == nil {
-		return 0, fmt.Errorf("prepared target conflict requires its selected write transaction")
-	}
-	query := `UPDATE event_deliveries SET subscriber_id=?, route_identity=?, delivery_target_route=? WHERE event_id=? AND route_identity=?`
-	if postgres {
-		query = `UPDATE event_deliveries SET subscriber_id=$1, route_identity=$2, delivery_target_route=$3::jsonb WHERE event_id=$4::uuid AND route_identity=$5`
-	}
-	result, err := tx.ExecContext(ctx, query, subscriberID, corruptIdentity, corruptTarget, eventID, originalIdentity)
-	if err != nil {
-		return 0, err
-	}
-	changed, err := result.RowsAffected()
-	if err != nil {
-		return 0, err
-	}
-	if changed != 1 {
-		return 0, fmt.Errorf("prepared target conflict requires its exact existing delivery: rows=%d", changed)
-	}
-	return changed, nil
-}
-
 func mustDeliveryAdapter(dialect Dialect) *Adapter {
 	adapter, err := NewAdapter(dialect)
 	if err != nil {
@@ -511,6 +489,19 @@ func (s *DeliveryPostgresOwner) InspectProviderOriginRecoveryTx(ctx context.Cont
 
 func (s *DeliverySQLiteOwner) InspectProviderOriginRecoveryTx(ctx context.Context, tx *sql.Tx, claim runtimedelivery.Claim, disposition runtimedelivery.FailureDisposition, ordinarySettlement bool) (runtimedelivery.Status, bool, error) {
 	return sqliteDeliveryAdapter.inspectProviderOriginRecovery(ctx, tx, claim, disposition, ordinarySettlement)
+}
+
+func (s *DeliveryPostgresOwner) ProviderOriginRecoveryAbandonedTx(ctx context.Context, tx *sql.Tx, claim runtimedelivery.Claim) (bool, error) {
+	return postgresDeliveryAdapter.providerOriginRecoveryAbandoned(ctx, tx, claim)
+}
+
+func (s *DeliverySQLiteOwner) ProviderOriginRecoveryAbandonedTx(ctx context.Context, tx *sql.Tx, claim runtimedelivery.Claim) (bool, error) {
+	return sqliteDeliveryAdapter.providerOriginRecoveryAbandoned(ctx, tx, claim)
+}
+
+func (a *Adapter) providerOriginRecoveryAbandoned(ctx context.Context, tx *sql.Tx, claim runtimedelivery.Claim) (bool, error) {
+	disposition, err := a.readProviderOriginRecoveryDisposition(ctx, tx, claim, false)
+	return disposition == providerOriginRecoveryExpiredExact || disposition == providerOriginRecoveryAlreadyTerminal, err
 }
 
 func (s *DeliveryPostgresOwner) RenewProviderOriginTx(ctx context.Context, attempt *mutationprotocol.Attempt, claim runtimedelivery.Claim, lease time.Duration) error {

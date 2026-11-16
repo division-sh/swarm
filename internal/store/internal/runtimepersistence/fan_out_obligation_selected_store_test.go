@@ -1173,7 +1173,7 @@ func TestFanOutFairnessLeaseRecoveryAndStaleFencingAcrossOwnersOnBothStores(t *t
 				t.Fatalf("serve newer intent: %v", err)
 			}
 
-			_, expiringClaim, found, err := secondOwner.ClaimFanOutIntent(ctx, pipeline.FanOutClaimRequest{
+			expiringIntent, expiringClaim, found, err := secondOwner.ClaimFanOutIntent(ctx, pipeline.FanOutClaimRequest{
 				Owner: "process-b", BundleHash: slow.bundleHash, Now: base.Add(15 * time.Second), Lease: 100 * time.Millisecond,
 			})
 			if err != nil || !found || expiringClaim.Key.ElementRef.SemanticPath != fast.semanticPath {
@@ -1182,6 +1182,7 @@ func TestFanOutFairnessLeaseRecoveryAndStaleFencingAcrossOwnersOnBothStores(t *t
 			if remaining := time.Until(expiringClaim.LeaseUntil.Add(10 * time.Millisecond)); remaining > 0 {
 				time.Sleep(remaining)
 			}
+			waitFanOutReadPacingForTest(t, ctx, expiringIntent)
 			_, reclaimed, found, err := firstOwner.ClaimFanOutIntent(ctx, pipeline.FanOutClaimRequest{
 				Owner: "process-a", BundleHash: slow.bundleHash, Now: base.Add(18 * time.Second), Lease: 5 * time.Second,
 			})
@@ -1393,6 +1394,92 @@ func TestFanOutClaimIsScopedToExactAdmittedBundleOnBothStores(t *testing.T) {
 func TestRunForkFanOutMaterializationPreservesPrefixAndResumesIndependently(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
+			t.Run("same_version_cardinality_contradiction", func(t *testing.T) {
+				var selectedBackend eventRecordContractBackend
+				for _, candidate := range eventRecordContractBackends() {
+					if candidate.name == backend {
+						selectedBackend = candidate
+						break
+					}
+				}
+				if selectedBackend.open == nil {
+					t.Fatalf("missing deployment backend %s", backend)
+				}
+				source, _ := newBranchPointDeploymentFixture(t, selectedBackend, []byte("{\"body\":\"one\"}\n{\"body\":\"two\"}\n{\"body\":\"three\"}\n"))
+				owner, db, ctx := source.store, source.db, source.ctx
+				rooted, err := owner.(rootedRunStore).LoadRunRootedSource(ctx, source.runID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				ref, err := durabledata.ParseDeclarationRef(".", "records.ready")
+				if err != nil {
+					t.Fatal(err)
+				}
+				pinned, err := owner.(interface {
+					LoadPinnedSource(context.Context, string, string, durabledata.DeclarationRef) (durabledata.PinnedSource, error)
+				}).LoadPinnedSource(ctx, source.runID, rooted.Admission().BundleHash(), ref)
+				if err != nil || pinned.RowCount != 3 || pinned.VersionID == "" {
+					t.Fatalf("real deployment pin: %+v err=%v", pinned, err)
+				}
+				plan, err := owner.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: source.runID})
+				if err != nil || len(plan.FanOutObligations) != 1 {
+					t.Fatalf("real deployment obligation: %+v err=%v", plan.FanOutObligations, err)
+				}
+				intent := plan.FanOutObligations[0].Intent
+				if intent.Request.Deployment == nil || intent.Request.Key.RunID != source.runID || intent.Request.Key.DeploymentFeedID == "" ||
+					intent.Source.Kind != fanoutobligation.SourceResourceVersion || intent.Source.Declaration != ref || intent.Source.VersionID != pinned.VersionID ||
+					intent.Request.Deployment.VersionID != pinned.VersionID || intent.Request.Deployment.SchemaDigest != pinned.SchemaDigest ||
+					intent.Request.Deployment.BundleHash != rooted.Admission().BundleHash() || intent.Request.Cardinality != 3 || intent.Cursor != 0 {
+					t.Fatalf("deployment source differs from its real pin: %+v pin=%+v", intent, pinned)
+				}
+				// Keep the real imported version and pin fixed; contradict only
+				// this deployment obligation's count, not a handler-owned source.
+				changed, err := db.ExecContext(ctx, `UPDATE fan_out_intents SET cardinality=4 WHERE run_id=$1 AND origin_kind='deployment' AND deployment_feed_id=$2`, source.runID, intent.Request.Key.DeploymentFeedID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if rows, err := changed.RowsAffected(); err != nil || rows != 1 {
+					t.Fatalf("deployment count fault: rows=%d err=%v", rows, err)
+				}
+				captureFanOutBarrierForkRevision(t, ctx, db, source.runID, backend == "postgres")
+				faulted, err := owner.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: source.runID})
+				if err != nil || len(faulted.FanOutObligations) != 1 {
+					t.Fatalf("faulted deployment cut: %+v err=%v", faulted.FanOutObligations, err)
+				}
+				expected := intent.Request
+				expected.Cardinality = 4
+				if !reflect.DeepEqual(faulted.FanOutObligations[0].Intent.Request, expected) || faulted.FanOutObligations[0].Intent.Cursor != 0 {
+					t.Fatalf("deployment cut changed more than count: %+v want=%+v", faulted.FanOutObligations[0].Intent, expected)
+				}
+				before, err := ReadSelectedForkApplicationStorageSnapshotForTest(ctx, owner)
+				if err != nil {
+					t.Fatal(err)
+				}
+				selection := runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: rooted.Admission().BundleHash()}
+				prepared, refusal := prepareSelectedStoreForkForTest(t, ctx, owner, source.runID, "", selection, rooted.Admission().BundleHash())
+				if refusal == nil {
+					request, err := prepared.MaterializationRequest()
+					if err != nil {
+						t.Fatal(err)
+					}
+					point := request.Preparation.ForkPoint
+					request.ForkOperation = &runfork.ForkOperationRequest{
+						OperationID: uuid.NewString(), Actor: "selected-fanout-native-fixture", IdempotencyKey: uuid.NewString(),
+						TransportHash: "selected-fanout-native-fixture", SourceRunID: source.runID, ForkEventID: request.At,
+						ResolvedPoint: &point, TargetBundleHash: request.SourceArtifactFact.BundleHash(),
+						TargetRootReference: request.RootAdmission.Reference(), ContractSelection: request.ContractSelection,
+						DataPinOverrides: request.DataPinOverrides,
+					}
+					_, refusal = owner.(runforkexecution.SelectedContractForkLifecycle).MaterializeRunForkForSelectedContractExecution(ctx, request)
+				}
+				if refusal == nil || refusal.Error() != "fork deployment unchanged version contradicts source schema or cardinality" {
+					t.Fatalf("same-version cardinality contradiction not refused: %v", refusal)
+				}
+				after, err := ReadSelectedForkApplicationStorageSnapshotForTest(ctx, owner)
+				if err != nil || !reflect.DeepEqual(before, after) {
+					t.Fatalf("cardinality refusal created or changed native application state: %v", err)
+				}
+			})
 			owner, _, db, postgres := newFanOutOwnerPairForTest(t, backend)
 			pg := owner.(interface {
 				selectedFanOutOwner
@@ -1677,7 +1764,7 @@ func TestFanOutEntityRevisionRejectsUnrelatedRunWithoutProgressOnBothStores(t *t
 			entityID, mutationID := seedFanOutEntityRevision(t, ctx, db, postgres, fixture.runID, `[{"name":"own-000","score":7.25},{"name":"own-001","score":-2},{"name":"own-002","score":1e3}]`, createdAt)
 			bindFanOutEntityRevision(t, ctx, db, postgres, fixture, fixture.runID, entityID, mutationID, createdAt)
 
-			_, claim, found, err := owner.ClaimFanOutIntent(ctx, pipeline.FanOutClaimRequest{Owner: "own-run-source", BundleHash: fixture.bundleHash, Now: createdAt.Add(time.Second), Lease: time.Minute})
+			intent, claim, found, err := owner.ClaimFanOutIntent(ctx, pipeline.FanOutClaimRequest{Owner: "own-run-source", BundleHash: fixture.bundleHash, Now: createdAt.Add(time.Second), Lease: time.Minute})
 			if err != nil || !found {
 				t.Fatalf("claim own-run entity source: found=%v err=%v", found, err)
 			}
@@ -1704,6 +1791,7 @@ func TestFanOutEntityRevisionRejectsUnrelatedRunWithoutProgressOnBothStores(t *t
 			if _, err := owner.ReleaseFanOutClaim(ctx, claim); err != nil {
 				t.Fatal(err)
 			}
+			waitFanOutReadPacingForTest(t, ctx, intent)
 
 			unrelatedRunID := uuid.NewString()
 			ctx = originalStoreFixtureContext(t, ctx, owner)

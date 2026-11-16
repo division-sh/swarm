@@ -1690,6 +1690,65 @@ func TestLowerCompositionConnectRoutePlanWithLocationFailsClosedForInvalidInputs
 			}
 		})
 	}
+	t.Run("above_LCA_without_keyed_level", func(t *testing.T) {
+		source := testConnectRoutePlanSource([]connectRoutePlanFlow{
+			{id: "envelope", mode: "static"},
+			{id: "envelope/producer", mode: "static", outputs: []runtimecontracts.FlowOutputEventPin{{Event: "work.ready"}}},
+			{id: "envelope/consumer", mode: "static", inputs: []runtimecontracts.FlowInputEventPin{{Event: "work.ready"}}},
+		}, []runtimecontracts.FlowConnect{{Event: "work.ready", From: "envelope/producer", To: "envelope/consumer"}})
+		plans, issues := compileConnectPlans(source)
+		if len(plans) != 0 || len(issues) != 1 || issues[0].Failure != ConnectFailureDeliveryTopologyInvalid || !strings.Contains(issues[0].Detail, "envelope/schema.yaml") || issues[0].AuthoredLocation == "" {
+			t.Fatalf("unselected extra height admitted: plans=%+v issues=%+v", plans, issues)
+		}
+	})
+	t.Run("unrelated_selector_is_not_a_witness", func(t *testing.T) {
+		root := canonicalrouting.CopyLexicalAddressing(t, true)
+		replaceFixtureText(t, filepath.Join(root, "schema.yaml"), "key_from: payload.target_account_id", "key_from: payload.source_account_id")
+		repo := canonicalrouting.RepoRoot(t)
+		bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
+		if err != nil {
+			if !strings.Contains(err.Error(), "source_account_id") || !strings.Contains(err.Error(), "schema.yaml") {
+				t.Fatalf("invalid own-row key failed for an unrelated reason: %v", err)
+			}
+			return
+		}
+		graph := CompileConnectGraph(semanticview.Wrap(bundle))
+		issues := graph.Issues()
+		if len(issues) != 1 || issues[0].Failure != ConnectFailureDeliveryTopologyInvalid || !strings.Contains(issues[0].Detail, "account/schema.yaml") {
+			t.Fatalf("another event's typed source authorized this edge: %+v", issues)
+		}
+	})
+	t.Run("missing_admitted_selector_cannot_waive_height", func(t *testing.T) {
+		root := canonicalrouting.CopyLexicalAddressing(t, true)
+		replaceFixtureText(t, filepath.Join(root, "schema.yaml"), ", resolution: select, key_from: payload.target_account_id", "")
+		issues := CompileConnectGraph(loadLexicalAddressSource(t, root)).Issues()
+		if len(issues) != 1 || issues[0].Failure != ConnectFailureDeliveryTopologyInvalid {
+			t.Fatalf("keyed declaration replaced typed row evidence: %+v", issues)
+		}
+	})
+	t.Run("keyless_extra_height_and_nearest_owner", func(t *testing.T) {
+		for _, higher := range []bool{false, true} {
+			graph := CompileConnectGraph(loadLexicalAddressSource(t, canonicalrouting.CopyWrappedLexicalAddressing(t, higher)))
+			issues := graph.Issues()
+			if higher {
+				if len(issues) != 1 || issues[0].Failure != ConnectFailureDeliveryTopologyInvalid || !strings.Contains(issues[0].Detail, "envelope/schema.yaml") {
+					t.Fatalf("keyless wrapper authorized a higher owner: %+v", issues)
+				}
+			} else if len(issues) != 0 {
+				t.Fatalf("nearest selecting owner was refused: %+v", issues)
+			}
+		}
+	})
+}
+
+func loadLexicalAddressSource(t testing.TB, root string) semanticview.Source {
+	t.Helper()
+	repo := canonicalrouting.RepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return semanticview.Wrap(bundle)
 }
 
 func TestCompileConnectGraphFailsClosedForNonUniqueEventCandidates(t *testing.T) {

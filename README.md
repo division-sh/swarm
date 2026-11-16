@@ -261,13 +261,15 @@ For serve-owned HTTPS instead, opt in through the deployment's `swarm.yaml`:
 serve:
   public_webhook:
     hostname: hooks.example.com # or an sslip.io-style name for your public IP
+    # port: 443
     # certificate_file: tls/fullchain.pem
     # private_key_file: tls/private-key.pem
     # email: ops@example.com
 ```
 
-This binds the dedicated webhook-only listener publicly on port 443. Supplied
-certificate and key paths may be anywhere the serving process can read. Relative
+Default 443. Every port uses HTTPS. Telegram accepts 443, 80, 88 and 8443. An automatic certificate needs public port 443.
+
+Supplied certificate and key paths may be anywhere the serving process can read. Relative
 paths resolve from the captured CLI invocation directory, not the configuration
 file, source directory or state directory; absolute paths and ordinary symlinks work.
 They are loaded once, must match the hostname and be currently valid, and must

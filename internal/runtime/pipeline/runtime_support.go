@@ -252,7 +252,6 @@ func cloneEmitIntents(intents []runtimeengine.EmitIntent) []runtimeengine.EmitIn
 	for _, intent := range intents {
 		copyIntent := intent
 		copyIntent.Event = cloneEvent(intent.Event)
-		copyIntent.Recipients = append([]string{}, intent.Recipients...)
 		cloned = append(cloned, copyIntent)
 	}
 	return cloned

@@ -15,10 +15,12 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/eventschema"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
+	"github.com/division-sh/swarm/internal/runtime/gateruntime"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -126,12 +128,13 @@ func upgradeSourceReference(source semanticview.Source) (sourceartifact.RootAdmi
 // UpgradeState contains ordinary domain readbacks from one selected-store cut.
 // It grants neither mutation authority nor permission to change a run's source.
 type UpgradeState struct {
-	RunID      string
-	Instances  []UpgradeInstance
-	Deliveries []deliverylifecycle.Snapshot
-	Cards      []decisioncard.ListItem
-	Barriers   []fanoutbarrier.Barrier
-	Events     []events.Event
+	RunID              string
+	Instances          []UpgradeInstance
+	Deliveries         []deliverylifecycle.Snapshot
+	Cards              []decisioncard.ListItem
+	CommittedGateCards []decisioncard.Card
+	Barriers           []fanoutbarrier.Barrier
+	Events             []events.Event
 }
 
 // UpgradeInstance avoids a dependency on the pipeline executor, which itself
@@ -192,7 +195,7 @@ func CheckUpgrade(ctx context.Context, current, candidate semanticview.Source, s
 	}
 	check := upgradeCheck{current: current, candidate: candidate, runID: state.RunID}
 	for _, instance := range state.Instances {
-		if err := check.instance(instance); err != nil {
+		if err := check.instanceAndCommittedGate(instance, state.CommittedGateCards); err != nil {
 			return nil, err
 		}
 	}
@@ -227,6 +230,66 @@ func CheckUpgrade(ctx context.Context, current, candidate semanticview.Source, s
 		}
 	}
 	return check.blockers, ctx.Err()
+}
+
+func (c *upgradeCheck) instanceAndCommittedGate(instance UpgradeInstance, cards []decisioncard.Card) error {
+	if err := c.instance(instance); err != nil {
+		return err
+	}
+	return c.committedGate(instance, cards)
+}
+
+func (c *upgradeCheck) committedGate(instance UpgradeInstance, cards []decisioncard.Card) error {
+	carrier, err := runtimeengine.StateCarrierFromPersisted(nil, nil, instance.StateBuckets)
+	if err != nil {
+		return err
+	}
+	activations, err := gateruntime.List(carrier.StateBuckets)
+	if err != nil {
+		return err
+	}
+	for _, activation := range activations {
+		if activation.Status != gateruntime.StatusDecisionCommitted {
+			continue
+		}
+		var matches []decisioncard.Card
+		for _, card := range cards {
+			if card.CardID == activation.CardID {
+				matches = append(matches, card)
+			}
+		}
+		if len(matches) != 1 {
+			return errors.New("committed gate requires its singular decided card")
+		}
+		card := matches[0]
+		anchor, err := card.Anchor.StageGate()
+		if err != nil {
+			return err
+		}
+		if card.RunID != c.runID || card.Status != decisioncard.StatusDecided || card.DecisionEventID != activation.DecisionEventID || anchor.Route != instance.Route || anchor.EntityID != instance.EntityID || anchor.FlowID != instance.FlowID || instance.Stage != activation.Stage {
+			return errors.New("committed gate contradicts its exact instance or decision")
+		}
+		issued, err := decisioncard.IssuedGateOffer(card, activation)
+		if err != nil {
+			return err
+		}
+		prior, err := decisioncard.CompileGateOffer(c.current, activation.FlowID, activation.Stage)
+		if err != nil || !issued.Equal(prior) {
+			return errors.Join(errors.New("committed gate differs from the current source contract"), err)
+		}
+		if _, found := c.candidate.WorkflowGateForStage(activation.FlowID, activation.Stage); !found {
+			c.add(anchor.Route.InstancePath, anchor.EntityID, anchor.FlowID, "committed_gate_contract_changed", activation.DecisionID, "schema", "stages")
+			continue
+		}
+		next, err := decisioncard.CompileGateOffer(c.candidate, activation.FlowID, activation.Stage)
+		if err != nil {
+			return err
+		}
+		if !issued.Equal(next) {
+			c.add(anchor.Route.InstancePath, anchor.EntityID, anchor.FlowID, "committed_gate_contract_changed", activation.DecisionID, "schema", "stages")
+		}
+	}
+	return nil
 }
 
 type upgradeCheck struct {

@@ -41,7 +41,6 @@ import (
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	eventtestsql "github.com/division-sh/swarm/internal/store/testsql"
-	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	runtimebustest "github.com/division-sh/swarm/tests/support/runtime/bus/bustest"
 	"github.com/division-sh/swarm/tests/support/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/tests/support/testutil"
@@ -207,6 +206,90 @@ func TestEventReplayTargetsPreserveAndValidateEveryExactSubscriberRoute(t *testi
 	}
 	if len(targets) != 2 || targets[0].DeliveryID != delivered.DeliveryID || targets[1].DeliveryID != failed.DeliveryID {
 		t.Fatalf("terminal route targets = %#v, want both exact delivery rows", targets)
+	}
+
+	originalEvent := eventtest.ExistingRunRootIngress(uuid.NewString(), "scan.requested", "source", "", []byte(`{}`), 0, operatorReplayRunID, events.EventEnvelope{}, time.Now().UTC())
+	originalEvent, err = eventtest.AdmitPayload(originalEvent, "", "scan.requested")
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, err := events.NewExistingEntityTarget(events.RouteIdentity{FlowID: ".", FlowInstance: operatorReplayRunID, EntityID: operatorReplayRunID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-a"), AgentIdentity: runtimebustest.IdentityForRun(t, operatorReplayRunID, "agent-a", ""),
+		Target: target, Context: events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "original-reply"}}}
+	deliveryID, err := runtimedelivery.DeliveryID(originalEvent.ID(), route)
+	if err != nil {
+		t.Fatal(err)
+	}
+	original, err := operatorread.NewOperatorEventFull(originalEvent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	original.Deliveries = []operatorread.OperatorEventDelivery{{DeliveryID: deliveryID, SubscriberID: "agent-a", Route: route, Status: "delivered"}}
+	selection, err := operatorread.SelectReplayDeliveries(original, []string{deliveryID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := selection.ValidateRecorded(originalEvent, []events.DeliveryRoute{route}); err != nil {
+		t.Fatal(err)
+	}
+	replay, err := replayEventFromOriginal(original, uuid.NewString(), time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := selection.ValidateEvent(replay); err == nil {
+		t.Fatal("replay selection accepted the unprojected original envelope")
+	}
+	replay, err = events.ResolveEnvelope(replay, events.EnvelopeForTargetSet(replay.Envelope(), []events.RouteIdentity{target.Route()}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := selection.ValidateEvent(replay); err != nil {
+		t.Fatal(err)
+	}
+	foreignEnvelope := events.EnvelopeForTargetRoute(replay.Envelope(), events.RouteIdentity{FlowID: "foreign", FlowInstance: uuid.NewString(), EntityID: uuid.NewString()})
+	foreignReplay, err := events.ResolveEnvelope(replay, foreignEnvelope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := selection.ValidateEvent(foreignReplay); err == nil {
+		t.Fatal("replay selection accepted a substituted event envelope")
+	}
+	for _, ids := range [][]string{nil, {deliveryID, deliveryID}, {"foreign-delivery"}} {
+		if _, err := operatorread.SelectReplayDeliveries(original, ids); err == nil {
+			t.Fatalf("invalid original delivery selection accepted: %v", ids)
+		}
+	}
+	for _, status := range []string{"pending", "processing", "unknown"} {
+		pendingView := original
+		pendingView.Deliveries = append([]operatorread.OperatorEventDelivery(nil), original.Deliveries...)
+		pendingView.Deliveries[0].Status = status
+		if _, err := operatorread.SelectReplayDeliveries(pendingView, []string{deliveryID}); err == nil {
+			t.Fatalf("non-replayable original delivery accepted: %s", status)
+		}
+	}
+	tampered := selection.Routes()
+	tampered[0].Context.Reply.ID = "caller-substituted"
+	if selection.Routes()[0].Context.ReplyContextID() != "original-reply" {
+		t.Fatal("caller mutated the frozen replay selection")
+	}
+	if err := selection.ValidateRecorded(originalEvent, tampered); err == nil {
+		t.Fatal("replay selection accepted substituted native route context")
+	}
+	wrongID := original
+	wrongID.Deliveries = append([]operatorread.OperatorEventDelivery(nil), original.Deliveries...)
+	wrongID.Deliveries[0].DeliveryID = "substituted-delivery"
+	forged, err := operatorread.SelectReplayDeliveries(wrongID, []string{"substituted-delivery"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := forged.ValidateRecorded(originalEvent, []events.DeliveryRoute{route}); err == nil {
+		t.Fatal("replay publication lost its exact native delivery identity")
+	}
+	if err := (operatorread.ReplaySelection{}).ValidateRecorded(originalEvent, []events.DeliveryRoute{route}); err == nil {
+		t.Fatal("zero replay evidence accepted native rows")
 	}
 }
 
@@ -384,7 +467,7 @@ func TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity(t *testing
 					t.Fatal(err)
 				}
 				storetest.CommitSemanticEvent(t, ctx, f.store, parent)
-				storetest.CommitNativeDeliveryPublication(t, ctx, f.store.(storetest.DeliveryPublicationFixtureStore), storetest.AdmitNativeDeliveryEvent(t, original), originalRoutes, authority, nil)
+				storetest.CommitNativeDeliveryPublication(t, ctx, f.store, f.store.(apiTestDurableWorkflowRoles).PipelineObligations(), storetest.AdmitNativeDeliveryEvent(t, original), originalRoutes, authority, nil)
 				frameStore, ok := f.store.(storetest.ManagedAgentTurnFixtureStore)
 				if !ok {
 					t.Fatalf("%T does not support managed-turn replay proof", f.store)
@@ -416,14 +499,10 @@ func TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity(t *testing
 				if _, err := updateCompleteReplayChainDepth(ctx, f.db, f.sqlite, originalID, -1); err == nil {
 					t.Fatal("event schema admitted negative chain_depth")
 				}
-				dialect := authoractivityfixture.DialectPostgres
-				if f.sqlite {
-					dialect = authoractivityfixture.DialectSQLite
-				}
-				eventtestsql.CorruptEventStore(t, ctx, f.db, dialect, eventtestsql.EventCorruptionClaim{
+				storetest.CorruptTargetRouteScalar(t, ctx, f.store, eventtestsql.EventCorruptionClaim{
 					Invariant: "store.event_record.canonical_readback",
 					Reason:    "prove operator replay rejects a durable target route that is valid JSON but not a route object",
-				}, `UPDATE events SET target_route = ? WHERE event_id = ?`, `UPDATE events SET target_route = $1::jsonb WHERE event_id = $2::uuid`, `"bad"`, originalID)
+				}, originalID)
 				if _, err := f.store.LoadOperatorEvent(ctx, originalID); err == nil || !strings.Contains(err.Error(), "target_route") {
 					t.Fatalf("canonical corrupt read error = %v, want target_route failure", err)
 				}
@@ -599,7 +678,7 @@ func TestOperatorReplayPreservesFailedEligibilityAndEveryExactRouteSiblingParity
 				t.Fatal(err)
 			}
 			storetest.CommitSemanticEvent(t, ctx, f.store, parent)
-			storetest.CommitNativeDeliveryPublication(t, ctx, f.store.(storetest.DeliveryPublicationFixtureStore), storetest.AdmitNativeDeliveryEvent(t, original), routes, authority, nil)
+			storetest.CommitNativeDeliveryPublication(t, ctx, f.store, f.store.(apiTestDurableWorkflowRoles).PipelineObligations(), storetest.AdmitNativeDeliveryEvent(t, original), routes, authority, nil)
 
 			firstClaim, err := storetest.ClaimDelivery(ctx, f.store, original, routes[0])
 			if err != nil {
@@ -901,16 +980,16 @@ type diagnosingReplayPublisher struct {
 	t *testing.T
 }
 
-func (p diagnosingReplayPublisher) PublishDirectRoutes(ctx context.Context, event events.Event, routes []events.DeliveryRoute) error {
-	err := p.eventReplayPublisher.PublishDirectRoutes(ctx, event, routes)
+func (p diagnosingReplayPublisher) PublishRecordedReplay(ctx context.Context, event events.Event, selection operatorread.ReplaySelection) error {
+	err := p.eventReplayPublisher.PublishRecordedReplay(ctx, event, selection)
 	if err != nil {
 		p.t.Logf("direct replay publication: %v", err)
 	}
 	return err
 }
 
-func (p diagnosingReplayPublisher) CheckDirectRoutes(ctx context.Context, event events.Event, routes []events.DeliveryRoute) (runtimebus.ExactDirectRouteStatus, error) {
-	status, err := p.eventReplayPublisher.CheckDirectRoutes(ctx, event, routes)
+func (p diagnosingReplayPublisher) CheckRecordedReplay(ctx context.Context, event events.Event, selection operatorread.ReplaySelection) (runtimebus.ExactDirectRouteStatus, error) {
+	status, err := p.eventReplayPublisher.CheckRecordedReplay(ctx, event, selection)
 	if err != nil {
 		p.t.Logf("direct replay admission: %v", err)
 	}
@@ -959,6 +1038,10 @@ func seedOperatorReplayDeliverySession(t testing.TB, ctx context.Context, select
 			t.Fatalf("seed operator replay delivery agent: %v", err)
 		}
 	}
+	identityArgs := []any{
+		fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
+		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
+	}
 	query := `
 		INSERT INTO agent_sessions (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
@@ -972,10 +1055,6 @@ func seedOperatorReplayDeliverySession(t testing.TB, ctx context.Context, select
 				flow_scope_key, flow_instance_id, flow_instance
 			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`
-	}
-	identityArgs := []any{
-		fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
-		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
 	}
 	sessionArgs := append([]any{sessionID, runID}, identityArgs...)
 	if _, err := db.ExecContext(ctx, query, sessionArgs...); err != nil {
@@ -1245,8 +1324,12 @@ func TestOperatorEventReplayStoresIdempotencyBeforeDirectPublishFanoutError(t *t
 	}
 	ch := subscribeOperatorReplayAgent(t, bus, "agent-a")
 	defer runtimebustest.Unsubscribe(bus, "agent-a")
-	fillAgentChannel(t, ctx, bus, "agent-a", cap(ch))
-	original := seedReplayableOperatorEvent(t, ctx, pg, "scan.requested", []string{"agent-a"}, runtimedelivery.StatusDelivered)
+	fillAgentChannel(t, ctx, pg, bus, "agent-a", cap(ch))
+	retained, err := pg.LoadOperatorAgent(ctx, operatorReplayAgentIdentity(t, "agent-a"))
+	if err != nil {
+		t.Fatalf("read filler delivery session: %v", err)
+	}
+	original := seedReplayableOperatorEvent(t, ctx, pg, "scan.requested", []string{"agent-a"}, runtimedelivery.StatusDelivered, retained)
 	handler := eventReplayTestHandler(t, pg, bus)
 	body := eventReplayBody(original.EventID, nil, "idem-direct-fanout-failure")
 
@@ -1699,12 +1782,12 @@ func (p *failOnceAuditEventPublisher) Publish(ctx context.Context, evt events.Ev
 	return p.inner.Publish(ctx, evt)
 }
 
-func (p *failOnceAuditEventPublisher) PublishDirectRoutes(ctx context.Context, evt events.Event, routes []events.DeliveryRoute) error {
-	return p.inner.PublishDirectRoutes(ctx, evt, routes)
+func (p *failOnceAuditEventPublisher) PublishRecordedReplay(ctx context.Context, evt events.Event, selection operatorread.ReplaySelection) error {
+	return p.inner.PublishRecordedReplay(ctx, evt, selection)
 }
 
-func (p *failOnceAuditEventPublisher) CheckDirectRoutes(ctx context.Context, evt events.Event, routes []events.DeliveryRoute) (runtimebus.ExactDirectRouteStatus, error) {
-	return p.inner.CheckDirectRoutes(ctx, evt, routes)
+func (p *failOnceAuditEventPublisher) CheckRecordedReplay(ctx context.Context, evt events.Event, selection operatorread.ReplaySelection) (runtimebus.ExactDirectRouteStatus, error) {
+	return p.inner.CheckRecordedReplay(ctx, evt, selection)
 }
 
 func eventReplayTestHandler(t *testing.T, pg *store.PostgresStore, bus eventReplayPublisher) *Handler {
@@ -1735,7 +1818,7 @@ func eventReplayTestHandlerWithPosture(t *testing.T, pg *store.PostgresStore, bu
 	})
 }
 
-func seedReplayableOperatorEvent(t *testing.T, ctx context.Context, pg *store.PostgresStore, eventName string, subscribers []string, status runtimedelivery.Status) operatorread.OperatorEventFull {
+func seedReplayableOperatorEvent(t *testing.T, ctx context.Context, pg *store.PostgresStore, eventName string, subscribers []string, status runtimedelivery.Status, retained ...operatorread.OperatorAgentDetail) operatorread.OperatorEventFull {
 	t.Helper()
 	ctx = originalAPIFixtureContext(t, ctx, pg)
 	eventID := uuid.NewString()
@@ -1773,7 +1856,15 @@ func seedReplayableOperatorEvent(t *testing.T, ctx context.Context, pg *store.Po
 			if err != nil {
 				t.Fatalf("claim original delivery %s %s: %v", eventID, subscriber, err)
 			}
-			sessionID := seedOperatorReplayDeliverySession(t, ctx, pg, storetest.DatabaseForTest(pg), false, runID, route.AgentIdentity)
+			var sessionID string
+			if len(retained) == 0 {
+				sessionID = seedOperatorReplayDeliverySession(t, ctx, pg, storetest.DatabaseForTest(pg), false, runID, route.AgentIdentity)
+			} else {
+				if len(retained) != 1 || retained[0].Agent.Identity != route.AgentIdentity || retained[0].CurrentSessionRef == nil || retained[0].CurrentSessionRef.SessionID == "" {
+					t.Fatal("retained replay fixture requires its exact agent and current session")
+				}
+				sessionID = retained[0].CurrentSessionRef.SessionID
+			}
 			if _, err := pg.BindAgentSession(ctx, claimed.Claim, sessionID); err != nil {
 				t.Fatalf("bind original delivery %s %s: %v", eventID, subscriber, err)
 			}
@@ -1826,11 +1917,23 @@ func assertNoReplayEvent(t *testing.T, ch <-chan *runtimebus.LocalDelivery) {
 	requireNoAPIV1RuntimeBusEvent(t, ch, "replay assertion")
 }
 
-func fillAgentChannel(t *testing.T, ctx context.Context, bus *runtimebus.EventBus, agentID string, count int) {
+func fillAgentChannel(t *testing.T, ctx context.Context, pg *store.PostgresStore, bus *runtimebus.EventBus, agentID string, count int) {
 	t.Helper()
+	original := seedReplayableOperatorEvent(t, ctx, pg, "filler.event", []string{agentID}, runtimedelivery.StatusDelivered)
+	ids := make([]string, 0, len(original.Deliveries))
+	for _, row := range original.Deliveries {
+		ids = append(ids, row.DeliveryID)
+	}
+	selection, err := operatorread.SelectReplayDeliveries(original, ids)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for i := 0; i < count; i++ {
-		err := bus.PublishDirect(ctx, eventtest.ExistingRunRootIngress(uuid.NewString(),
-			events.EventType("filler.event"), "", "", []byte(`{"ok":true}`), 0, operatorReplayRunID, events.EventEnvelope{}, time.Now().UTC()), []string{agentID})
+		event, err := replayEventFromOriginal(original, uuid.NewString(), time.Now().UTC())
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = bus.PublishRecordedReplay(ctx, event, selection)
 		if err != nil {
 			t.Fatalf("fill agent channel publish %d: %v", i, err)
 		}

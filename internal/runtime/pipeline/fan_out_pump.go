@@ -152,14 +152,25 @@ func (pc *PipelineCoordinator) claimAndServeFanOutTurn(ctx context.Context, owne
 	}
 	var loadErr *FanOutEvaluationLoadError
 	if errors.As(groupErr, &loadErr) {
-		if fanOutEvaluationCancellationOnly(groupErr) {
+		switch fanOutEvaluationDisposition(groupErr) {
+		case FanOutReadYield, FanOutReadUncertain:
+			return fanOutTurnYielded, groupErr
+		case FanOutReadRetry:
+			cause := runtimefailures.Wrap(runtimefailures.ClassDependencyUnavailable, "fan_out_read_retryable", "runtime.fan_out", loadErr.Stage, map[string]any{"stage": loadErr.Stage}, groupErr)
+			settlement, retryErr := owner.ReleaseFanOutRetryable(context.WithoutCancel(ctx), FanOutRetryableRelease{
+				Claim: claim, Now: time.Now().UTC(), ReadEvaluation: true,
+				Failure: runtimefailures.Normalize(cause, "runtime.fan_out", loadErr.Stage),
+			})
+			if settlement.Acknowledged {
+				release = false
+				return fanOutTurnRetryWait, errors.Join(groupErr, retryErr)
+			}
+			return fanOutTurnAwaitScan, errors.Join(groupErr, retryErr)
+		case FanOutReadDefect:
+			return blockClaim(loadErr.Stage, -1, groupErr, nil)
+		default:
 			return fanOutTurnYielded, groupErr
 		}
-		stage := loadErr.Stage
-		if stage == "" {
-			stage = "load_evaluation"
-		}
-		return blockClaim(stage, -1, groupErr, nil)
 	}
 	if err := input.Validate(intent); groupErr == nil && err != nil {
 		return blockClaim("validate_evaluation", -1, err, nil)
@@ -488,27 +499,29 @@ const (
 	fanOutFailureItemSemantic
 )
 
-// Joined independent faults must not be hidden by an accompanying cancellation.
-func fanOutEvaluationCancellationOnly(err error) bool {
-	if err == context.Canceled || err == context.DeadlineExceeded {
-		return true
+// Only native read evidence classifies an evaluation. An independent sibling
+// outside that evidence cannot inherit its disposal or defect proof.
+func fanOutEvaluationDisposition(err error) FanOutReadDisposition {
+	if evidence, ok := err.(*FanOutEvaluationLoadError); ok {
+		return evidence.Disposition
 	}
 	switch cause := err.(type) {
 	case interface{ Unwrap() []error }:
 		causes := cause.Unwrap()
 		if len(causes) == 0 {
-			return false
+			return FanOutReadUncertain
 		}
+		disposition := fanOutEvaluationDisposition(causes[0])
 		for _, child := range causes {
-			if !fanOutEvaluationCancellationOnly(child) {
-				return false
+			if fanOutEvaluationDisposition(child) != disposition {
+				return FanOutReadUncertain
 			}
 		}
-		return true
+		return disposition
 	case interface{ Unwrap() error }:
-		return fanOutEvaluationCancellationOnly(cause.Unwrap())
+		return fanOutEvaluationDisposition(cause.Unwrap())
 	default:
-		return false
+		return FanOutReadUncertain
 	}
 }
 

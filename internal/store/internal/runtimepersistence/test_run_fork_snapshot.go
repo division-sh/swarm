@@ -2,14 +2,10 @@ package runtimepersistence
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"strings"
 
-	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
-	"github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
-	"github.com/division-sh/swarm/internal/store/testutil/runforkrevisionfixture"
 	"github.com/google/uuid"
 )
 
@@ -20,29 +16,20 @@ func CaptureSelectedRunForkRevisionForTest(ctx context.Context, selected any, ru
 	if _, err := uuid.Parse(runID); err != nil {
 		return 0, fmt.Errorf("run-fork snapshot fixture requires a run identity: %w", err)
 	}
-	dialect, err := eventFixtureDialectForTest(selected)
-	if err != nil {
+	if _, err := eventFixtureDialectForTest(selected); err != nil {
 		return 0, err
 	}
 	if len(families) == 0 {
 		families = runforkrevision.AllFamilies()
 	}
-	var revision int64
-	err = runEventFixtureMutationForTest(ctx, selected, func(ctx context.Context, attempt *mutationprotocol.Attempt) error {
-		return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
-			var err error
-			if dialect == authoractivityfixture.DialectPostgres {
-				revision, err = runforkrevisionfixture.Capture(ctx, tx, runID, families...)
-			} else {
-				revision, err = runforkrevisionfixture.CaptureSQLite(ctx, tx, runID, families...)
-			}
-			return err
-		})
-	})
-	if err != nil {
-		return 0, err
+	switch owner := selected.(type) {
+	case *PostgresStore:
+		return owner.runForkPostgresOwner.CaptureSelectedRunForkRevisionForTest(ctx, runID, families...)
+	case *SQLiteRuntimeStore:
+		return owner.runForkSQLiteOwner.CaptureSelectedRunForkRevisionForTest(ctx, runID, families...)
+	default:
+		return 0, fmt.Errorf("event fixture store %T is unsupported", selected)
 	}
-	return revision, nil
 }
 
 // CaptureRunForkSnapshotForTest captures all canonical historical families on

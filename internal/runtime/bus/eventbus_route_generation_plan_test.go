@@ -165,10 +165,13 @@ func TestEventBusIdentityRoutePlanResolvesCurrentAgentGenerationAtDispatch(t *te
 	newToken := testAgentLifecycleToken(t, agentID, "", 14, 2)
 	eb.RegisterRuntimeActiveAgentDescriptor(ActiveAgentDescriptor{Identity: oldToken.Identity})
 	oldCh := eb.ReplaceAgentRoute(oldToken, testAgentSubscriptionAdmission(t, oldToken.AgentID, events.EventType("test.identity_route")))
-	evt := routeGenerationTestEvent("identity-route-generation", "test.identity_route")
-	plan, err := eb.deliveryPlanner.PlanDirect(context.Background(), evt, []string{agentID})
+	original := routeGenerationTestEvent(eventtest.UUID("identity-route-generation"), "test.identity_route")
+	evt, selection := recordedReplaySelectionForTest(t, original, []events.DeliveryRoute{{
+		Recipient: events.MustAgentDeliveryRecipient(agentID), AgentIdentity: oldToken.Identity,
+	}})
+	plan, err := eb.recordedReplayPlan(context.Background(), evt, selection)
 	if err != nil {
-		t.Fatalf("PlanDirect: %v", err)
+		t.Fatalf("recordedReplayPlan: %v", err)
 	}
 	if len(plan.LiveRecipients) != 1 || plan.LiveRecipients[0].liveAuthority != liveRecipientAuthorityIdentity {
 		t.Fatalf("direct live recipients = %#v, want one identity-authoritative recipient", plan.LiveRecipients)

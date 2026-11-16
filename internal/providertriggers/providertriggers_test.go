@@ -285,6 +285,20 @@ func TestTwilioManifestAcceptsSignedFormWebhook(t *testing.T) {
 	if strings.Contains(encoded, "twilio-secret") {
 		t.Fatal("Twilio signing secret leaked into delivery payload")
 	}
+	t.Run("nondefault_port_is_signed_exactly", func(t *testing.T) {
+		req.URL = "https://example.com:8443/webhooks/customer-a/twilio?tenant=alpha"
+		req.Headers.Set("X-Twilio-Signature", twilioSignatureBase64("twilio-secret", req.URL, form))
+		registry := testPlatformRegistry(t)
+		actual, err := acceptInstalled(registry, req)
+		if err != nil || actual.ProviderEventID != delivery.ProviderEventID || !actual.AcknowledgeBeforeDispatch {
+			t.Fatalf("signed nondefault port lost delivery identity: %+v err=%v", actual, err)
+		}
+		for _, changed := range []string{requestURL, "https://example.com:9443/webhooks/customer-a/twilio?tenant=alpha"} {
+			req.URL = changed
+			_, err := acceptInstalled(registry, req)
+			requireProviderTriggerError(t, err, http.StatusUnauthorized)
+		}
+	})
 }
 
 func TestTwilioManifestRejectsAmbiguousOrUnsupportedCallbacks(t *testing.T) {

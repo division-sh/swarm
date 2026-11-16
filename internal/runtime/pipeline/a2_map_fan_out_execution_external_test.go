@@ -523,6 +523,7 @@ func (p *a2MapFanOutExecution) pumpCompositeReceipt(t *testing.T, owner pipeline
 	if settlement, err := owner.ReleaseFanOutClaim(p.ctx, claim); err != nil || !settlement.Acknowledged {
 		t.Fatalf("release source readback claim: %#v err=%v", settlement, err)
 	}
+	waitA2MapReadFloor(t, p.ctx, intent)
 	if _, err := p.pc.ServeFanOutCandidate(p.ctx, owner, r.key); err != nil {
 		failure, _ := failures.EnvelopeFromError(err)
 		t.Fatalf("actual composite fan-out pump: %v failure=%+v", err, failure)
@@ -1028,6 +1029,7 @@ func runA2MapFanOutCompiledImmutableSource(t *testing.T, selected gateRecoverySt
 	if settlement, err := handoff.owner.ReleaseFanOutClaim(p.ctx, claim); err != nil || !settlement.Acknowledged {
 		t.Fatalf("release readback claim: %#v err=%v", settlement, err)
 	}
+	waitA2MapReadFloor(t, p.ctx, intent)
 	p.assertProgress(t, 0, len(keys), "open", intent.Source.MutationID)
 	if _, err := p.pc.ServeFanOutCandidate(p.ctx, handoff.owner, handoff.key); err != nil {
 		failure, _ := failures.EnvelopeFromError(err)
@@ -1312,6 +1314,7 @@ func TestA2MapFanOutRetainedProjectionAndRangeRefuseOnBothStores(t *testing.T) {
 			if settlement, err := handoff.owner.ReleaseFanOutClaim(p.ctx, claim); err != nil || !settlement.Acknowledged {
 				t.Fatalf("release actual source claim after refusals: %#v err=%v", settlement, err)
 			}
+			waitA2MapReadFloor(t, p.ctx, intent)
 			if _, err := p.pc.ServeFanOutCandidate(p.ctx, handoff.owner, handoff.key); err != nil {
 				t.Fatalf("actual compiled pump after refusal controls: %v", err)
 			}
@@ -1327,5 +1330,19 @@ func TestA2MapFanOutRetainedProjectionAndRangeRefuseOnBothStores(t *testing.T) {
 			}
 			p.assertProgress(t, 3, 3, "closed", intent.Source.MutationID)
 		})
+	}
+}
+
+func waitA2MapReadFloor(t *testing.T, ctx context.Context, intent fanoutobligation.Intent) {
+	t.Helper()
+	if intent.ReadRetry == nil {
+		t.Fatal("source readback claim did not retain its native pacing floor")
+	}
+	timer := time.NewTimer(max(0, time.Until(intent.ReadRetry.NotBefore.Add(time.Millisecond))))
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
 	}
 }

@@ -189,7 +189,7 @@ func requireHumanTaskForeignContinuationRefusal(t *testing.T, rt servedControlPr
 				t.Fatal(err)
 			}
 			t.Cleanup(func() {
-				if err := restore(ctx); err != nil {
+				if err := restore.Restore(ctx); err != nil {
 					t.Error(err)
 				}
 			})

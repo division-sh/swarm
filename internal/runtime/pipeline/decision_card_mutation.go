@@ -257,6 +257,7 @@ type decisionCardInputMutationResult struct {
 // transaction as the authoritative card facts.
 type DecisionCardMutationCommand struct {
 	Mutation                  DecisionCardMutation
+	GateOffer                 PreparedGateOffer
 	GateState                 *WorkflowEngineStateRecord
 	Publication               runtimeengine.DurablePublicationPlan
 	ForcedDeferralPublication runtimeengine.DurablePublicationPlan
@@ -335,6 +336,7 @@ func (r CommittedDecisionCardMutation) Validate() error {
 
 type DecisionCardMutationOwner interface {
 	AcquireDecisionCardMutation(context.Context, apiidempotency.Request, DecisionCardMutation) (DecisionCardMutationLease, error)
+	ReplayDecisionCardMutation(context.Context, apiidempotency.Request, DecisionCardMutation) (json.RawMessage, bool, error)
 }
 
 type DecisionCardMutationLease interface {
@@ -539,6 +541,25 @@ func (pc *PipelineCoordinator) prepareDecisionCardMutation(
 		}
 	}
 	command := DecisionCardMutationCommand{Mutation: mutation}
+	if card.Anchor.Kind() == decisioncard.AnchorKindStageGate && mutation.kind != DecisionCardMutationCancelInput {
+		instance, err := pc.loadDecisionCardGateMutation(ctx, card)
+		if err != nil {
+			return command, nil, err
+		}
+		carrier, err := workflowInstanceStateCarrier(instance)
+		if err != nil {
+			return command, nil, err
+		}
+		anchor, _ := card.Anchor.StageGate()
+		activation, _, err := gateruntime.Load(carrier.StateBuckets, anchor.FlowID, card.Snapshot.Decision)
+		if err != nil {
+			return command, nil, err
+		}
+		command.GateOffer, err = pc.prepareGateOffer(ctx, card, instance, activation)
+		if err != nil {
+			return command, nil, err
+		}
+	}
 	intents := make([]runtimeengine.EmitIntent, 0, 2)
 	switch mutation.kind {
 	case DecisionCardMutationDecide:

@@ -423,6 +423,7 @@ type Intent struct {
 	NextChunkSize   int           `json:"next_chunk_size"`
 	LastServedAt    time.Time     `json:"last_served_at,omitempty"`
 	Retry           *RetryWait    `json:"retry,omitempty"`
+	ReadRetry       *ReadRetry    `json:"read_retry,omitempty"`
 	CreatedAt       time.Time     `json:"created_at"`
 	UpdatedAt       time.Time     `json:"updated_at"`
 	ClaimOwner      string        `json:"claim_owner,omitempty"`
@@ -462,6 +463,14 @@ func (i Intent) Validate() error {
 		}
 		if i.Status != StatusOpen || i.ClaimOwner != "" {
 			return errors.New("fan-out retry wait requires open unclaimed work")
+		}
+	}
+	if i.ReadRetry != nil {
+		if err := i.ReadRetry.Validate(); err != nil {
+			return err
+		}
+		if i.Status != StatusOpen {
+			return errors.New("fan-out read pacing requires open work")
 		}
 	}
 	if strings.TrimSpace(i.ClaimOwner) == "" {
@@ -551,6 +560,9 @@ func (i Intent) ServingAt(now time.Time) (ServingState, error) {
 			return ServingLeased, nil
 		}
 		if i.Retry != nil && i.Retry.ReadyAt.After(now) {
+			return ServingRetryWait, nil
+		}
+		if i.ReadRetry != nil && i.ReadRetry.NotBefore.After(now) {
 			return ServingRetryWait, nil
 		}
 		return ServingEligible, nil
@@ -719,6 +731,8 @@ type RunSummary struct {
 	MinNextChunk            int                            `json:"min_next_chunk"`
 	MaxNextChunk            int                            `json:"max_next_chunk"`
 	OldestAgeMS             int64                          `json:"oldest_age_ms"`
+	ReadWaiting             int                            `json:"read_waiting"`
+	OldestReadWaitMS        *int64                         `json:"oldest_read_wait_ms"`
 }
 
 type FanOutSemanticRejectionSample struct {
@@ -785,6 +799,9 @@ func validateFanOutSummaryOrigin(deliveryID, feedID, flowPath, family, semanticP
 }
 
 func (s RunSummary) Validate() error {
+	if s.ReadWaiting < 0 || s.ReadWaiting > s.Open || s.OldestReadWaitMS != nil && (*s.OldestReadWaitMS < 0 || s.ReadWaiting == 0) {
+		return errors.New("fan-out read waiting summary is contradictory")
+	}
 	if _, err := uuid.Parse(strings.TrimSpace(s.RunID)); err != nil {
 		return errors.New("fan-out run summary requires canonical run identity")
 	}

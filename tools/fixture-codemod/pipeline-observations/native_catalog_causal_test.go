@@ -225,7 +225,7 @@ func TestNativeCatalogCausalOraclesRejectLostScopeMultiplicityAndRefusals(t *tes
 }
 
 func TestNativeCatalogCausalOwnerKeepsExactReadAndRowErrorContract(t *testing.T) {
-	path := filepath.Join("..", "..", "..", "internal", "store", "internal", "backend", "eventrecord", "causal_observation.go")
+	path := filepath.Join("..", "..", "..", "internal", "store", "internal", "backend", "eventpersistence", "test_event_record_observation_queries.go")
 	source, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
@@ -234,11 +234,11 @@ func TestNativeCatalogCausalOwnerKeepsExactReadAndRowErrorContract(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	fn, err := uniqueFunction(file, "ReadCausalObservationSince")
+	fn, err := uniqueFunction(file, "readCausalObservationSince")
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := `func ReadCausalObservationSince(ctx context.Context, tx *sql.Tx, postgres bool, since time.Time) ([]CausalObservationRow, error) {
+	want := `func readCausalObservationSince(ctx context.Context, tx *sql.Tx, postgres bool, since time.Time) ([]eventrecord.CausalObservationRow, error) {
 query := ` + "`SELECT event_id::text,event_name,COALESCE(source_event_id::text,''),\nCOALESCE(NULLIF(payload->>'entity_id',''),COALESCE(entity_id::text,''))\nFROM events WHERE created_at >= $1 ORDER BY created_at ASC,event_id ASC`" + `
 if !postgres {
 query = ` + "`SELECT event_id,event_name,COALESCE(source_event_id,''),\nCOALESCE(NULLIF(json_extract(payload,'$.entity_id'),''),COALESCE(entity_id,''))\nFROM events WHERE created_at >= ? ORDER BY created_at ASC,event_id ASC`" + `
@@ -246,9 +246,9 @@ query = ` + "`SELECT event_id,event_name,COALESCE(source_event_id,''),\nCOALESCE
 rows, err := tx.QueryContext(ctx, query, since)
 if err != nil { return nil, err }
 defer rows.Close()
-out := []CausalObservationRow{}
+out := []eventrecord.CausalObservationRow{}
 for rows.Next() {
-var row CausalObservationRow
+var row eventrecord.CausalObservationRow
 if err := rows.Scan(&row.ID, &row.Name, &row.SourceEventID, &row.PayloadEntityID); err != nil { return nil, err }
 out = append(out, row)
 }

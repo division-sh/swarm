@@ -68,6 +68,15 @@ func TestRun_AllowsTemplateInstanceKeyCompositionConnectWithoutAddress(t *testin
 	if reportContains(report.Errors(), "template_instance_validation", "") {
 		t.Fatalf("unexpected template_instance_validation error: %#v", report.Errors())
 	}
+	t.Run("C53_keyed_ancestor_reselection", func(t *testing.T) {
+		repo := repoRootForBootverifyTest(t)
+		root := canonicalrouting.CopyLexicalAddressing(t, true)
+		bundle := loadFixtureBundleAt(t, repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
+		report := Run(t.Context(), semanticview.Wrap(bundle), Options{})
+		if reportContains(report.Errors(), "composition_connect_validation", "") {
+			t.Fatalf("frozen C53 retained the false path-only LCA refusal: %+v", report.Errors())
+		}
+	})
 }
 
 func TestRun_AllowsCreateInputResolutionCompositionConnect(t *testing.T) {
@@ -431,6 +440,42 @@ func TestRun_FailsClosedForInvalidParentCompositionConnect(t *testing.T) {
 			}
 			if tc.wantExtra != "" && !reportContains(report.Errors(), "composition_connect_validation", tc.wantExtra) {
 				t.Fatalf("expected composition_connect_validation detail %q, got %#v", tc.wantExtra, report.Errors())
+			}
+		})
+	}
+	t.Run("located_unselected_higher_owner", func(t *testing.T) {
+		repo := repoRootForBootverifyTest(t)
+		root := canonicalrouting.CopyUnselectedHigherCompositionConnect(t)
+		bundle := loadFixtureBundleAt(t, repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
+		report := Run(t.Context(), semanticview.Wrap(bundle), Options{})
+		found := false
+		for _, finding := range report.Errors() {
+			if finding.CheckID == "composition_connect_validation" && strings.Contains(finding.Location, "schema.yaml") && strings.Contains(finding.Message, runtimepinrouting.ConnectFailureDeliveryTopologyInvalid.Code()) && strings.Contains(finding.Message, "connect belongs in envelope/schema.yaml, the exact lowest common ancestor") {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("higher-owner refusal lost classification/location/teaching: %+v", report.Errors())
+		}
+	})
+	for _, fieldName := range []string{"account_id", "target_account_id"} {
+		t.Run("lexically_bound_account_"+fieldName, func(t *testing.T) {
+			root := canonicalrouting.CopyLexicallyBoundAccountConnection(t)
+			repo := repoRootForBootverifyTest(t)
+			control, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
+			if err != nil {
+				t.Fatalf("lexical verify control: %v", err)
+			}
+			pin, present := control.FlowInputEventPin("account", "ticket.done")
+			schema, bound := pin.ProducerEventSchema()
+			field, declared := schema.StructuralField(fieldName)
+			if !present || !bound || !declared || field.IsOptional || field.TypeRef != "text" {
+				t.Fatalf("verify key lacks required compatible producer evidence: %+v", field)
+			}
+			canonicalrouting.SetLexicalAccountKeySource(t, root, "payload."+fieldName)
+			bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
+			if bundle != nil || err == nil || !strings.Contains(err.Error(), "`account` is bound by context") || !strings.Contains(err.Error(), "account/schema.yaml:") {
+				t.Fatalf("lexical-key verify refusal lost location/teaching: bundle=%v err=%v", bundle != nil, err)
 			}
 		})
 	}

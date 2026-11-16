@@ -181,6 +181,7 @@ type effectOwnerMethods interface {
 	GetExternalEffectOutcome(ctx context.Context, operationID string) (effects.OperationOutcome, bool, error)
 	HeartbeatCompletionAttempt(ctx context.Context, attempt effects.Attempt, now time.Time, lease time.Duration) error
 	InspectStartupRecovery(ctx context.Context, now time.Time, available bool) (effects.StartupRecoveryCounts, error)
+	ForecastStartupRecovery(ctx context.Context, now time.Time) (effects.StartupRecoveryCounts, error)
 	InstallContextCompaction(ctx context.Context, lease *sessions.Lease, result llm.ContextCompactionResult) error
 	IsExternalEffectAuthorityCurrent(ctx context.Context, authority effects.Authority) (bool, error)
 	IsForkChatWorkspaceAuthorityCurrent(ctx context.Context, authority effects.Authority) (bool, error)
@@ -398,6 +399,7 @@ type pipelineOwnerMethods interface {
 	ReadWorkflowHandlerStageReceipts(ctx context.Context, eventID string, instance flowidentity.RunScopedFlowInstance) ([]pipelineobligation.CommittedStageReceipt, error)
 	ReadWorkflowPublicationStages(ctx context.Context, eventID string, instance flowidentity.RunScopedFlowInstance) (pipeline.WorkflowPublicationStageEvidence, bool, error)
 	ReconcileDynamicFlowRuntimeReadinessPlans(ctx context.Context, requests []pipeline.DynamicFlowRuntimeReadinessPlanReconciliation, observedAt time.Time) ([]pipeline.DynamicFlowRuntimeReadinessPlanReconciliationResult, error)
+	ReplayDecisionCardMutation(ctx context.Context, req apiidempotency.Request, mutation pipeline.DecisionCardMutation) (json.RawMessage, bool, error)
 	RequireGateRouteAdmitted(ctx context.Context, runID string) error
 	ResolveDynamicFlowRuntimeActivation(ctx context.Context, request pipeline.DynamicFlowRuntimeActivationRequest) (pipeline.DynamicFlowRuntimeActivationResolution, error)
 	RetireDynamicFlowRuntimeActivationAttempt(ctx context.Context, attempt pipeline.DynamicFlowRuntimeActivationAttempt) error

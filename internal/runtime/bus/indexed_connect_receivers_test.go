@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/decisioncardtest"
 )
 
 type unscopedConnectIndexTestReader struct {
@@ -114,7 +115,7 @@ func TestControlPublicationKeepsEmptyCompiledTargetScope(t *testing.T) {
 func TestDirectPlanningPropagatesScopedIndexFailures(t *testing.T) {
 	source := connectRoutePlanRootProducerSingletonSource(t)
 	event := eventtest.RuntimeControl(eventtest.UUID("direct-empty-scope-control"), "mailbox.card_deferred", "", "", []byte(`{}`), 0,
-		busInternalTestRunID, "", events.EventEnvelope{}, time.Now().UTC())
+		busInternalTestRunID, "", events.EnvelopeForEntityID(events.EventEnvelope{}, busInternalTestRunID), time.Now().UTC())
 	ctx := constructionIndexContext(t, source)
 	reader := &unscopedConnectIndexTestReader{}
 	bus := &EventBus{semanticSource: source, durable: DurableDependencies{Instances: reader}}
@@ -128,18 +129,23 @@ func TestDirectPlanningPropagatesScopedIndexFailures(t *testing.T) {
 			loadTargetOwnerCandidates: bus.targetOwnerCandidates,
 		},
 	}
+	intent := decisioncardtest.RequesterReturn(t, event, "requester", events.DeliveryContext{})
 	for _, failure := range []error{context.Canceled, errors.New("direct index failure"), errors.Join(context.Canceled, errors.New("independent direct index failure"))} {
 		reader.err = failure
-		if _, err := planner.PlanDirect(ctx, event, []string{"requester"}); !errors.Is(err, failure) {
+		if _, err := (requesterReturnRelation{compiled: true}).bind(ctx, planner, intent.Event, intent.RequesterReturn); !errors.Is(err, failure) {
 			t.Fatalf("direct planning bypassed scoped index admission: got=%v want=%v", err, failure)
 		}
 	}
 	if len(reader.requested) != 3 {
 		t.Fatalf("direct planning did not query its scoped owner: %+v", reader.requested)
 	}
+	expected, err := flowidentity.NewRunScopedFlowInstance(event.RunID(), flowidentity.StoredRoute(".", "", event.RunID()))
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, request := range reader.requested {
-		if request.RunID() != event.RunID() || !request.Valid() || len(request.FlowIDs()) != 0 || len(request.Coordinates()) != 0 {
-			t.Fatalf("direct control admission broadened its empty scope: %+v", request)
+		if request.RunID() != event.RunID() || !request.Valid() || len(request.FlowIDs()) != 0 || !slices.Equal(request.Coordinates(), []flowidentity.RunScopedFlowInstance{expected}) {
+			t.Fatalf("requester-return admission broadened its exact root scope: %+v", request)
 		}
 	}
 }

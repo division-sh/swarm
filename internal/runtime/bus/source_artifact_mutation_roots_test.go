@@ -11,6 +11,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -358,13 +359,8 @@ func TestPublishRootsRejectForeignSourceBeforeWorkOccurrenceAdmission(t *testing
 		{name: "publish acknowledged", run: func(ctx context.Context) error {
 			return bus.PublishAcknowledged(ctx, sourceMutationEvent())
 		}},
-		{name: "direct", run: func(ctx context.Context) error {
-			return bus.PublishDirect(ctx, sourceMutationEvent(), []string{"agent-a"})
-		}},
-		{name: "direct routes", run: func(ctx context.Context) error {
-			return bus.PublishDirectRoutes(ctx, sourceMutationEvent(), []events.DeliveryRoute{{
-				Recipient: events.MustAgentDeliveryRecipient("agent-a"),
-			}})
+		{name: "recorded replay", run: func(ctx context.Context) error {
+			return bus.PublishRecordedReplay(ctx, sourceMutationEvent(), operatorread.ReplaySelection{})
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

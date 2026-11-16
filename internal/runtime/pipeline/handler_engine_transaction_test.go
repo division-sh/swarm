@@ -199,8 +199,11 @@ func (b *recordingPipelineBus) EngineDispatcher() runtimeengine.PostCommitDispat
 func (d recordingPipelineDispatcher) DispatchPostCommit(ctx context.Context, intents []runtimeengine.EmitIntent) error {
 	for _, intent := range intents {
 		intentCtx := events.WithDeliveryContext(ctx, intent.Context)
-		if len(intent.Recipients) > 0 {
-			if err := d.bus.PublishDirect(intentCtx, intent.Event, intent.Recipients); err != nil {
+		if !intent.RequesterReturn.Empty() {
+			if err := intent.RequesterReturn.ValidateEvent(intent.Event, intent.Context); err != nil {
+				return err
+			}
+			if err := d.bus.PublishDirect(intentCtx, intent.Event, []string{intent.RequesterReturn.RequesterID()}); err != nil {
 				return err
 			}
 			continue

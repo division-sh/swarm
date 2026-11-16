@@ -15,6 +15,7 @@ import (
 type workflowDecisionRouteTxOwner interface {
 	CompleteProposedEffectRouteTx(context.Context, *mutationprotocol.Attempt, string, string, time.Time) (decisioncard.ProposedEffectContinuation, bool, error)
 	CompleteHumanTaskOutcomeTx(context.Context, *mutationprotocol.Attempt, string, string, time.Time) (decisioncard.HumanTaskContinuation, bool, error)
+	ValidateHumanTaskReturnTx(context.Context, *mutationprotocol.Attempt, decisioncard.HumanTaskReturn) error
 }
 
 func commitProposedEffectRoute(
@@ -67,6 +68,9 @@ func commitHumanTaskRoute(
 	completeOutcome bool,
 ) (runtimepipeline.CommittedHumanTaskRoute, error) {
 	outcome := run(ctx, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runtimepipeline.CommittedHumanTaskRoute, error) {
+		if err := decisions.ValidateHumanTaskReturnTx(txctx, attempt, plan.HumanTaskReturnBinding()); err != nil {
+			return runtimepipeline.CommittedHumanTaskRoute{}, err
+		}
 		committed, err := store.commitPublicationTx(txctx, attempt, plan.PublicationCommand())
 		if err != nil {
 			return runtimepipeline.CommittedHumanTaskRoute{}, fmt.Errorf("commit human-task route publication: %w", err)

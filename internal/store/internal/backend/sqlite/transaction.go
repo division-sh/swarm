@@ -206,6 +206,23 @@ func (b *Backend) RunReadTransaction(ctx context.Context, operation func(context
 	return errors.Join(ctx.Err(), err)
 }
 
+// The observation is handle disposal only; it never replaces write settlement
+// or changes the callback/rollback/close errors returned by the native owner.
+func (b *Backend) RunReadTransactionObserved(ctx context.Context, operation func(context.Context, *sql.Tx) error) (bool, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if !b.Valid() {
+		return false, fmt.Errorf("sqlite backend is required")
+	}
+	if tx, err := b.inspectionTransaction(ctx); err != nil || tx != nil {
+		return false, b.RunReadTransaction(ctx, operation)
+	}
+	released := true
+	_, err := b.runTransactionOnceOutcome(ctx, &sql.TxOptions{ReadOnly: true}, 0, false, nil, operation, &released)
+	return released, errors.Join(ctx.Err(), err)
+}
+
 func (b *Backend) RunLockingReadTransaction(ctx context.Context, operation func(context.Context, *sql.Tx) error) error {
 	// Reuse native writer possession/finalization for the bounded inventory;
 	// the callback records no revision, evidence or backfill.
@@ -308,7 +325,7 @@ func (b *Backend) runTransactionOnce(ctx context.Context, opts *sql.TxOptions, o
 	return err
 }
 
-func (b *Backend) runTransactionOnceOutcome(ctx context.Context, opts *sql.TxOptions, permitWait time.Duration, acquisition bool, retryContext *context.Context, operation func(context.Context, *sql.Tx) error) (committed bool, err error) {
+func (b *Backend) runTransactionOnceOutcome(ctx context.Context, opts *sql.TxOptions, permitWait time.Duration, acquisition bool, retryContext *context.Context, operation func(context.Context, *sql.Tx) error, readReleased ...*bool) (committed bool, err error) {
 	write := opts == nil || !opts.ReadOnly
 	if err := ctx.Err(); err != nil {
 		return false, cancellationBeforeConnection(ctx, err, write)
@@ -319,6 +336,9 @@ func (b *Backend) runTransactionOnceOutcome(ctx context.Context, opts *sql.TxOpt
 		return false, cancellationBeforeConnection(ctx, err, write)
 	}
 	poolWait := time.Since(poolStarted)
+	if len(readReleased) != 0 {
+		*readReleased[0] = false
+	}
 	var tx *sql.Tx
 	beginAttempted, commitAttempted := false, false
 	var stopRollback func() bool
@@ -341,6 +361,9 @@ func (b *Backend) runTransactionOnceOutcome(ctx context.Context, opts *sql.TxOpt
 		}
 		releaseOrdering()
 		finalized = finalized.closeConnection(conn, write)
+		if len(readReleased) != 0 {
+			*readReleased[0] = finalized.connectionReleased
+		}
 		if finalized.err != nil {
 			// This also reports cleanup failure while the original callback panic
 			// unwinds. No recover here: the original panic remains authoritative.

@@ -53,6 +53,7 @@ func deploymentStoreDB(t *testing.T) *sql.DB {
 			created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL, claim_owner TEXT,
 			claim_generation INTEGER NOT NULL DEFAULT 0, lease_expires_at TIMESTAMP, blocked_reason TEXT,
 			capsule TEXT, retry_ready_at TIMESTAMP, retry_failure TEXT,
+			read_retry_not_before TIMESTAMP, read_retry_delay_ms BIGINT, read_retry_since TIMESTAMP, read_retry_failure TEXT,
 			UNIQUE (run_id, deployment_feed_id))`,
 		`CREATE TABLE runs (run_id TEXT PRIMARY KEY, bundle_hash TEXT NOT NULL, status TEXT NOT NULL)`,
 		`CREATE TABLE run_control_state (run_id TEXT PRIMARY KEY, control_status TEXT)`,
@@ -160,7 +161,7 @@ func TestDeploymentClaimUsesExactOriginKeyOnBothStores(t *testing.T) {
 			}
 			claimRequest := runtimepipeline.FanOutClaimRequest{Candidate: &request.Key, BundleHash: request.Deployment.BundleHash, Owner: "deployment-worker", Now: now, Lease: time.Minute}
 			var claim fanoutobligation.Claim
-			if err := claimFanOutIntentRow(ctx, tx, claimRequest, now, &intent, &claim); err != nil {
+			if err := claimFanOutIntentRow(ctx, tx, backend == "postgres", claimRequest, now, &intent, &claim); err != nil {
 				t.Fatal(err)
 			}
 			if got, err := loadOwnedFanOutIntentTx(ctx, tx, backend == "postgres", claim, false); err != nil || got.Request.Key != request.Key {

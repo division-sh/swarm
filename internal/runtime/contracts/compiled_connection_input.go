@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 )
 
 var ErrConnectionProjectionCollision = errors.New("connection projection conflicts with producer")
@@ -137,6 +138,9 @@ func CompileConnectionInputs(bundle *WorkflowContractBundle, pins ConnectionInpu
 }
 
 func compileConnectionInput(bundle *WorkflowContractBundle, pins ConnectionInputPinProvider, connect FlowConnect) (CompiledConnectionInput, error) {
+	if err := lexicallyBoundConnectionKeyError(bundle, connect); err != nil {
+		return CompiledConnectionInput{}, err
+	}
 	if !ordinaryInstanceResolution(connect.Resolution) {
 		return CompiledConnectionInput{}, fmt.Errorf("connect.resolution must be create, select or select-or-create")
 	}
@@ -170,6 +174,25 @@ func compileConnectionInput(bundle *WorkflowContractBundle, pins ConnectionInput
 		mode: connect.Resolution, evidence: evidence, receiverSchema: receiver,
 		receiverFlow: receiverFlow, receiverEvent: receiverEvent,
 	}}, nil
+}
+
+func lexicallyBoundConnectionKeyError(bundle *WorkflowContractBundle, connect FlowConnect) error {
+	owner := normalizedConnectOwnerFlowPath(connect.OwnerFlowPath)
+	if bundle == nil || owner == "." || connect.KeyFrom == "" || connectEndpointFlowID(owner, connect.To) != owner {
+		return nil
+	}
+	producer := connectEndpointFlowID(owner, connect.From)
+	if !strings.HasPrefix(producer, owner+"/") {
+		return nil
+	}
+	if _, declared := bundle.FlowSchemaByID(producer); !declared {
+		return nil
+	}
+	schema, declared := bundle.FlowSchemaByID(owner)
+	if !declared || schema.Instance.Empty() {
+		return nil
+	}
+	return fmt.Errorf("`%s` is bound by context", owner)
 }
 
 func connectionReceiverEventSchema(event string, producer CompiledEventSchema, evidence FlowInputInstanceSourceTypeEvidence) (CompiledEventSchema, error) {

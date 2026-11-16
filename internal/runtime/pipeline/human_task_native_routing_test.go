@@ -2,8 +2,10 @@ package pipeline
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -37,6 +39,22 @@ func (s foreignHumanTaskRequesterForTest) LoadHumanTaskContinuation(ctx context.
 	return continuation, err
 }
 
+type siblingHumanTaskCardReadForTest struct{ decisioncard.Store }
+
+func (s siblingHumanTaskCardReadForTest) GetDecisionCard(ctx context.Context, id string) (decisioncard.Card, error) {
+	card, err := s.Store.GetDecisionCard(ctx, id)
+	if err != nil {
+		return card, err
+	}
+	anchor, err := card.Anchor.HumanTask()
+	if err != nil {
+		return card, err
+	}
+	anchor.RequesterAgentID = "sibling-agent"
+	card.Anchor, err = decisioncard.NewHumanTaskAnchor(anchor)
+	return card, err
+}
+
 func nativeHumanTaskRoutingFixtureForTest(t *testing.T, backend string, global bool, open pipelineDeliveryNativeOpenerForTest) (*PipelineDeliveryNativeFixtureForTest, *PipelineCoordinator, context.Context, decisioncard.Card, decisioncard.HumanTaskContinuation, *nativePipelineDeliveryBusObservationForTest) {
 	t.Helper()
 	bundle := loadWorkflowTempBundle(t, map[string]string{
@@ -51,6 +69,7 @@ func nativeHumanTaskRoutingFixtureForTest(t *testing.T, backend string, global b
 	}
 	run := runtimeRunID(ctx)
 	fixture.ObserveHumanRequester(ctx, "requester-agent")
+	fixture.ObserveHumanRequester(ctx, "sibling-agent")
 	source, err := events.NewStaticFlowRoutingSource(events.RouteIdentity{FlowID: ".", FlowInstance: run, EntityID: run})
 	if err != nil {
 		t.Fatal(err)
@@ -94,8 +113,18 @@ func observeNativeHumanTaskDispatchForTest(t *testing.T, fixture *PipelineDelive
 		if fixture.Transactions().Active != 0 {
 			return fmt.Errorf("human-task dispatch began before selected transaction completion")
 		}
-		if len(intents) != 1 || len(intents[0].Recipients) != 1 || intents[0].Recipients[0] != "requester-agent" || intents[0].Context.ReplyContextID() != continuation.ReplyContextID || intents[0].Event.TargetRoute().Normalized() != continuation.RequesterRoute {
+		if len(intents) != 1 || intents[0].RequesterReturn.RequesterID() != "requester-agent" || intents[0].Context.ReplyContextID() != continuation.ReplyContextID || intents[0].Event.TargetRoute().Normalized() != continuation.RequesterRoute {
 			return fmt.Errorf("native direct requester route/context changed: %+v", intents)
+		}
+		if err := intents[0].RequesterReturn.ValidateEvent(intents[0].Event, intents[0].Context); err != nil {
+			return err
+		}
+		raw, err := json.Marshal(intents[0])
+		if err != nil {
+			return err
+		}
+		if strings.Contains(string(raw), `"RequesterReturn"`) {
+			return fmt.Errorf("ephemeral requester binding escaped into serialized intent")
 		}
 		*count++
 		return nil
@@ -144,6 +173,15 @@ func VerifyNativeHumanTaskDecisionRoutesDirectlyToRequesterInOneMutationOnBothSt
 				}
 				assertNativeHumanTaskRefusalConservesContinuationForTest(t, fixture, ctx, previous, before)
 				pc.humanTasks = fixture.HumanTasks
+				pc.decisionCards = siblingHumanTaskCardReadForTest{Store: fixture.Cards}
+				if _, _, err := pc.handleWorkflowGateDecisionEvent(ctx, parent); err == nil || !strings.Contains(err.Error(), "differs from its native card and continuation") {
+					t.Fatalf("substituted card requester crossed native commit: %v", err)
+				}
+				if bus.committedCount() != 0 || *dispatches != 0 {
+					t.Fatal("substituted card requester published or dispatched")
+				}
+				assertNativeHumanTaskRefusalConservesContinuationForTest(t, fixture, ctx, previous, before)
+				pc.decisionCards = fixture.Cards
 				if _, _, err := pc.handleWorkflowGateDecisionEvent(ctx, parent); err != nil {
 					t.Fatal(err)
 				}
@@ -202,6 +240,17 @@ func VerifyNativeHumanTaskDeferredAndExpiredOutcomesUseRequesterRouteOnBothStore
 				}
 				assertNativeHumanTaskRefusalConservesContinuationForTest(t, fixture, ctx, previous, before)
 				pc.humanTasks = fixture.HumanTasks
+				pc.decisionCards = siblingHumanTaskCardReadForTest{Store: fixture.Cards}
+				if expired {
+					_, _, err = pc.handleDecisionCardExpiredEvent(ctx, parent)
+				} else {
+					_, _, err = pc.handleDecisionCardDeferredEvent(ctx, parent)
+				}
+				if err == nil || !strings.Contains(err.Error(), "differs from its native card and continuation") || bus.committedCount() != 0 || *dispatches != 0 {
+					t.Fatalf("substituted lifecycle requester crossed native commit: %v", err)
+				}
+				assertNativeHumanTaskRefusalConservesContinuationForTest(t, fixture, ctx, previous, before)
+				pc.decisionCards = fixture.Cards
 				if expired {
 					_, _, err = pc.handleDecisionCardExpiredEvent(ctx, parent)
 				} else {

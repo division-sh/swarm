@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"math"
 	"strings"
 	"time"
 
@@ -105,51 +104,8 @@ type completionRecoveryAuthorityEvidence struct {
 
 type CompletionRecoveryAuthorityEvidence = completionRecoveryAuthorityEvidence
 
-func prospectiveAgentGenerations(ctx context.Context, tx *sql.Tx, mode []recoveryReadMode) (string, error) {
-	if recoveryLocks(mode) {
-		return "[]", nil
-	}
-	query := `SELECT CAST(run_id AS TEXT), agent_id, agent_name_owner, agent_name_source,
-		agent_route_presence, flow_scope_key, flow_instance_id, flow_instance, lifecycle_generation FROM agents`
-	rows, err := tx.QueryContext(ctx, query)
-	if err != nil {
-		return "", fmt.Errorf("read prospective agent generations: %w", err)
-	}
-	defer rows.Close()
-	type nextAgent struct {
-		RunID         string `json:"run_id"`
-		AgentID       string `json:"agent_id"`
-		NameOwner     string `json:"name_owner"`
-		NameSource    string `json:"name_source"`
-		RoutePresence string `json:"route_presence"`
-		ScopeKey      string `json:"scope_key"`
-		InstanceID    string `json:"instance_id"`
-		InstancePath  string `json:"instance_path"`
-		Generation    int64  `json:"generation"`
-	}
-	agents := make([]nextAgent, 0)
-	for rows.Next() {
-		var agent nextAgent
-		var generation int64
-		if err := rows.Scan(&agent.RunID, &agent.AgentID, &agent.NameOwner, &agent.NameSource,
-			&agent.RoutePresence, &agent.ScopeKey, &agent.InstanceID, &agent.InstancePath, &generation); err != nil {
-			return "", err
-		}
-		if generation < 0 || generation == math.MaxInt64 {
-			return "", fmt.Errorf("invalid retained agent lifecycle generation %d", generation)
-		}
-		agent.Generation = int64(runtimemanager.NextLifecycleGeneration(uint64(generation)))
-		agents = append(agents, agent)
-	}
-	if err := rows.Err(); err != nil {
-		return "", err
-	}
-	encoded, err := json.Marshal(agents)
-	return string(encoded), err
-}
-
 func reconcileCompletionAttemptsPostgres(ctx context.Context, tx *sql.Tx, llm *storellm.LLMPostgresOwner, delivery providerDrainDeliveryOwner, directives providerDrainDirectiveOwner, mutation *mutationprotocol.Attempt, allowed map[string]struct{}, now time.Time, selectedExecutionID string) (runtimeeffects.RecoverySummary, error) {
-	attempts, err := loadCompletionRecoveryAttemptsPostgres(ctx, tx, now, selectedExecutionID, nil)
+	attempts, err := loadCompletionRecoveryAttemptsPostgres(ctx, tx, delivery, now, selectedExecutionID, nil)
 	if err != nil {
 		return runtimeeffects.RecoverySummary{}, err
 	}
@@ -157,42 +113,26 @@ func reconcileCompletionAttemptsPostgres(ctx context.Context, tx *sql.Tx, llm *s
 	return reconcileCompletionAttempts(ctx, tx, llm, nil, delivery, directives, mutation, true, attempts, now)
 }
 
-func loadCompletionRecoveryAttemptsPostgres(ctx context.Context, tx *sql.Tx, now time.Time, selectedExecutionID string, identity *agentidentity.Identity, mode ...recoveryReadMode) ([]completionRecoveryAttempt, error) {
+func loadCompletionRecoveryAttemptsPostgres(ctx context.Context, tx *sql.Tx, delivery providerDrainDeliveryOwner, now time.Time, selectedExecutionID string, identity *agentidentity.Identity, mode ...recoveryReadMode) ([]completionRecoveryAttempt, error) {
+	attempts, err := readCompletionRecoveryAttemptsPostgres(ctx, tx, selectedExecutionID, identity, mode...)
+	if err != nil {
+		return nil, err
+	}
+	return selectAbandonedCompletionAttempts(ctx, tx, delivery, attempts, now, false)
+}
+
+func readCompletionRecoveryAttemptsPostgres(ctx context.Context, tx *sql.Tx, selectedExecutionID string, identity *agentidentity.Identity, mode ...recoveryReadMode) ([]completionRecoveryAttempt, error) {
 	predicate, args, err := startupCompletionRecoveryFilter(identity, true)
 	if err != nil {
 		return nil, err
 	}
-	prospective, err := prospectiveAgentGenerations(ctx, tx, mode)
-	if err != nil {
-		return nil, err
-	}
-	args = append([]any{now, selectedExecutionID, prospective, recoveryAvailable(mode)}, args...)
-	projectedGeneration := `COALESCE((SELECT next_agent.generation
-		FROM jsonb_to_recordset($3::jsonb) AS next_agent(
-			run_id text, agent_id text, name_owner text, name_source text, route_presence text,
-			scope_key text, instance_id text, instance_path text, generation bigint)
-		WHERE next_agent.run_id=o.agent_run_id::text AND next_agent.agent_id=o.agent_id
-			AND next_agent.name_owner=o.agent_name_owner AND next_agent.name_source=o.agent_name_source
-			AND next_agent.route_presence=o.agent_route_presence AND next_agent.scope_key=o.flow_scope_key
-			AND next_agent.instance_id=o.flow_instance_id AND next_agent.instance_path=o.flow_instance
-		), g.lifecycle_generation)`
-	query := postgresCompletionRecoverySelect + storeagent.CompletionRecoveryAgentJoinSQL() + `
+	args = append([]any{selectedExecutionID, recoveryAvailable(mode)}, args...)
+	query := postgresCompletionRecoverySelect + `
 		WHERE o.effect_kind='provider_turn' AND a.usage_target_kind IS NOT NULL
 		  AND a.state IN ('authorized','launched','response_observed')
-		  AND ((o.authority_kind='selected_contract_fork' AND o.selected_execution_id::text=$2) OR
-		  ($2='' AND o.authority_kind<>'selected_contract_fork' AND ` + postgresProviderCompletionRecoveryOwnerPredicate + `
-		  AND (
-		    a.lease_expires_at <= $1 OR
-		    (o.authority_kind='normal_agent' AND (
-		      ` + storeagent.CompletionRecoveryAgentStaleSQL(false, projectedGeneration) + `
-		    )) OR
-		    (o.authority_kind='normal_agent' AND NOT EXISTS (
-		      SELECT 1 FROM runs run
-		      WHERE run.run_id=COALESCE(NULLIF(o.lineage->>'run_id',''),NULLIF(o.authority_evidence #>> '{usage_target,run_id}',''))::uuid
-		        AND run.status IN (` + runLifecycleActiveStateSQLValues + `)
-		    ))
-		  )
-		  )) AND $4::boolean
+		  AND ((o.authority_kind='selected_contract_fork' AND o.selected_execution_id::text=$1) OR
+		  ($1='' AND o.authority_kind<>'selected_contract_fork' AND ` + postgresProviderCompletionRecoveryOwnerPredicate + `))
+		  AND $2::boolean
 		` + predicate + ` ORDER BY a.authorized_at,a.attempt_id
 	`
 	if recoveryLocks(mode) {
@@ -206,7 +146,7 @@ func loadCompletionRecoveryAttemptsPostgres(ctx context.Context, tx *sql.Tx, now
 }
 
 func reconcileCompletionAttemptsSQLite(ctx context.Context, tx *sql.Tx, llm *storellm.LLMSQLiteOwner, delivery providerDrainDeliveryOwner, directives providerDrainDirectiveOwner, mutation *mutationprotocol.Attempt, allowed map[string]struct{}, now time.Time, selectedExecutionID string) (runtimeeffects.RecoverySummary, error) {
-	attempts, err := loadCompletionRecoveryAttemptsSQLite(ctx, tx, now, selectedExecutionID, nil)
+	attempts, err := loadCompletionRecoveryAttemptsSQLite(ctx, tx, delivery, now, selectedExecutionID, nil)
 	if err != nil {
 		return runtimeeffects.RecoverySummary{}, err
 	}
@@ -214,44 +154,25 @@ func reconcileCompletionAttemptsSQLite(ctx context.Context, tx *sql.Tx, llm *sto
 	return reconcileCompletionAttempts(ctx, tx, nil, llm, delivery, directives, mutation, false, attempts, now)
 }
 
-func loadCompletionRecoveryAttemptsSQLite(ctx context.Context, tx *sql.Tx, now time.Time, selectedExecutionID string, identity *agentidentity.Identity, mode ...recoveryReadMode) ([]completionRecoveryAttempt, error) {
+func loadCompletionRecoveryAttemptsSQLite(ctx context.Context, tx *sql.Tx, delivery providerDrainDeliveryOwner, now time.Time, selectedExecutionID string, identity *agentidentity.Identity, mode ...recoveryReadMode) ([]completionRecoveryAttempt, error) {
+	attempts, err := readCompletionRecoveryAttemptsSQLite(ctx, tx, selectedExecutionID, identity, mode...)
+	if err != nil {
+		return nil, err
+	}
+	return selectAbandonedCompletionAttempts(ctx, tx, delivery, attempts, now, true)
+}
+
+func readCompletionRecoveryAttemptsSQLite(ctx context.Context, tx *sql.Tx, selectedExecutionID string, identity *agentidentity.Identity, mode ...recoveryReadMode) ([]completionRecoveryAttempt, error) {
 	predicate, args, err := startupCompletionRecoveryFilter(identity, false)
 	if err != nil {
 		return nil, err
 	}
-	prospective, err := prospectiveAgentGenerations(ctx, tx, mode)
-	if err != nil {
-		return nil, err
-	}
-	args = append([]any{selectedExecutionID, selectedExecutionID, now, prospective, recoveryAvailable(mode)}, args...)
-	projectedGeneration := `COALESCE((SELECT json_extract(next_agent.value,'$.generation')
-		FROM json_each(?) next_agent
-		WHERE json_extract(next_agent.value,'$.run_id')=o.agent_run_id
-			AND json_extract(next_agent.value,'$.agent_id')=o.agent_id
-			AND json_extract(next_agent.value,'$.name_owner')=o.agent_name_owner
-			AND json_extract(next_agent.value,'$.name_source')=o.agent_name_source
-			AND json_extract(next_agent.value,'$.route_presence')=o.agent_route_presence
-			AND json_extract(next_agent.value,'$.scope_key')=o.flow_scope_key
-			AND json_extract(next_agent.value,'$.instance_id')=o.flow_instance_id
-			AND json_extract(next_agent.value,'$.instance_path')=o.flow_instance
-		), g.lifecycle_generation)`
-	rows, err := tx.QueryContext(ctx, sqliteCompletionRecoverySelect+storeagent.CompletionRecoveryAgentJoinSQL()+`
+	args = append([]any{selectedExecutionID, selectedExecutionID, recoveryAvailable(mode)}, args...)
+	rows, err := tx.QueryContext(ctx, sqliteCompletionRecoverySelect+`
 		WHERE o.effect_kind='provider_turn' AND a.usage_target_kind IS NOT NULL
 		  AND a.state IN ('authorized','launched','response_observed')
 		  AND ((o.authority_kind='selected_contract_fork' AND o.selected_execution_id=?) OR
-		  (?='' AND o.authority_kind<>'selected_contract_fork' AND `+sqliteProviderCompletionRecoveryOwnerPredicate+`
-		  AND (
-		    a.lease_expires_at <= ? OR
-		    (o.authority_kind='normal_agent' AND (
-		      `+storeagent.CompletionRecoveryAgentStaleSQL(true, projectedGeneration)+`
-		    )) OR
-		    (o.authority_kind='normal_agent' AND NOT EXISTS (
-		      SELECT 1 FROM runs run
-		      WHERE run.run_id=COALESCE(NULLIF(json_extract(o.lineage,'$.run_id'),''),NULLIF(json_extract(o.authority_evidence,'$.usage_target.run_id'),''))
-		        AND run.status IN (`+runLifecycleActiveStateSQLValues+`)
-		    ))
-		  )
-		  )) AND ?
+		  (?='' AND o.authority_kind<>'selected_contract_fork' AND `+sqliteProviderCompletionRecoveryOwnerPredicate+`)) AND ?
 		`+predicate+` ORDER BY a.authorized_at,a.attempt_id
 	`, args...)
 	if err != nil {
@@ -272,9 +193,9 @@ func startupCompletionRecoveryFilter(identity *agentidentity.Identity, postgres 
 		AND o.agent_name_owner=? AND o.agent_name_source=? AND o.agent_route_presence=?
 		AND o.flow_scope_key=? AND o.flow_instance_id=? AND o.flow_instance=?`
 	if postgres {
-		predicate = ` AND o.authority_kind='normal_agent' AND o.agent_run_id=$5::uuid AND o.agent_id=$6
-			AND o.agent_name_owner=$7 AND o.agent_name_source=$8 AND o.agent_route_presence=$9
-			AND o.flow_scope_key=$10 AND o.flow_instance_id=$11 AND o.flow_instance=$12`
+		predicate = ` AND o.authority_kind='normal_agent' AND o.agent_run_id=$3::uuid AND o.agent_id=$4
+			AND o.agent_name_owner=$5 AND o.agent_name_source=$6 AND o.agent_route_presence=$7
+			AND o.flow_scope_key=$8 AND o.flow_instance_id=$9 AND o.flow_instance=$10`
 	}
 	return predicate, []any{fields.RunID, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
 		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath}, nil
@@ -287,7 +208,7 @@ func (s *EffectPostgresOwner) RecoverStartupProviderAttemptsPostgresTx(ctx conte
 		if err := validateStartupProviderRecovery(ctx, tx, request, result, false); err != nil {
 			return err
 		}
-		attempts, err := loadCompletionRecoveryAttemptsPostgres(ctx, tx, request.Now, "", &request.Identity)
+		attempts, err := loadCompletionRecoveryAttemptsPostgres(ctx, tx, s.delivery, request.Now, "", &request.Identity)
 		if err != nil {
 			return err
 		}
@@ -306,7 +227,7 @@ func (s *EffectSQLiteOwner) RecoverStartupProviderAttemptsSQLiteTx(ctx context.C
 		if err := validateStartupProviderRecovery(ctx, tx, request, result, true); err != nil {
 			return err
 		}
-		attempts, err := loadCompletionRecoveryAttemptsSQLite(ctx, tx, request.Now, "", &request.Identity)
+		attempts, err := loadCompletionRecoveryAttemptsSQLite(ctx, tx, s.delivery, request.Now, "", &request.Identity)
 		if err != nil {
 			return err
 		}
@@ -693,7 +614,7 @@ func completionRecoverySettlement(recovered completionRecoveryAttempt, state run
 			return runtimeeffects.Attempt{}, runtimeeffects.CompletionSettlement{}, fmt.Errorf("completion recovery origin claim conflicts for attempt %s", recovered.AttemptID)
 		}
 		attempt.Origin = origin
-	} else if strings.TrimSpace(recovered.AgentRunID) != "" {
+	} else if authority.Kind != runtimeeffects.AuthorityNormalAgent && strings.TrimSpace(recovered.AgentRunID) != "" {
 		return runtimeeffects.Attempt{}, runtimeeffects.CompletionSettlement{}, fmt.Errorf("completion recovery non-agent authority carries agent run identity for attempt %s", recovered.AttemptID)
 	}
 	agentID := strings.TrimSpace(target.AgentID)

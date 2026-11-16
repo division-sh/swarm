@@ -36,6 +36,7 @@ func selectedSuccessorStoreDB(t *testing.T, backend string) *sql.DB {
 			created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL, claim_owner TEXT,
 			claim_generation INTEGER NOT NULL DEFAULT 0, lease_expires_at TIMESTAMP, blocked_reason TEXT,
 			capsule TEXT, retry_ready_at TIMESTAMP, retry_failure TEXT,
+			read_retry_not_before TIMESTAMP, read_retry_delay_ms BIGINT, read_retry_since TIMESTAMP, read_retry_failure TEXT,
 			UNIQUE (run_id, deployment_feed_id))`,
 		`CREATE TABLE fan_out_outcomes (
 			run_id TEXT NOT NULL, deployment_feed_id TEXT NOT NULL,

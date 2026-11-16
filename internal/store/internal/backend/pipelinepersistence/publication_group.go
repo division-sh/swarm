@@ -156,14 +156,14 @@ func (s *fanOutSQLiteOwner) openFanOutPublicationGroup(ctx context.Context, clai
 func (s *fanOutPostgresOwner) BeginFanOutEvaluation(ctx context.Context, claim fanoutobligation.Claim, validate func(runtimepipeline.FanOutEvaluationInput) error) (runtimepipeline.FanOutEvaluationInput, pipelineobligation.PublicationGroup, error) {
 	intent, err := s.loadFanOutEvaluationIntent(ctx, claim)
 	if err != nil {
-		return runtimepipeline.FanOutEvaluationInput{}, nil, &runtimepipeline.FanOutEvaluationLoadError{Cause: err}
+		return runtimepipeline.FanOutEvaluationInput{}, nil, err
 	}
 	input, err := loadFanOutEvaluation(ctx, s.backend.ConstructionHandle(), true, s.resourceData, intent)
 	if err != nil {
-		return input, nil, &runtimepipeline.FanOutEvaluationLoadError{Cause: err}
+		return input, nil, fanOutReadFailure(ctx, "hydrate_read", err, false)
 	}
 	if err := validateFanOutEvaluationInput(input, validate); err != nil {
-		return input, nil, &runtimepipeline.FanOutEvaluationLoadError{Cause: err, Stage: "validate_evaluation"}
+		return input, nil, fanOutReadFailure(ctx, "validate_evaluation", fanOutInvalidRead(err), true)
 	}
 	if err := ctx.Err(); err != nil {
 		return input, nil, err
@@ -178,14 +178,14 @@ func (s *fanOutPostgresOwner) BeginFanOutEvaluation(ctx context.Context, claim f
 func (s *fanOutSQLiteOwner) BeginFanOutEvaluation(ctx context.Context, claim fanoutobligation.Claim, validate func(runtimepipeline.FanOutEvaluationInput) error) (runtimepipeline.FanOutEvaluationInput, pipelineobligation.PublicationGroup, error) {
 	intent, err := s.loadFanOutEvaluationIntent(ctx, claim)
 	if err != nil {
-		return runtimepipeline.FanOutEvaluationInput{}, nil, &runtimepipeline.FanOutEvaluationLoadError{Cause: err}
+		return runtimepipeline.FanOutEvaluationInput{}, nil, err
 	}
 	input, err := loadFanOutEvaluation(ctx, s.backend.ConstructionHandle(), false, s.resourceData, intent)
 	if err != nil {
-		return input, nil, &runtimepipeline.FanOutEvaluationLoadError{Cause: err}
+		return input, nil, fanOutReadFailure(ctx, "hydrate_read", err, false)
 	}
 	if err := validateFanOutEvaluationInput(input, validate); err != nil {
-		return input, nil, &runtimepipeline.FanOutEvaluationLoadError{Cause: err, Stage: "validate_evaluation"}
+		return input, nil, fanOutReadFailure(ctx, "validate_evaluation", fanOutInvalidRead(err), true)
 	}
 	if err := ctx.Err(); err != nil {
 		return input, nil, err

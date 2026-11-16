@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -35,6 +37,7 @@ import (
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	runtimebustest "github.com/division-sh/swarm/tests/support/runtime/bus/bustest"
+	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/decisioncardtest"
 	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/templatereply"
 	"github.com/division-sh/swarm/tests/support/testutil"
@@ -631,8 +634,85 @@ func TestReplyResolutionConformance_TypedHumanTaskPreservesReplyAuthorityAcrossR
 			assertReplyContextState(t, ctx, backend, deliveryContext.ReplyContextID(), runtimereplycontext.StateTerminal, replyID)
 
 			proveTypedHumanTaskStaleOrigin(t, ctx, backend, cards, source, runID)
+			t.Run("authored_final_stage", func(t *testing.T) {
+				proveReplyAfterAuthoredFinalStage(t, backendCase.setup(t))
+			})
 		})
 	}
+}
+
+func proveReplyAfterAuthoredFinalStage(t *testing.T, backend durableReplyConformanceStore) {
+	t.Helper()
+	root := templatereply.Write(t, templatereply.Options{ProviderContinuation: templatereply.ContinuationHuman})
+	for name, edit := range map[string]func(string) string{
+		"schema.yaml": func(body string) string {
+			return strings.Replace(body, "inputs:\n", "inputs:\n  - requester.finished\n", 1) + "\n  - {event: requester.finished, from: ., to: requester, resolution: select}\n"
+		},
+		"events.yaml": func(body string) string { return body + "\nrequester.finished:\n  account_id: text\n" },
+		"requester/schema.yaml": func(body string) string {
+			return strings.Replace(body, "inputs:\n", "inputs:\n  - requester.finished\n", 1) + "\nstages:\n  active: {}\n  done: {final: true}\n"
+		},
+		"requester/nodes.yaml": func(body string) string {
+			return body + "\n  requester.finished: {advances_to: done}\n"
+		},
+	} {
+		path := filepath.Join(root, name)
+		body, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(edit(string(body))), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	repo := canonicalrouting.RepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := semanticview.Wrap(bundle)
+	runID := uuid.NewString()
+	ctx := originalConformanceFixtureContext(t, testAuthorActivityContext(t.Context()), backend)
+	seedDurableReplyConformanceRun(t, ctx, backend, runID, source)
+	ctx = runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(ctx, conformanceSourceArtifactFact(t, source)), runID)
+	eb, _, coordinator := newDurableReplyHumanTaskRuntime(t, ctx, backend, source)
+	request := replyConformanceEventForRun(source.ResolveFlowEventReference("requester", "provider.requested"), uuid.NewString(), runID, "requester", "requester/account-a", map[string]any{"provider_request_id": "final-stage-request", "account_id": "account-a"})
+	if err := eb.Publish(ctx, request); err != nil {
+		t.Fatal(err)
+	}
+	routes, err := backend.ListEventDeliveryRoutes(ctx, request.ID())
+	if err != nil || len(routes) != 1 || routes[0].Context.Empty() {
+		t.Fatalf("final-stage request authority: %+v %v", routes, err)
+	}
+	finish := eventtest.ExistingRunRootIngress(uuid.NewString(), "requester.finished", "operator", "", []byte(`{"account_id":"account-a"}`), 0, runID, events.EventEnvelope{}, time.Now().UTC())
+	if err := eb.PublishAcknowledged(ctx, finish); err != nil {
+		t.Fatal(err)
+	}
+	waitReplyConformanceBus(t, ctx, eb)
+	identity := replyConformanceRequesterIdentity(t, source, runID, "account-a")
+	owner, err := runtimeflowidentity.NewRunScopedFlowInstance(runID, identity.Route())
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, found, err := coordinator.Load(ctx, owner)
+	if err != nil || !found || before.CurrentState != "done" || before.Status != "active" || !before.TerminatedAt.IsZero() {
+		t.Fatalf("authored final stage, not operational termination: %+v found=%t err=%v", before, found, err)
+	}
+	reply := replyConformanceEventForRun(source.ResolveFlowEventReference("provider", "provider.replied"), uuid.NewString(), runID, "provider", "provider", map[string]any{"provider_request_id": "final-stage-request", "account_id": "account-a", "result": "late"})
+	if err := eb.Publish(events.WithDeliveryContext(ctx, routes[0].Context), reply); err != nil {
+		t.Fatal(err)
+	}
+	if recipients, err := backend.ListEventDeliveryRoutes(ctx, reply.ID()); err != nil || len(recipients) != 0 {
+		t.Fatalf("final-stage reply routed: %+v %v", recipients, err)
+	}
+	if got := loadReplyConformanceTargetFailure(t, ctx, backend, reply.ID()); got != runtimepinrouting.FailureStaleArrival.Code() {
+		t.Fatalf("final-stage reply refusal=%q want=%q", got, runtimepinrouting.FailureStaleArrival.Code())
+	}
+	after, found, err := coordinator.Load(ctx, owner)
+	if err != nil || !found || !reflect.DeepEqual(before, after) {
+		t.Fatalf("late reply changed final requester: %+v %v", after, err)
+	}
+	assertReplyContextState(t, ctx, backend, routes[0].Context.ReplyContextID(), runtimereplycontext.StateOpen, "")
 }
 
 func proveTypedHumanTaskStaleOrigin(t *testing.T, ctx context.Context, backend durableReplyConformanceStore, cards replyHumanTaskConformanceStore, source semanticview.Source, runID string) {

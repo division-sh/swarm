@@ -12,6 +12,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/operatorread"
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -74,6 +75,41 @@ type completeEventDispatchFixture struct {
 	identity         agentidentity.Identity
 	source           semanticview.Source
 	rootConstruction *runtimepipeline.CommittedFlowInstanceActivation
+}
+
+func (f completeEventDispatchFixture) recordedReplay(t testing.TB, ctx context.Context) (events.Event, operatorread.ReplaySelection) {
+	t.Helper()
+	reader := f.store.(interface {
+		LoadOperatorEvent(context.Context, string) (operatorread.OperatorEventFull, error)
+	})
+	original, err := reader.LoadOperatorEvent(ctx, f.event.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := make([]string, 0, len(original.Deliveries))
+	for _, row := range original.Deliveries {
+		if row.Route.AgentIdentity == f.identity {
+			ids = append(ids, row.DeliveryID)
+		}
+	}
+	selection, err := operatorread.SelectReplayDeliveries(original, ids)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := original.EventSnapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	targets := make([]events.RouteIdentity, 0, len(selection.Routes()))
+	for _, route := range selection.Routes() {
+		targets = append(targets, route.Target.Route())
+	}
+	event := eventtest.ReplayForProducerWithRoutingSource(
+		uuid.NewString(), snapshot.Type(), snapshot.Producer(), snapshot.TaskID(), snapshot.Payload(), snapshot.ChainDepth()+1,
+		events.EventLineage{RunID: snapshot.RunID(), ParentEventID: snapshot.ID(), TaskID: snapshot.TaskID(), ExecutionMode: snapshot.ExecutionMode()},
+		events.EnvelopeForTargetSet(snapshot.Envelope(), targets), snapshot.RoutingSource(), time.Now().UTC(),
+	)
+	return event, selection
 }
 
 type completeEventDispatchGeneration struct {
@@ -309,9 +345,7 @@ func newCompleteEventDispatchFixtureWithOrigin(
 	createdAt := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
 	runID, eventID := uuid.NewString(), uuid.NewString()
 	seedCompleteEventDispatchRunWithOrigin(t, ctx, selected, runID, createdAt, origin)
-	sourceRoute := events.RouteIdentity{
-		FlowID: "source-flow", FlowInstance: "source-flow/one", EntityID: uuid.NewString(),
-	}
+	sourceRoute := events.RouteIdentity{EntityID: runID}
 	var rootConstruction *runtimepipeline.CommittedFlowInstanceActivation
 	if constructSource {
 		constructionCtx := runtimecorrelation.WithRunID(ctx, runID)
@@ -339,25 +373,26 @@ func newCompleteEventDispatchFixtureWithOrigin(
 	}
 	envelope := events.EnvelopeForSourceRoute(events.EventEnvelope{}, sourceRoute)
 	eventType := events.EventType("custom.replay.checked")
+	routingSource := eventtest.RootRoutingSource(runID)
 	if constructSource {
-		eventType, err = runtimepinrouting.AdmitPublicationIdentity(sourceRoute.FlowID, "custom.replay.checked",
-			eventtest.ConcreteTemplateRoutingSource(sourceRoute.FlowID, sourceRoute.FlowInstance, sourceRoute.EntityID))
+		routingSource = eventtest.ConcreteTemplateRoutingSource(sourceRoute.FlowID, sourceRoute.FlowInstance, sourceRoute.EntityID)
+		eventType, err = runtimepinrouting.AdmitPublicationIdentity(sourceRoute.FlowID, "custom.replay.checked", routingSource)
 		if err != nil {
 			t.Fatalf("admit complete-event publication identity: %v", err)
 		}
 	}
-	event := eventtest.InExecutionMode(eventtest.PersistedChildForProducer(
+	event := eventtest.ChildForProducerWithRoutingSource(
 		eventID,
 		eventType,
 		eventtest.Producer(events.EventProducerNode, "declarative-node"),
 		"event-owned-task",
 		[]byte(`{"task_id":"payload-owned-task","text":"complete snapshot"}`),
 		3,
-		runID,
-		uuid.NewString(),
+		events.EventLineage{RunID: runID, ParentEventID: uuid.NewString(), TaskID: "event-owned-task", ExecutionMode: executionmode.Mock},
 		envelope,
+		routingSource,
 		createdAt,
-	), executionmode.Mock)
+	)
 	agentID := "complete-event-agent"
 	ownerURI := completeEventAgentOwnerURI(agentID)
 	if source != nil {

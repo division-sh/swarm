@@ -17,8 +17,14 @@ outputs: [custom.emitted, custom.followup, custom.snapshot, custom.claimed, cust
 func CopyEngineOutboxTarget(t testing.TB) string {
 	t.Helper()
 	root := CopyEngineOutboxPublication(t)
+	writeClosedVariantFile(t, root, "schema.yaml", `# fixture: engine-outbox-publication
+inputs: [custom.emitted, custom.followup, custom.snapshot, custom.claimed, custom.conflicting]
+outputs: [custom.emitted, custom.followup, custom.snapshot, custom.claimed, custom.conflicting]
+connect:
+  - {event: custom.snapshot, from: '.', to: flow-original}
+`)
 	writeClosedVariantFile(t, root, "flow-original/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
-	writeClosedVariantFile(t, root, "flow-original/schema.yaml", "stages: []\n# fixture: original-target\n")
-	writeClosedVariantFile(t, root, "flow-original/events.yaml", "custom.snapshot:\n")
+	writeClosedVariantFile(t, root, "flow-original/schema.yaml", "stages: []\ninputs: [custom.snapshot]\n# fixture: original-target\n")
+	writeClosedVariantFile(t, root, "flow-original/agents.yaml", "agent-original:\n  intent: {inline: Observe the snapshot.}\n  subscriptions: [custom.snapshot]\n")
 	return root
 }

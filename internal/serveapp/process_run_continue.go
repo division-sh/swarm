@@ -117,6 +117,9 @@ func (s *processLifecycleSupervisor) continueRunRuntime(ctx context.Context, req
 	}
 	result, err := current.RunControl.ContinueDeferred(ctx, req)
 	if err != nil {
+		if runcontrol.IsNotPausedOnly(err) {
+			return s.recheckPausedRunHandlersLocked(ctx, lease, req.RunID, availability.RootReference, currentSources.Revision)
+		}
 		return result, errors.Join(err, lease.Done())
 	}
 	id := uuid.NewString()
@@ -128,6 +131,34 @@ func (s *processLifecycleSupervisor) continueRunRuntime(ctx context.Context, req
 	s.mu.Unlock()
 	go s.finishContinuedRun(lease, req.RunID, availability.RootReference, currentSources.Revision, id)
 	return result, nil
+}
+
+func (s *processLifecycleSupervisor) recheckPausedRunHandlersLocked(ctx context.Context, lease *worklifetime.Lease, runID string, reference sourceartifact.RootAdmissionReference, revision string) (result runcontrol.TransitionResult, err error) {
+	defer func() { err = errors.Join(err, lease.Done()) }()
+	if err := s.validateContinuedRunTarget(ctx, runID, reference, revision); err != nil {
+		return result, err
+	}
+	use, err := s.acquireLiveTargetRuntimeLocked(ctx, reference)
+	if err != nil {
+		return result, err
+	}
+	if use == nil {
+		return result, errors.New("handler resume did not acquire its exact runtime")
+	}
+	defer func() { err = errors.Join(err, use.Done()) }()
+	if use.Runtime() == nil || use.Runtime().RunControl == nil {
+		return result, errors.New("handler resume runtime has no control owner")
+	}
+	workCtx, cancel := context.WithCancel(use.WorkContext())
+	defer cancel()
+	joined := make(chan struct{})
+	stop := context.AfterFunc(ctx, func() { defer close(joined); cancel() })
+	defer func() {
+		if !stop() {
+			<-joined
+		}
+	}()
+	return use.Runtime().RunControl.RecheckPausedFanOut(workCtx, runID)
 }
 
 func (s *processLifecycleSupervisor) finishContinuedRun(lease *worklifetime.Lease, runID string, reference sourceartifact.RootAdmissionReference, revision, id string) {

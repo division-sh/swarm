@@ -29,6 +29,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepublicingress "github.com/division-sh/swarm/internal/runtime/publicingress"
 	runtimeregistration "github.com/division-sh/swarm/internal/runtime/registration"
+	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	sessionexecution "github.com/division-sh/swarm/internal/sessionprovider/execution"
@@ -46,6 +47,7 @@ type serveChannelDeliveryDispatcher struct {
 	activations        channelonboarding.Store
 	manager            *runtime.RuntimeContextManager
 	selectedDecisions  selectedChannelDecisionOwner
+	completionReplay   apiv1.DecisionCardCompletionReplay
 	ingress            *runtimepublicingress.ReadinessOwner
 	effects            runtimeeffects.Store
 	credentials        *runtimecredentials.SnapshotOwner
@@ -215,7 +217,27 @@ func (d *serveChannelDeliveryDispatcher) commitChannelCardMutation(ctx context.C
 	if d.manager == nil {
 		return nil, false, fmt.Errorf("channel card runtime source is unavailable")
 	}
-	use, lookup, err := d.manager.AcquireBundleHash(ctx, card.BundleHash)
+	var use *runtime.RuntimeContextUse
+	var lookup runtime.RuntimeContextLookup
+	var err error
+	if card.Anchor.Kind() == decisioncard.AnchorKindStageGate {
+		var availability runbundle.Availability
+		use, lookup, availability, err = d.manager.AcquireRun(ctx, card.RunID)
+		if err == nil && lookup.AllowsCompletionReplay(ctx, card.RunID, availability) && d.completionReplay != nil {
+			response, replayed, replayErr := d.completionReplay.ReplayDecisionCardMutation(ctx, request, mutation)
+			if replayErr != nil || replayed {
+				return response, replayed, replayErr
+			}
+		}
+		if err == nil && !availability.Available() {
+			err = fmt.Errorf("channel card current run source is unavailable")
+		}
+	} else {
+		use, lookup, err = d.manager.AcquireBundleHash(ctx, card.BundleHash)
+	}
+	if use != nil {
+		defer use.Done()
+	}
 	if err != nil {
 		return nil, false, err
 	}
@@ -225,7 +247,6 @@ func (d *serveChannelDeliveryDispatcher) commitChannelCardMutation(ctx context.C
 	if !lookup.Loaded() || use == nil || use.Runtime() == nil || use.Runtime().Pipeline == nil || use.Runtime().Bus == nil {
 		return nil, false, fmt.Errorf("channel card runtime source is unavailable")
 	}
-	defer use.Done()
 	mutationCtx, err := use.Runtime().Bus.AdmitSourceArtifactFact(use.WorkContext())
 	if err != nil {
 		return nil, false, err

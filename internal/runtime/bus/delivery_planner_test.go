@@ -22,6 +22,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/decisioncardtest"
 	"github.com/division-sh/swarm/tests/support/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 	"gopkg.in/yaml.v3"
@@ -111,7 +112,7 @@ func (p deliveryPlanner) Plan(ctx context.Context, evt events.Event) (RoutePlan,
 	if err != nil {
 		return RoutePlan{}, err
 	}
-	if err := validateRoutedNodeDeliveryAuthority(p.recipientPolicy.semanticSource, evt, plan.RoutedRecipients, plan); err != nil {
+	if err := plan.requireAdmittedNodeIntents(); err != nil {
 		return RoutePlan{}, err
 	}
 	return plan, nil
@@ -701,7 +702,9 @@ func TestDeliveryPlanner_DirectSameSlugUsesTargetRouteBeforeAmbiguity(t *testing
 		time.Time{},
 	)
 
-	plan, err := planner.PlanDirect(context.Background(), evt, []string{"requester"})
+	intent := decisioncardtest.RequesterReturn(t, evt, "requester", events.DeliveryContext{})
+	relation := requesterReturnRelation{compiled: true}
+	plan, err := relation.bind(context.Background(), planner, intent.Event, intent.RequesterReturn)
 	if err != nil {
 		t.Fatalf("PlanDirect targeted requester: %v", err)
 	}
@@ -722,9 +725,21 @@ func TestDeliveryPlanner_DirectSameSlugUsesTargetRouteBeforeAmbiguity(t *testing
 		events.EnvelopeForEntityID(events.EventEnvelope{}, "requester-entity"),
 		time.Time{},
 	)
-	if _, err := planner.PlanDirect(context.Background(), untargeted, []string{"requester"}); err == nil ||
-		!strings.Contains(err.Error(), `direct recipient agent_id "requester" is ambiguous`) {
-		t.Fatalf("untargeted same-slug PlanDirect error = %v, want ambiguity rejection", err)
+	untargetedIntent := decisioncardtest.RequesterReturn(t, untargeted, "requester", events.DeliveryContext{})
+	if _, err := relation.bind(context.Background(), planner, untargetedIntent.Event, untargetedIntent.RequesterReturn); err == nil ||
+		!strings.Contains(err.Error(), "target disagrees with exact agent identity instance") {
+		t.Fatalf("root-bound same-slug return error = %v, want exact instance refusal", err)
+	}
+	ambiguous := descriptorB
+	ambiguous.Identity.Name, err = agentidentity.RuntimeName("requester", "independent-requester-owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	planner.recipientPolicy.loadActiveAgentDescriptors = func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {
+		return testActiveAgentDescriptors(descriptorB, ambiguous), true, nil
+	}
+	if _, err := relation.bind(context.Background(), planner, intent.Event, intent.RequesterReturn); err == nil || !strings.Contains(err.Error(), "ambiguous") {
+		t.Fatalf("same-coordinate requester ambiguity error = %v", err)
 	}
 }
 
@@ -749,11 +764,13 @@ func TestDeliveryPlanner_ExactDirectRoutePreservesCommittedTargetWithoutDescript
 		Target: events.MustExistingEntityTarget(target),
 	}
 	evt := eventtest.RunCreatingRootIngress(
-		"", "task.completed", "", "", nil, 0, "", "",
+		eventtest.UUID("recorded-target-original"), "task.completed", "", "", nil, 0, descriptor.Identity.RunID, "",
 		events.EnvelopeForTargetRoute(events.EventEnvelope{}, target), time.Time{},
 	)
 
-	plan, err := planner.PlanExactDirect(context.Background(), evt, []events.DeliveryRoute{route})
+	evt, selection := recordedReplaySelectionForTest(t, evt, []events.DeliveryRoute{route})
+	bus := &EventBus{deliveryPlanner: planner}
+	plan, err := bus.recordedReplayPlan(context.Background(), evt, selection)
 	if err != nil {
 		t.Fatalf("PlanExactDirect committed target: %v", err)
 	}
@@ -770,15 +787,17 @@ func TestDeliveryPlanner_ExactDirectRoutePreservesCommittedTargetWithoutDescript
 	missing := testActiveAgentDescriptor(t, "replay-agent", "", "other/instance")
 	missingRoute := route
 	missingRoute.AgentIdentity = missing.Identity
-	_, err = planner.PlanExactDirect(context.Background(), evt, []events.DeliveryRoute{missingRoute})
+	original := eventtest.RunCreatingRootIngress(eventtest.UUID("recorded-target-missing"), "task.completed", "", "", nil, 0, descriptor.Identity.RunID, "", events.EnvelopeForTargetRoute(events.EventEnvelope{}, target), time.Time{})
+	missingEvent, missingSelection := recordedReplaySelectionForTest(t, original, []events.DeliveryRoute{missingRoute})
+	_, err = bus.recordedReplayPlan(context.Background(), missingEvent, missingSelection)
 	if !errors.Is(err, ErrExactDirectRecipientUnavailable) {
 		t.Fatalf("PlanExactDirect missing exact identity error = %v, want %v", err, ErrExactDirectRecipientUnavailable)
 	}
 	storeFailure := errors.New("independent exact-agent availability failure")
-	planner.recipientPolicy.loadActiveAgentDescriptors = func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {
+	bus.deliveryPlanner.recipientPolicy.loadActiveAgentDescriptors = func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {
 		return nil, false, storeFailure
 	}
-	if _, err := planner.PlanExactDirect(context.Background(), evt, []events.DeliveryRoute{route}); !errors.Is(err, storeFailure) || targetReads != 0 {
+	if _, err := bus.recordedReplayPlan(context.Background(), evt, selection); !errors.Is(err, storeFailure) || targetReads != 0 {
 		t.Fatalf("exact agent failure lost: err=%v target reads=%d", err, targetReads)
 	}
 }
@@ -1570,7 +1589,23 @@ func TestDeliveryPlanner_StaticRootSameInstanceRouteUsesSelectedRunOwner(t *test
 	intent := plan.DeliveryIntents[0]
 	subscriber := Subscriber{Recipient: intent.Recipient, Path: want.FlowID, handlerNode: intent.Handler.Node(), targetHandler: intent.Handler}
 	root := rootExecutionCoordinate(planner.recipientPolicy.semanticSource, plan.Event.RunID())
-	if !resolvedSelectedRunRootIntentMatchesSubscriber(intent, subscriber, root, want) {
+	admit := func(result RoutePlanDeliveryIntent, candidate Subscriber, coordinate semanticview.RootExecutionCoordinate) bool {
+		projection := publicationTargetOwnerEvidence{source: planner.recipientPolicy.semanticSource}
+		if !coordinate.Valid() {
+			projection.source = nil
+		}
+		proposed := newRoutePlan(plan.Event)
+		proposed.DeliveryIntents = []RoutePlanDeliveryIntent{result, {
+			Recipient: candidate.Recipient, Handler: routedSubscriberTargetHandler(candidate, plan.Event.Type()),
+			nodeSubscribers: []Subscriber{candidate}, Producer: routeIntentProducerOrdinary, Persist: true,
+		}}
+		if err := projection.resolveNodeTargetOwners(&proposed, nil); err != nil {
+			return false
+		}
+		projection.bindNodeCandidates(&proposed)
+		return proposed.ValidatePersistentDeliveries() == nil
+	}
+	if !admit(intent, subscriber, root) {
 		t.Fatal("exact selected-root receipt refused its admitted node and handler")
 	}
 	otherNode := testRootNode(t, "other-node")
@@ -1610,22 +1645,56 @@ func TestDeliveryPlanner_StaticRootSameInstanceRouteUsesSelectedRunOwner(t *test
 		t.Run(test.name, func(t *testing.T) {
 			changed, changedSubscriber, changedRoot := intent, subscriber, root
 			test.change(&changed, &changedSubscriber, &changedRoot)
-			if resolvedSelectedRunRootIntentMatchesSubscriber(changed, changedSubscriber, changedRoot, changed.TargetBlueprint) {
+			if admit(changed, changedSubscriber, changedRoot) {
 				t.Fatal("selected-root exception accepted mismatched authority")
 			}
 		})
 	}
 	changed := intent
 	changed.Recipient = events.MustNodeDeliveryRecipient(otherNode)
-	handler := routedSubscriberTargetHandler(subscriber, plan.Event.Type())
-	if routePlanIntentAuthorizesRoutedSubscriber(changed, subscriber, root, handler) {
+	if admit(changed, subscriber, root) {
 		t.Fatal("outer node-recipient fence was bypassed")
 	}
 	changed = intent
 	changed.Handler = changed.Handler.ForEvent("foreign.event")
-	if routePlanIntentAuthorizesRoutedSubscriber(changed, subscriber, root, handler) {
+	if admit(changed, subscriber, root) {
 		t.Fatal("outer localized-handler fence was bypassed")
 	}
+	t.Run("each unresolved candidate needs its own admitted result", func(t *testing.T) {
+		foreign := subscriber
+		foreign.Path = "foreign"
+		proposed := newRoutePlan(plan.Event)
+		proposed.AddDeliveryIntents(intent)
+		for _, candidate := range []Subscriber{subscriber, foreign} {
+			proposed.AddDeliveryIntents(RoutePlanDeliveryIntent{
+				Recipient: candidate.Recipient, Handler: routedSubscriberTargetHandler(candidate, plan.Event.Type()),
+				nodeSubscribers: []Subscriber{candidate}, Producer: routeIntentProducerOrdinary, Persist: true,
+			})
+		}
+		projection := publicationTargetOwnerEvidence{source: planner.recipientPolicy.semanticSource}
+		if err := projection.resolveNodeTargetOwners(&proposed, nil); err != nil {
+			t.Fatal(err)
+		}
+		projection.bindNodeCandidates(&proposed)
+		if err := proposed.ValidatePersistentDeliveries(); err == nil {
+			t.Fatal("one lawful candidate hid a different unbound instance")
+		}
+		if len(proposed.DeliveryRoutes()) != 1 {
+			t.Fatalf("unresolved candidate became executable: %+v", proposed.DeliveryRoutes())
+		}
+	})
+	t.Run("node descriptions are owned projections", func(t *testing.T) {
+		description := plan.routedRecipients()
+		if len(description) != 1 {
+			t.Fatalf("admitted node readback = %+v", description)
+		}
+		description[0].Path = "foreign"
+		copy := plan.Normalized()
+		copy.DeliveryIntents[0].nodeSubscribers[0].Path = "another"
+		if got := plan.routedRecipients(); len(got) != 1 || got[0].Path == "foreign" || got[0].Path == "another" {
+			t.Fatalf("readback or normalized copy mutated admitted result: %+v", got)
+		}
+	})
 }
 
 func TestDeliveryPlanner_ExactSameInstanceTargetUsesCompiledReceiverMode(t *testing.T) {

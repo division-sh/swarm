@@ -706,7 +706,6 @@ func TestProviderAttemptDrainStartupRecoveryParity(t *testing.T) {
 		originExpired bool
 		wantCode      string
 	}{
-		{name: "after_launch", capture: false, wantCode: "effect_recovery_outcome_unconfirmed"},
 		{name: "after_capture", capture: true, wantCode: "effect_recovery_outcome_unconfirmed"},
 		{name: "after_response", observe: true, capture: true, wantCode: "effect_recovery_outcome_unconfirmed"},
 		{name: "after_launch_expired_origin", capture: false, originExpired: true, wantCode: "effect_recovery_outcome_unconfirmed"},

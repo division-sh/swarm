@@ -75,7 +75,6 @@ func copyCommittedIntents(intents []runtimeengine.EmitIntent) []runtimeengine.Em
 	for index, intent := range intents {
 		copyOf[index] = intent
 		copyOf[index].Event = intent.Event.Clone()
-		copyOf[index].Recipients = append([]string(nil), intent.Recipients...)
 	}
 	return copyOf
 }

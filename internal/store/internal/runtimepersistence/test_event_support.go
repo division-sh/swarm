@@ -9,16 +9,13 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
-	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
-	"github.com/division-sh/swarm/internal/store/eventfixture"
 	"github.com/division-sh/swarm/internal/store/internal/backend/activityjournal"
 	deliveryadapter "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventpersistence"
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres"
 	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/sqlite"
-	"github.com/division-sh/swarm/internal/store/internal/backend/genericschedule"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence"
@@ -231,17 +228,14 @@ func ReadAgentSettledAttemptCountForTest(ctx context.Context, selected any, even
 	if err := validateStandaloneStorageEvent(selected, eventID); err != nil {
 		return 0, err
 	}
-	_, postgres := selected.(*PostgresStore)
-	var count int
-	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		var err error
-		count, err = deliveryadapter.ReadAgentSettledAttemptCountTx(ctx, tx, postgres, eventID, agentID)
-		return err
-	})
-	if err != nil {
-		return 0, err
+	switch store := selected.(type) {
+	case *PostgresStore:
+		return store.deliveryPostgresOwner.ReadAgentSettledAttemptCountForTest(ctx, eventID, agentID)
+	case *SQLiteRuntimeStore:
+		return store.deliverySQLiteOwner.ReadAgentSettledAttemptCountForTest(ctx, eventID, agentID)
+	default:
+		return 0, fmt.Errorf("agent settled attempt count requires the original native owner")
 	}
-	return count, nil
 }
 
 func SetEventChainDepthForTest(ctx context.Context, selected any, eventID string, depth int) error {
@@ -318,33 +312,20 @@ func ReadGlobalEventChronologyForTest(ctx context.Context, selected any) ([]Glob
 	}
 }
 
-type ScatterGatherPhysicalCounts struct {
-	Entities, Timers, FanOutIntents, DomainEvents int
-}
+type ScatterGatherPhysicalCounts = pipelinepersistence.ScatterGatherPhysicalCounts
 
 func ReadScatterGatherPhysicalCountsForTest(ctx context.Context, selected any, runID string) (ScatterGatherPhysicalCounts, error) {
 	if err := validateChannelObservationOwner(selected); err != nil {
 		return ScatterGatherPhysicalCounts{}, err
 	}
-	var out ScatterGatherPhysicalCounts
-	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		var err error
-		if out.Entities, err = pipelinepersistence.CountWorkflowFieldRowsForRun(ctx, tx, runID); err != nil {
-			return err
-		}
-		if out.Timers, err = genericschedule.CountTimerRowsForRun(ctx, tx, runID); err != nil {
-			return err
-		}
-		if out.FanOutIntents, err = pipelinepersistence.CountFanOutIntentsForRun(ctx, tx, runID); err != nil {
-			return err
-		}
-		out.DomainEvents, err = eventrecord.CountScatterGatherDomainEvents(ctx, tx, runID)
-		return err
-	})
-	if err != nil {
-		return ScatterGatherPhysicalCounts{}, err
+	switch store := selected.(type) {
+	case *PostgresStore:
+		return store.pipelinePostgresOwner.ReadScatterGatherPhysicalCountsForTest(ctx, runID)
+	case *SQLiteRuntimeStore:
+		return store.pipelineSQLiteOwner.ReadScatterGatherPhysicalCountsForTest(ctx, runID)
+	default:
+		return ScatterGatherPhysicalCounts{}, fmt.Errorf("scatter/gather counts require the original native owner")
 	}
-	return out, nil
 }
 
 func CountRunEventNameStorageForTest(ctx context.Context, selected any, run, name string) (int, error) {
@@ -421,30 +402,7 @@ func ReadCausalEventStorageSinceForTest(ctx context.Context, selected any, since
 
 // Record-bearing fixture evidence uses the publication fixture's closed codec.
 // Callers receive detached facts, never another record interpreter.
-type SemanticEventFixtureEvidence struct {
-	Record                      eventrecord.Record
-	RecordFound                 bool
-	RevisionCount               int
-	PipelineReceiptCount        int
-	PipelineReceiptOutcome      string
-	PipelineReceiptReason       string
-	PipelineReceiptFailure      *runtimefailures.Envelope
-	CommittedScope              string
-	CommittedScopeFound         bool
-	RunStatus                   string
-	RunEventCount               int
-	SettledDeliveryAttemptCount int
-	DeliveryProjections         map[string][18]string
-	DeliveryStatuses            map[string]string
-	NonPlatformReceiptCount     int
-}
-
-func loadCanonicalFixtureRecordTx(ctx context.Context, tx *sql.Tx, postgres bool, eventID string) (eventrecord.Record, bool, error) {
-	if postgres {
-		return eventrecordpostgres.Load(ctx, tx, eventID)
-	}
-	return eventrecordsqlite.Load(ctx, tx, eventID)
-}
+type SemanticEventFixtureEvidence = eventpersistence.SemanticEventFixtureEvidence
 
 // LoadCanonicalEventRecordForTest requires presence; storage reading and
 // complete decoding belong only to ReadCanonicalEventRecordForTest.
@@ -554,20 +512,17 @@ func InsertRevisionedExistingRunRootEventForTest(ctx context.Context, selected a
 	envelope events.EventEnvelope, createdAt time.Time,
 ) (events.Event, error) {
 	var rejected events.Event
-	dialect, err := eventFixtureDialectForTest(selected)
-	if err != nil {
+	if _, err := eventFixtureDialectForTest(selected); err != nil {
 		return rejected, err
 	}
-	var event events.Event
-	err = runEventFixtureMutationForTest(ctx, selected, func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
-		var err error
-		event, err = eventfixture.ExistingRunRoot(txctx, attempt, dialect, eventID, runID, eventType, producer, payload, envelope, createdAt)
-		return err
-	})
-	if err != nil {
-		return rejected, err
+	switch owner := selected.(type) {
+	case *PostgresStore:
+		return owner.eventPostgresOwner.InsertRevisionedExistingRunRootForTest(ctx, eventID, runID, eventType, producer, payload, envelope, createdAt)
+	case *SQLiteRuntimeStore:
+		return owner.eventSQLiteOwner.InsertRevisionedExistingRunRootForTest(ctx, eventID, runID, eventType, producer, payload, envelope, createdAt)
+	default:
+		return rejected, fmt.Errorf("event fixture store %T is unsupported", selected)
 	}
-	return event, nil
 }
 
 func eventFixtureDialectForTest(selected any) (authoractivityfixture.Dialect, error) {
@@ -588,43 +543,6 @@ func eventFixtureDialectForTest(selected any) (authoractivityfixture.Dialect, er
 		}
 	}
 	return "", fmt.Errorf("event fixture selected store %T is not initialized", selected)
-}
-
-func runEventFixtureMutationForTest(ctx context.Context, selected any, write func(context.Context, *mutationprotocol.Attempt) error) error {
-	apply := func(txctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
-		return struct{}{}, write(txctx, attempt)
-	}
-	switch store := selected.(type) {
-	case *PostgresStore:
-		if store == nil || store.backend == nil {
-			return fmt.Errorf("postgres event fixture store is required")
-		}
-		return mutationprotocol.RunPostgres(ctx, store.backend, mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, store.runLifecycleCandidates, apply).Err()
-	case *SQLiteRuntimeStore:
-		if store == nil || store.backend == nil {
-			return fmt.Errorf("sqlite event fixture store is required")
-		}
-		return mutationprotocol.RunSQLite(ctx, store.backend, "canonical event fixture", mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, store.runLifecycleCandidates, apply).Err()
-	default:
-		return fmt.Errorf("event fixture store %T is unsupported", selected)
-	}
-}
-
-func runUnrevisionedEventFixtureTransactionForTest(ctx context.Context, selected any, write func(context.Context, *sql.Tx) error) error {
-	switch store := selected.(type) {
-	case *PostgresStore:
-		if store == nil || store.backend == nil {
-			return fmt.Errorf("postgres event fixture store is required")
-		}
-		return store.backend.RunTransaction(ctx, write)
-	case *SQLiteRuntimeStore:
-		if store == nil || store.backend == nil {
-			return fmt.Errorf("sqlite event fixture store is required")
-		}
-		return store.backend.RunTransaction(ctx, "unrevisioned event fixture", write)
-	default:
-		return fmt.Errorf("event fixture store %T is unsupported", selected)
-	}
 }
 
 func commitSelectedSemanticEventFixtureForTest(ctx context.Context, selectedStore any, admitted events.AdmittedEvent, settlement events.RouteSettlement, routes []events.DeliveryRoute, scope runtimepipelineobligation.CommittedScope, pipelineDisposition *runtimepipelineobligation.Disposition, revisioned, captureForkFrontier bool) (bool, error) {

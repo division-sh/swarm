@@ -325,6 +325,7 @@ const fanOutReadinessReasonSQL = `CASE
 	WHEN i.status<>'open' THEN 'intent_' || i.status
 	WHEN i.claim_owner IS NOT NULL AND (i.lease_expires_at IS NULL OR i.lease_expires_at>$1) THEN 'claim_in_flight'
 	WHEN i.retry_ready_at>$1 THEN 'retry_wait'
+	WHEN i.read_retry_not_before>$1 THEN 'retry_wait'
 	ELSE 'eligible' END`
 
 // Closed intents still own armed barriers. Retain their existing serving key

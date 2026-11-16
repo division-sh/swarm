@@ -6,18 +6,26 @@ import (
 	"fmt"
 )
 
-func (s *DecisionPostgresOwner) CorruptHumanTaskRequesterForTest(ctx context.Context, runID, cardID, coordinate, hostile string) (func(context.Context) error, error) {
+type HumanTaskRequesterRestoration struct {
+	restore func(context.Context) error
+}
+
+func (r *HumanTaskRequesterRestoration) Restore(ctx context.Context) error {
+	return r.restore(ctx)
+}
+
+func (s *DecisionPostgresOwner) CorruptHumanTaskRequesterForTest(ctx context.Context, runID, cardID, coordinate, hostile string) (*HumanTaskRequesterRestoration, error) {
 	return corruptHumanTaskRequesterForTest(ctx, s.backend.RunTransaction, true, runID, cardID, coordinate, hostile)
 }
 
-func (s *DecisionSQLiteOwner) CorruptHumanTaskRequesterForTest(ctx context.Context, runID, cardID, coordinate, hostile string) (func(context.Context) error, error) {
+func (s *DecisionSQLiteOwner) CorruptHumanTaskRequesterForTest(ctx context.Context, runID, cardID, coordinate, hostile string) (*HumanTaskRequesterRestoration, error) {
 	run := func(ctx context.Context, apply func(context.Context, *sql.Tx) error) error {
 		return s.backend.RunTransaction(ctx, "mailbox fixture", apply)
 	}
 	return corruptHumanTaskRequesterForTest(ctx, run, false, runID, cardID, coordinate, hostile)
 }
 
-func corruptHumanTaskRequesterForTest(ctx context.Context, run func(context.Context, func(context.Context, *sql.Tx) error) error, postgres bool, runID, cardID, coordinate, hostile string) (func(context.Context) error, error) {
+func corruptHumanTaskRequesterForTest(ctx context.Context, run func(context.Context, func(context.Context, *sql.Tx) error) error, postgres bool, runID, cardID, coordinate, hostile string) (*HumanTaskRequesterRestoration, error) {
 	switch coordinate {
 	case "requester_flow_id", "requester_flow_instance", "requester_entity_id":
 	default:
@@ -66,7 +74,7 @@ func corruptHumanTaskRequesterForTest(ctx context.Context, run func(context.Cont
 	if err != nil {
 		return nil, err
 	}
-	return func(ctx context.Context) error {
+	return &HumanTaskRequesterRestoration{restore: func(ctx context.Context) error {
 		return run(ctx, func(ctx context.Context, tx *sql.Tx) error {
 			current, err := read(ctx, tx)
 			if err != nil {
@@ -77,7 +85,7 @@ func corruptHumanTaskRequesterForTest(ctx context.Context, run func(context.Cont
 			}
 			return write(ctx, tx, original)
 		})
-	}, nil
+	}}, nil
 }
 
 func requireMailboxRequesterFixtureRow(result sql.Result) error {

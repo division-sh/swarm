@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"strings"
 	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
@@ -310,10 +309,6 @@ func inspectVerifyPublicIngress(ctx context.Context, cfg RuntimeConfigLoadResult
 		verifyDeploymentObservation(ctx, result, "public_ingress_admission", "internal/cliapp.ResolveServePublicIngressMode", subject, failures.ClassSchemaInvalid, func(context.Context) error { return err })
 		return
 	}
-	if mode == publicingress.ModeNativeTLS {
-		intent.PublicWebhookBaseURL = "https://" + strings.TrimSpace(cfg.Config.Serve.PublicWebhook.Hostname)
-		intent.PublicWebhookListen = ":443"
-	}
 	if !enabled {
 		result.BootReport.Observations = append(result.BootReport.Observations, bootverify.AdmissionObservation{
 			CheckID: "public_ingress_admission", Owner: "internal/cliapp.ResolveServePublicIngressMode", Subject: subject, Class: bootverify.AdmissionDeploymentObservation,
@@ -322,6 +317,15 @@ func inspectVerifyPublicIngress(ctx context.Context, cfg RuntimeConfigLoadResult
 		return
 	}
 	verifyDeploymentObservation(ctx, result, "public_ingress_admission", "internal/runtime/publicingress.ValidateConfiguration", subject, failures.ClassSchemaInvalid, func(context.Context) error {
+		if mode == publicingress.ModeNativeTLS {
+			if err := ValidateServePublicWebhookPort(cfg.Config, ChannelPackLoad{}); err != nil {
+				return err
+			}
+			intent.PublicWebhookBaseURL, intent.PublicWebhookListen, err = publicingress.NativeTLSAddresses(cfg.Config.Serve.PublicWebhook)
+			if err != nil {
+				return err
+			}
+		}
 		return publicingress.ValidateConfiguration(mode, intent.PublicWebhookBaseURL, intent.PublicWebhookListen)
 	})
 }

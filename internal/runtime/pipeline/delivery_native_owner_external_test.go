@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/agentintent"
+	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
@@ -29,7 +30,10 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/replycontext"
+	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	runtimebustest "github.com/division-sh/swarm/tests/support/runtime/bus/bustest"
@@ -105,6 +109,31 @@ func pipelineDeliveryNativeFixture(t *testing.T, backend string, source semantic
 	return pipelineDeliveryNativeFixtureFromSelected(t, source, base, selected, reopen, probe)
 }
 
+func pipelineDeliveryNativeUpgradeFixture(t *testing.T, backend string, source semanticview.Source) *pipeline.PipelineDeliveryNativeFixtureForTest {
+	t.Helper()
+	fixture := pipelineDeliveryNativeFixture(t, backend, source)
+	original, err := agentfixture.ProcessCapability(t, fixture.Context, fixture.Store.(agentfixture.Store))
+	if err != nil {
+		t.Fatal(err)
+	}
+	root, found, err := correlation.RootAdmissionFromContext(fixture.Context)
+	if err != nil || !found {
+		t.Fatalf("original upgrade source root is unavailable: found=%t err=%v", found, err)
+	}
+	coordinate, err := agenttopology.NewSourceCoordinate(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{coordinate}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := original.InstallCompleteSourceSet(fixture.Context, agenttopology.SourceSetCommitRequest{OperationID: uuid.NewString(), Plan: plan}); err != nil {
+		t.Fatal(err)
+	}
+	return fixture
+}
+
 func pipelineDeliveryNativeFixtureFromSelected(t *testing.T, source semanticview.Source, base pipeline.WorkflowHandlerNativeFixtureForTest, selected timerReplaySelectedStore, reopen func() timerReplaySelectedStore, probe *storetest.TransactionCollector) *pipeline.PipelineDeliveryNativeFixtureForTest {
 	t.Helper()
 	original, err := agentfixture.ProcessCapability(t, base.Context, selected.(agentfixture.Store))
@@ -121,6 +150,57 @@ func pipelineDeliveryNativeFixtureFromSelected(t *testing.T, source semanticview
 		t.Fatal(err)
 	}
 	fixture := &pipeline.PipelineDeliveryNativeFixtureForTest{WorkflowHandlerNativeFixtureForTest: base, Store: selected, Authority: authority}
+	fixture.UpgradeSource = func(ctx context.Context, candidate semanticview.Source) error {
+		bundle, found := semanticview.Bundle(candidate)
+		if !found || bundle == nil {
+			return fmt.Errorf("native upgrade fixture requires its compiled candidate")
+		}
+		scope, found := authoractivity.ScopeFromContext(ctx)
+		if !found {
+			return fmt.Errorf("native upgrade fixture lacks its original author scope")
+		}
+		process, err := startupownership.WithProcessMutationAuthority(authoractivity.WithScope(t.Context(), scope), original)
+		if err != nil {
+			return err
+		}
+		sourceartifactfixture.RequireArtifact(t, process, selected.(sourceartifactfixture.Writer), bundle.SourceArtifact)
+		rooted, err := bundle.RootedSource()
+		if err != nil {
+			return err
+		}
+		coordinate, err := agenttopology.NewSourceCoordinate(rooted.Admission())
+		if err != nil {
+			return err
+		}
+		next, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{coordinate}, nil)
+		if err != nil {
+			return err
+		}
+		reader := selected.(runbundle.UpgradeReader)
+		plan, err := runbundle.AdmitPinnedSources(process, reader, candidate, func(_ context.Context, ref sourceartifact.RootAdmissionReference) (semanticview.Source, error) {
+			prior, _ := semanticview.Bundle(source)
+			root, err := prior.RootedSource()
+			if err != nil {
+				return nil, err
+			}
+			if root.Admission().Reference() != ref {
+				return nil, fmt.Errorf("native upgrade fixture lacks exact predecessor")
+			}
+			return source, nil
+		})
+		if err != nil {
+			return err
+		}
+		head, exists, err := original.CurrentSourceSet(process)
+		if err != nil {
+			return err
+		}
+		if !exists {
+			return fmt.Errorf("native upgrade fixture lacks its current source set")
+		}
+		_, err = original.RestoreSourceSet(process, agenttopology.SourceSetCommitRequest{OperationID: uuid.NewString(), ExpectedRevision: head.Revision, Plan: next, BundleUpgrade: plan})
+		return err
+	}
 	fixture.HumanTasks = selected.(decisioncard.HumanTaskStore)
 	fixture.HumanExpiry = selected.(pipeline.HumanTaskExpiry)
 	fixture.CreateHumanReply = func(ctx context.Context, run, request, reply string) error {

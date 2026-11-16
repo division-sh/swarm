@@ -2,8 +2,7 @@ package runtimepersistence
 
 import (
 	"context"
-	"database/sql"
-	"strings"
+	"fmt"
 
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -16,21 +15,14 @@ func ReadRuntimeLogRunSnapshotForTest(ctx context.Context, selected any, runID s
 	if err := validateSelectedForkStorageIdentity(runID); err != nil {
 		return runlifecycle.Snapshot{}, err
 	}
-	var snapshot runlifecycle.Snapshot
-	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		var err error
-		switch owner := selected.(type) {
-		case *PostgresStore:
-			snapshot, err = owner.runLifecyclePostgresOwner.LoadSnapshotTx(ctx, tx, runID, false)
-		case *SQLiteRuntimeStore:
-			snapshot, err = owner.runLifecycleSQLiteOwner.LoadSnapshotTx(ctx, tx, runID)
-		}
-		return err
-	})
-	if err != nil {
-		return runlifecycle.Snapshot{}, err
+	switch owner := selected.(type) {
+	case *PostgresStore:
+		return owner.runLifecyclePostgresOwner.ReadRuntimeLogRunSnapshotForTest(ctx, runID)
+	case *SQLiteRuntimeStore:
+		return owner.runLifecycleSQLiteOwner.ReadRuntimeLogRunSnapshotForTest(ctx, runID)
+	default:
+		return runlifecycle.Snapshot{}, fmt.Errorf("runtime log snapshot requires an original native read owner, got %T", selected)
 	}
-	return snapshot, nil
 }
 
 func RemoveRuntimeLogFixtureSourceArtifactForTest(ctx context.Context, selected any, hash string) (int64, error) {
@@ -40,19 +32,14 @@ func RemoveRuntimeLogFixtureSourceArtifactForTest(ctx context.Context, selected 
 	if err := runtimeidentity.ValidateCanonicalBundleHash(hash); err != nil {
 		return 0, err
 	}
-	var removed int64
-	err := runUnrevisionedEventFixtureTransactionForTest(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		result, err := tx.ExecContext(ctx, `DELETE FROM source_artifacts WHERE bundle_hash=$1`, hash)
-		if err != nil {
-			return err
-		}
-		removed, err = result.RowsAffected()
-		return err
-	})
-	if err != nil {
-		return 0, err
+	switch owner := selected.(type) {
+	case *PostgresStore:
+		return owner.sourceArtifactOwner.RemoveRuntimeLogFixtureSourceArtifactForTest(ctx, hash)
+	case *SQLiteRuntimeStore:
+		return owner.sourceArtifactOwner.RemoveRuntimeLogFixtureSourceArtifactForTest(ctx, hash)
+	default:
+		return 0, fmt.Errorf("runtime log source-artifact fixture requires an original native owner, got %T", selected)
 	}
-	return removed, nil
 }
 
 // The fixed AFTER INSERT cut aborts the original diagnostic transaction after
@@ -64,27 +51,12 @@ func SetRuntimeLogFixtureAppendFaultForTest(ctx context.Context, selected any, r
 	if err := validateSelectedForkStorageIdentity(runID); err != nil {
 		return err
 	}
-	_, postgres := selected.(*PostgresStore)
-	literal := "'" + strings.ReplaceAll(runID, "'", "''") + "'"
-	statements := []string{`DROP TRIGGER runtime_log_exact_append_cut`}
-	if postgres {
-		statements = []string{`DROP TRIGGER runtime_log_exact_append_cut ON events`, `DROP FUNCTION runtime_log_exact_append_cut()`}
+	switch owner := selected.(type) {
+	case *PostgresStore:
+		return owner.eventPostgresOwner.SetRuntimeLogFixtureAppendFaultForTest(ctx, runID, enabled)
+	case *SQLiteRuntimeStore:
+		return owner.eventSQLiteOwner.SetRuntimeLogFixtureAppendFaultForTest(ctx, runID, enabled)
+	default:
+		return fmt.Errorf("runtime log append fault requires an original native owner, got %T", selected)
 	}
-	if enabled {
-		statements = []string{`CREATE TRIGGER runtime_log_exact_append_cut AFTER INSERT ON events WHEN NEW.event_name='platform.runtime_log' AND NEW.run_id=` + literal + ` BEGIN SELECT RAISE(ABORT,'runtime_log_exact_append_cut'); END`}
-		if postgres {
-			statements = []string{
-				`CREATE FUNCTION runtime_log_exact_append_cut() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.event_name='platform.runtime_log' AND NEW.run_id=` + literal + `::uuid THEN RAISE EXCEPTION 'runtime_log_exact_append_cut'; END IF; RETURN NEW; END $$`,
-				`CREATE TRIGGER runtime_log_exact_append_cut AFTER INSERT ON events FOR EACH ROW EXECUTE FUNCTION runtime_log_exact_append_cut()`,
-			}
-		}
-	}
-	return runUnrevisionedEventFixtureTransactionForTest(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		for _, statement := range statements {
-			if _, err := tx.ExecContext(ctx, statement); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
 }

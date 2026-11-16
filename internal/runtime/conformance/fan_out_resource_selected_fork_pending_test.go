@@ -3,9 +3,12 @@ package conformance
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -13,6 +16,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/operatorread"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
@@ -30,6 +34,7 @@ import (
 // defers only that normal receiver claim using its real persisted snapshot.
 type selectedDeploymentClaimGate struct {
 	runtimedelivery.Store
+	allow    func(events.Event) bool
 	held     atomic.Bool
 	deferred atomic.Int64
 	kind     runtimedelivery.ExecutionAuthorityKind
@@ -151,7 +156,7 @@ func (g *selectedDeploymentClaimGate) ClaimDelivery(ctx context.Context, authori
 	if kind == "" {
 		kind = runtimedelivery.ExecutionAuthorityNormalRuntime
 	}
-	if !g.held.Load() || authority.Kind() != kind || event.Type() != selectedDeploymentEvent {
+	if !g.held.Load() || authority.Kind() != kind || event.Type() != selectedDeploymentEvent || g.allow != nil && g.allow(event) {
 		return g.Store.ClaimDelivery(ctx, authority, event, route)
 	}
 	id, err := runtimedelivery.DeliveryID(event.ID(), route)
@@ -179,6 +184,9 @@ func (g *selectedDeploymentClaimGate) ClaimDelivery(ctx context.Context, authori
 // publication-only snapshot is R3a and must not satisfy this proof. The child
 // must preserve the old pending delivery while feeding only the changed pin.
 func TestDeploymentSourceFixedTPendingReceiverAndChangedPinBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend+"/sixty_of_hundred", func(t *testing.T) { proveSixtyOfHundredSelectedFork(t, backend) })
+	}
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, changedPin := range []bool{false, true} {
 			name := backend + "/same_pin"
@@ -394,6 +402,501 @@ func TestDeploymentSourceFixedTPendingReceiverAndChangedPinBothStores(t *testing
 				}
 			})
 		}
+	}
+}
+
+func proveSixtyOfHundredSelectedFork(t *testing.T, backend string) {
+	t.Helper()
+	gate := &selectedDeploymentClaimGate{entered: make(chan string, 128), allow: func(event events.Event) bool {
+		var payload struct {
+			AccountID string `json:"account_id"`
+		}
+		if err := json.Unmarshal(event.Payload(), &payload); err != nil {
+			return false
+		}
+		return payload.AccountID < "item-060"
+	}}
+	gate.held.Store(true)
+	t.Cleanup(func() { gate.held.Store(false) })
+	f := selectedDeploymentResourceFixtureWithDelivery(t, backend, "root", nil, func(store runtimedelivery.Store) runtimedelivery.Store { gate.Store = store; return gate }, nil)
+	var rows bytes.Buffer
+	for i := 0; i < 100; i++ {
+		fmt.Fprintf(&rows, "{\"account_id\":\"item-%03d\",\"document\":{\"ordinal\":%d}}\n", i, i)
+	}
+	ref, err := durabledata.ParseDeclarationRef(".", selectedDeploymentEvent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runID := createDeploymentResourceFixtureRun(t, f, durabledata.RunCreationDataEnvelope{Imports: []durabledata.FusedImport{{SourceInvocationID: uuid.NewString(), Declaration: ref, ExpectedHead: durabledata.AbsentHead(), InputFormat: "jsonl", Input: rows.Bytes()}}})
+	server := f.operatorServer(t)
+	deadline := time.Now().Add(20 * time.Second)
+	var atCut operatorread.OperatorEventListResult
+	for {
+		atCut = selectedDeploymentPublicEvents(t, f.ctx, server, runID)
+		delivered, pending := 0, 0
+		for _, event := range atCut.Events {
+			if len(event.Deliveries) != 1 {
+				continue
+			}
+			switch event.Deliveries[0].Status {
+			case "delivered":
+				delivered++
+			case "pending":
+				pending++
+			}
+		}
+		if len(atCut.Events) == 100 && delivered == 60 && pending == 40 {
+			break
+		}
+		if !time.Now().Before(deadline) {
+			t.Fatalf("real 60/100 cut did not form: issued=%d delivered=%d pending=%d", len(atCut.Events), delivered, pending)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if atCut.NextCursor != "" {
+		t.Fatal("hundred-item cut omitted retained rows")
+	}
+	planner := f.selected.(interface {
+		PlanRunFork(context.Context, runfork.RunForkPlanRequest) (runfork.RunForkPlan, error)
+	})
+	pauseDeploymentFixtureRun(t, f, runID)
+	pausePlan, err := planner.PlanRunFork(f.ctx, runfork.RunForkPlanRequest{SourceRunID: runID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner, _ := deploymentForkOwner(t, f)
+	forkServer := deploymentForkServer(t, f, owner)
+	waitSelectedDeploymentPausedPipeline(t, f, runID, pausePlan.ForkPoint.Revision)
+	// The snapshot precedes the final plan read. A revision that lands between
+	// them has no classified facts and fails closed rather than moving the cut.
+	standing := selectedDeploymentPauseRevisionFacts(t, f.ctx, f.selected, runID)
+	plan, err := planner.PlanRunFork(f.ctx, runfork.RunForkPlanRequest{SourceRunID: runID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := selectedDeploymentPauseRevisionProvenance(standing, pausePlan.ForkPoint.Revision, plan.ForkPoint.Revision, atCut); err != nil {
+		t.Fatal(err)
+	}
+	if err := runfork.ValidateFanOutPendingReplayAdmission(plan); err != nil {
+		t.Fatal(err)
+	}
+	var owed int
+	for _, obligation := range plan.FanOutObligations {
+		owed += len(obligation.PendingDeployment)
+	}
+	if owed != 40 {
+		t.Fatalf("fixed cut owes %d recipients, want40", owed)
+	}
+	params := map[string]any{"source_run_id": runID, "bundle_hash": f.runtime.sourceArtifactFact.BundleHash(), "idempotency_key": uuid.NewString()}
+	result, rpcErr := deploymentForkRPC(t, f.ctx, forkServer, params)
+	version := selectedDeploymentVersion(t, f, rows.Bytes())
+	if len(rpcErr) != 0 || result.ForkRunID == "" || result.ForkRevision != plan.ForkPoint.Revision || len(result.DataPins) != 1 || result.DataPins[0].VersionID != version.VersionID {
+		t.Fatalf("60/100 fork lost exact native cut/version: %+v expected_revision=%d expected_version=%s error=%s", result, plan.ForkPoint.Revision, version.VersionID, rpcErr)
+	}
+	gate.held.Store(false)
+	f.runtime.bus.SignalDeliveryContinuations()
+	waitNotifyAllChildrenRuntimeWithin(t, f.runtime, result.ForkRunID, 3*time.Minute)
+	child := selectedDeploymentPublicEvents(t, f.ctx, server, result.ForkRunID)
+	if child.NextCursor != "" || len(child.Events) != 40 {
+		t.Fatalf("60/100 replayed settled prefix or lost suffix: %+v", child)
+	}
+	seen := map[string]bool{}
+	for _, event := range child.Events {
+		key, ok := event.Payload["account_id"].(string)
+		if !ok || key < "item-060" || key > "item-099" || seen[key] || len(event.Deliveries) != 1 || event.Deliveries[0].Status != "delivered" || len(event.DeadLetters) != 0 {
+			t.Fatalf("wrong continued suffix row: %+v", event)
+		}
+		seen[key] = true
+	}
+	summary, err := f.selected.(interface {
+		FanOutRunSummary(context.Context, string, time.Time) (fanoutobligation.RunSummary, error)
+	}).FanOutRunSummary(f.ctx, result.ForkRunID, time.Now().UTC())
+	if err != nil || summary.Cardinality != 100 || summary.Cursor != 100 || summary.Settled != 100 || summary.Unsettled != 0 || summary.Owed != 0 {
+		t.Fatalf("60 retained +40 executed did not settle all100: %+v %v", summary, err)
+	}
+	if after := selectedDeploymentPublicEvents(t, f.ctx, server, runID); !reflect.DeepEqual(atCut, after) {
+		t.Fatal("fork continuation reexecuted or changed its paused source")
+	}
+	before := selectedDeploymentForkOperationSnapshot(t, f, result.ForkRunID)
+	replay, rpcErr := deploymentForkRPC(t, f.ctx, forkServer, params)
+	if len(rpcErr) != 0 || !reflect.DeepEqual(result, replay) || before != selectedDeploymentForkOperationSnapshot(t, f, result.ForkRunID) {
+		t.Fatalf("60/100 exact operation replay mutated evidence: %+v %s", replay, rpcErr)
+	}
+}
+
+type selectedDeploymentRevisionFact struct {
+	family, key string
+	present     bool
+	value       map[string]any
+}
+
+func selectedDeploymentEventCreatingRevisions(facts map[int64][]selectedDeploymentRevisionFact) (map[string]int64, error) {
+	created := make(map[string]int64)
+	first := make(map[string]selectedDeploymentRevisionFact)
+	for revision, recorded := range facts {
+		for _, fact := range recorded {
+			if fact.family != "events" {
+				continue
+			}
+			if previous, found := created[fact.key]; !found || revision < previous {
+				created[fact.key], first[fact.key] = revision, fact
+			}
+		}
+	}
+	for eventID, fact := range first {
+		if created[eventID] < 1 || eventID == "" || !fact.present || fact.value["event_id"] != eventID {
+			return nil, fmt.Errorf("event %q has invalid creating revision %d: %+v", eventID, created[eventID], fact)
+		}
+	}
+	return created, nil
+}
+
+// Recovery claiming checks busy ownership before paused eligibility. It can
+// transiently acquire authority, so an ineligible result must not hide cleanup.
+func selectedDeploymentOnlyProbeError(err, want error) bool {
+	if err == want {
+		return true
+	}
+	switch wrapped := err.(type) {
+	case interface{ Unwrap() []error }:
+		children := wrapped.Unwrap()
+		if len(children) == 0 {
+			return false
+		}
+		for _, child := range children {
+			if !selectedDeploymentOnlyProbeError(child, want) {
+				return false
+			}
+		}
+		return true
+	case interface{ Unwrap() error }:
+		return selectedDeploymentOnlyProbeError(wrapped.Unwrap(), want)
+	default:
+		return false
+	}
+}
+
+func waitSelectedDeploymentPausedPipeline(t *testing.T, f *deploymentResourceFixture, runID string, paused int64) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(f.ctx, 30*time.Second)
+	defer cancel()
+	created, err := selectedDeploymentEventCreatingRevisions(selectedDeploymentPauseRevisionFacts(t, ctx, f.selected, runID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for eventID, revision := range created {
+		if revision > paused {
+			delete(created, eventID)
+		}
+	}
+	if len(created) == 0 {
+		t.Fatal("paused source has no revisioned events to observe")
+	}
+	owner := f.selected.(interface {
+		PipelineObligations() runtimepipelineobligation.Store
+	}).PipelineObligations()
+	for {
+		state, err := storetest.ReadRunStopStorage(ctx, f.selected, runID)
+		if err != nil || state.Status != "paused" || state.Control != "paused" {
+			t.Fatalf("pipeline wait requires the exact paused source/control: %+v error=%v", state, err)
+		}
+		var busy []string
+		for eventID := range created {
+			_, err := storetest.ReadExactPipelineReceiptOutcomeReason(ctx, f.selected, eventID)
+			if err == nil {
+				continue
+			}
+			if !selectedDeploymentOnlyProbeError(err, sql.ErrNoRows) {
+				t.Fatalf("read paused event %s pipeline receipt: %v", eventID, err)
+			}
+			work, err := owner.ClaimEvent(ctx, eventID, runtimepipelineobligation.PurposeRecovery)
+			switch {
+			case err == nil:
+				releaseErr := owner.Release(context.WithoutCancel(ctx), work.Claim)
+				t.Fatalf("paused event %s unexpectedly admitted pipeline work; release=%v", eventID, releaseErr)
+			case selectedDeploymentOnlyProbeError(err, runtimepipelineobligation.ErrBusy):
+				busy = append(busy, eventID)
+			case selectedDeploymentOnlyProbeError(err, runtimepipelineobligation.ErrIneligible):
+				// Pause-held, unclaimed work stays pending; do not dispatch it.
+			default:
+				t.Fatalf("observe paused event %s pipeline claim: %v", eventID, err)
+			}
+		}
+		if len(busy) == 0 {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("paused source pipeline work did not settle or park: busy=%v error=%v", busy, ctx.Err())
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+}
+
+func selectedDeploymentPauseRevisionFacts(t *testing.T, ctx context.Context, selected any, runID string) map[int64][]selectedDeploymentRevisionFact {
+	t.Helper()
+	snapshot, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, selected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := storetest.DecodeSelectedForkSnapshotRows(snapshot["run_fork_fact_revisions"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	readText := func(row map[string]storetest.SelectedForkSnapshotCell, column string) string {
+		t.Helper()
+		cell, ok := row[column]
+		if !ok {
+			t.Fatalf("revision fact lacks %s", column)
+		}
+		value, err := cell.Text()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return value
+	}
+	facts := make(map[int64][]selectedDeploymentRevisionFact)
+	for _, row := range rows {
+		if readText(row, "run_id") != runID {
+			continue
+		}
+		var revision int64
+		if err := json.Unmarshal(row["revision"].Value, &revision); err != nil {
+			t.Fatal(err)
+		}
+		present, err := selectedDeploymentPresentPhysical(row["present"])
+		if err != nil {
+			t.Fatal(err)
+		}
+		var value map[string]any
+		if err := json.Unmarshal([]byte(readText(row, "fact")), &value); err != nil {
+			t.Fatalf("revision %d has unreadable fact kind: %v", revision, err)
+		}
+		facts[revision] = append(facts[revision], selectedDeploymentRevisionFact{
+			family: readText(row, "family"), key: readText(row, "fact_key"), present: present, value: value,
+		})
+	}
+	return facts
+}
+
+func selectedDeploymentPresentPhysical(cell storetest.SelectedForkSnapshotCell) (bool, error) {
+	switch cell.Type {
+	case "bool":
+		var present bool
+		if err := json.Unmarshal(cell.Value, &present); err != nil {
+			return false, err
+		}
+		return present, nil
+	case "int64":
+		var present int64
+		if err := json.Unmarshal(cell.Value, &present); err != nil {
+			return false, err
+		}
+		if present != 0 && present != 1 {
+			return false, fmt.Errorf("physical present value %d is not 0 or 1", present)
+		}
+		return present == 1, nil
+	default:
+		return false, fmt.Errorf("physical present has unsupported type %q", cell.Type)
+	}
+}
+
+func TestSelectedDeploymentPresentPhysical(t *testing.T) {
+	for _, test := range []struct {
+		name, physicalType, value string
+		want                      bool
+		wantError                 bool
+	}{
+		{name: "bool_true", physicalType: "bool", value: "true", want: true},
+		{name: "bool_false", physicalType: "bool", value: "false"},
+		{name: "sqlite_true", physicalType: "int64", value: "1", want: true},
+		{name: "sqlite_false", physicalType: "int64", value: "0"},
+		{name: "non_boolean_integer", physicalType: "int64", value: "2", wantError: true},
+		{name: "wrong_physical_type", physicalType: "string", value: `"1"`, wantError: true},
+		{name: "wrong_boolean_value", physicalType: "bool", value: "1", wantError: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := selectedDeploymentPresentPhysical(storetest.SelectedForkSnapshotCell{
+				Column: "present", Type: test.physicalType, Value: json.RawMessage(test.value),
+			})
+			if (err != nil) != test.wantError || (err == nil && got != test.want) {
+				t.Fatalf("physical present = %t, %v, want %t, error=%t", got, err, test.want, test.wantError)
+			}
+		})
+	}
+}
+
+func selectedDeploymentPauseRevisionProvenance(facts map[int64][]selectedDeploymentRevisionFact, paused, planned int64, cut operatorread.OperatorEventListResult) error {
+	if planned < paused {
+		return fmt.Errorf("paused source revision regressed: pause=%d plan=%d", paused, planned)
+	}
+	created, err := selectedDeploymentEventCreatingRevisions(facts)
+	if err != nil {
+		return err
+	}
+	eventsAtCut := make(map[string]operatorread.OperatorEventFull, len(cut.Events))
+	deliveriesAtCut := make(map[string]string, len(cut.Events))
+	for _, event := range cut.Events {
+		if len(event.Deliveries) != 1 {
+			return fmt.Errorf("issued event %s lost its sole receiver", event.EventID)
+		}
+		eventsAtCut[event.EventID] = event
+		deliveriesAtCut[event.Deliveries[0].DeliveryID] = event.EventID
+	}
+	priorFacts := map[string]selectedDeploymentRevisionFact{}
+	knownFeeds := map[string]bool{}
+	for revision := int64(1); revision <= paused; revision++ {
+		recorded := facts[revision]
+		for _, fact := range recorded {
+			priorFacts[fact.family+"|"+fact.key] = fact
+			if fact.present && fact.family == "fan_out_obligations" && fact.value["fact_kind"] == "intent" && fact.value["origin_kind"] == "deployment" {
+				if feedID, ok := fact.value["deployment_feed_id"].(string); ok && feedID != "" {
+					knownFeeds[feedID] = true
+				}
+			}
+		}
+	}
+	for revision := paused + 1; revision <= planned; revision++ {
+		recorded := facts[revision]
+		if len(recorded) == 0 {
+			return fmt.Errorf("paused source revision %d has no readable provenance (pause=%d plan=%d)", revision, paused, planned)
+		}
+		for _, fact := range recorded {
+			kind := ""
+			if fact.value != nil {
+				kind, _ = fact.value["fact_kind"].(string)
+			}
+			allowed := false
+			if fact.present {
+				switch fact.family {
+				case "event_deliveries":
+					eventID, _ := fact.value["event_id"].(string)
+					deliveryID, _ := fact.value["delivery_id"].(string)
+					atCut, issued := eventsAtCut[eventID]
+					status, _ := fact.value["status"].(string)
+					allowed = issued && deliveriesAtCut[deliveryID] == eventID &&
+						(status == atCut.Deliveries[0].Status || atCut.Deliveries[0].StartedAt != nil && status == "delivered")
+				case "event_receipts":
+					eventID, _ := fact.value["event_id"].(string)
+					ownReceipt := fact.value["subscriber_type"] == "platform" && fact.value["subscriber_id"] == "pipeline" && fact.value["outcome"] == "success"
+					if ownReceipt {
+						creating, found := created[eventID]
+						if !found || creating > paused {
+							return fmt.Errorf("paused source pipeline receipt revision=%d event=%s event_created=%d creating_evidence=%t pause=%d", revision, eventID, creating, found, paused)
+						}
+						allowed = true
+					}
+				case "fan_out_obligations":
+					prior, known := priorFacts[fact.family+"|"+fact.key]
+					switch kind {
+					case "intent":
+						allowed = known && prior.present && prior.value["fact_kind"] == "intent" &&
+							fact.value["origin_kind"] == "deployment" && fact.value["deployment_feed_id"] == prior.value["deployment_feed_id"] &&
+							fact.value["source_resource_version_id"] == prior.value["source_resource_version_id"] &&
+							fact.value["cardinality"] == float64(100) && fact.value["cursor"] == float64(100)
+					case "outcome":
+						// The original event and its outcome commit together. A later
+						// projection may repeat that fact; it cannot add an outcome.
+						eventID, _ := fact.value["event_id"].(string)
+						atCut, issued := eventsAtCut[eventID]
+						feedID, _ := fact.value["deployment_feed_id"].(string)
+						ordinal, ordinalOK := fact.value["ordinal"].(float64)
+						allowed = known && prior.present && reflect.DeepEqual(prior.value, fact.value) && issued && knownFeeds[feedID] &&
+							fact.value["origin_kind"] == "deployment" && fact.value["outcome_source_event_id"] == nil &&
+							fact.value["outcome_kind"] == "committed" && ordinalOK && ordinal >= 0 && ordinal < 100 &&
+							atCut.Payload["account_id"] == fmt.Sprintf("item-%03d", int(ordinal))
+					}
+				}
+			}
+			if !allowed {
+				return fmt.Errorf("paused source advanced by unproved revision %d family=%s key=%s kind=%s present=%t fact=%v (pause=%d plan=%d)", revision, fact.family, fact.key, kind, fact.present, fact.value, paused, planned)
+			}
+			priorFacts[fact.family+"|"+fact.key] = fact
+		}
+	}
+	return nil
+}
+
+func TestSixtyOfHundredPauseRevisionProvenance(t *testing.T) {
+	cut := operatorread.OperatorEventListResult{Events: []operatorread.OperatorEventFull{{
+		EventID: "issued-event", Payload: map[string]any{"account_id": "item-000"},
+		Deliveries: []operatorread.OperatorEventDelivery{{DeliveryID: "issued-delivery", Status: "delivered"}},
+	}}}
+	intent := selectedDeploymentRevisionFact{family: "fan_out_obligations", key: "intent", present: true, value: map[string]any{
+		"fact_kind": "intent", "origin_kind": "deployment", "deployment_feed_id": "original-feed",
+		"cardinality": float64(100), "cursor": float64(100), "source_resource_version_id": "original-version",
+	}}
+	outcome := selectedDeploymentRevisionFact{family: "fan_out_obligations", key: "outcome-0", present: true, value: map[string]any{
+		"fact_kind": "outcome", "origin_kind": "deployment", "deployment_feed_id": "original-feed",
+		"event_id": "issued-event", "outcome_source_event_id": nil, "ordinal": float64(0), "outcome_kind": "committed",
+	}}
+	event := selectedDeploymentRevisionFact{family: "events", key: "issued-event", present: true, value: map[string]any{"event_id": "issued-event"}}
+	receipt := selectedDeploymentRevisionFact{family: "event_receipts", key: "receipt", present: true, value: map[string]any{
+		"event_id": "issued-event", "subscriber_type": "platform", "subscriber_id": "pipeline", "outcome": "success",
+	}}
+	pending := cut
+	pending.Events = append([]operatorread.OperatorEventFull(nil), cut.Events...)
+	pending.Events[0].Deliveries = []operatorread.OperatorEventDelivery{{DeliveryID: "issued-delivery", Status: "pending"}}
+	t.Run("pending original event pipeline receipt", func(t *testing.T) {
+		if err := selectedDeploymentPauseRevisionProvenance(map[int64][]selectedDeploymentRevisionFact{1: {event}, 2: {receipt}}, 1, 2, pending); err != nil {
+			t.Fatal(err)
+		}
+	})
+	for _, test := range []struct {
+		name      string
+		facts     map[int64][]selectedDeploymentRevisionFact
+		wantError bool
+	}{
+		{"same committed original outcome recaptured", map[int64][]selectedDeploymentRevisionFact{1: {event, intent, outcome}, 2: {outcome}}, false},
+		{"new outcome after pause", map[int64][]selectedDeploymentRevisionFact{1: {event, intent}, 2: {outcome}}, true},
+		{"new event after pause", map[int64][]selectedDeploymentRevisionFact{1: {event, intent, outcome}, 2: {{family: "events", key: "new-event", present: true, value: map[string]any{"event_id": "new-event"}}}}, true},
+		{"unreadable successor", map[int64][]selectedDeploymentRevisionFact{1: {event, intent, outcome}}, true},
+		{"receipt without creating evidence", map[int64][]selectedDeploymentRevisionFact{2: {receipt}}, true},
+		{"absent first event fact", map[int64][]selectedDeploymentRevisionFact{1: {{family: "events", key: event.key}}, 2: {event, receipt}}, true},
+		{"wrong first event identity", map[int64][]selectedDeploymentRevisionFact{1: {{family: "events", key: event.key, present: true, value: map[string]any{"event_id": "other"}}}, 2: {receipt}}, true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			err := selectedDeploymentPauseRevisionProvenance(test.facts, 1, 2, cut)
+			if (err != nil) != test.wantError {
+				t.Fatalf("revision classification error=%v, wantError=%t", err, test.wantError)
+			}
+		})
+	}
+	t.Run("receipt for post-pause event", func(t *testing.T) {
+		err := selectedDeploymentPauseRevisionProvenance(map[int64][]selectedDeploymentRevisionFact{2: {receipt, event}}, 1, 2, cut)
+		if err == nil || !strings.Contains(err.Error(), "revision=2") || !strings.Contains(err.Error(), "event_created=2") {
+			t.Fatalf("post-pause event receipt must print both revisions: %v", err)
+		}
+	})
+	for _, field := range []string{"subscriber_type", "subscriber_id", "outcome"} {
+		t.Run("other receipt "+field, func(t *testing.T) {
+			other := receipt
+			other.value = make(map[string]any, len(receipt.value))
+			for key, value := range receipt.value {
+				other.value[key] = value
+			}
+			other.value[field] = "other"
+			if err := selectedDeploymentPauseRevisionProvenance(map[int64][]selectedDeploymentRevisionFact{1: {event}, 2: {other}}, 1, 2, cut); err == nil {
+				t.Fatal("unrelated receipt was admitted")
+			}
+		})
+	}
+	for _, test := range []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"sentinel", runtimepipelineobligation.ErrIneligible, true},
+		{"joined sentinel", errors.Join(runtimepipelineobligation.ErrIneligible), true},
+		{"wrapped sentinel", fmt.Errorf("probe: %w", runtimepipelineobligation.ErrIneligible), true},
+		{"cleanup failure", errors.Join(runtimepipelineobligation.ErrIneligible, errors.New("cleanup")), false},
+		{"cancellation", errors.Join(runtimepipelineobligation.ErrIneligible, context.Canceled), false},
+	} {
+		t.Run("claim probe "+test.name, func(t *testing.T) {
+			if got := selectedDeploymentOnlyProbeError(test.err, runtimepipelineobligation.ErrIneligible); got != test.want {
+				t.Fatalf("probe error accepted=%t, want%t: %v", got, test.want, test.err)
+			}
+		})
 	}
 }
 

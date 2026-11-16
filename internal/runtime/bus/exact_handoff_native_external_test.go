@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/manager"
+	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
@@ -33,6 +34,7 @@ type exactHandoffNativeOwner interface {
 	sessions.Registry
 	storetest.AgentFixtureStore
 	sourceartifactfixture.RootedWriter
+	PipelineObligations() pipelineobligation.Store
 }
 
 func openExactHandoffNative(t *testing.T, backend string, selectedExecution bool) runtimebus.ExactHandoffNativeFixtureForTest {
@@ -54,7 +56,7 @@ func openExactHandoffNative(t *testing.T, backend string, selectedExecution bool
 		if err != nil {
 			t.Fatal(err)
 		}
-		execution := selectedtest.OpenSelectedDeliveryExecution(t, ctx, owner, original)
+		execution := selectedtest.OpenSelectedDeliveryExecution(t, ctx, owner, owner.PipelineObligations(), original)
 		ctx, authority = execution.Context, execution.Authority
 		fixture.Source = execution.SemanticSource
 		fixture.SelectedEvent, fixture.SelectedRoute = execution.SelectedEvent, execution.SelectedRoute
@@ -103,7 +105,7 @@ func openExactHandoffNative(t *testing.T, backend string, selectedExecution bool
 			storetest.RequireRunningRun(t, ctx, owner, runID, time.Now().UTC())
 			event = eventtest.RuntimeControl(eventID, "test.work", "test", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
 		}
-		storetest.CommitNativeDeliveryPublication(t, ctx, owner, storetest.AdmitNativeDeliveryEvent(t, event), []events.DeliveryRoute{route}, authority, nil)
+		storetest.CommitNativeDeliveryPublication(t, ctx, owner, owner.PipelineObligations(), storetest.AdmitNativeDeliveryEvent(t, event), []events.DeliveryRoute{route}, authority, nil)
 		return storetest.LoadCanonicalEventRecord(t, ctx, owner, eventID)
 	}
 	fixture.Load = func(t *testing.T, eventID string) events.Event {

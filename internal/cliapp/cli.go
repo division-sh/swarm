@@ -275,6 +275,7 @@ func newServeCommand(ctx context.Context, root InvocationRoot, runServe ServeRun
 	cmd := &cobra.Command{
 		Use:     "serve [directory]",
 		Short:   "Start the Swarm runtime (server): engine, API, health, and MCP.",
+		Long:    "For serve-owned HTTPS, opt in through the deployment's `swarm.yaml` under `serve.public_webhook`. With neither `certificate_file` nor `private_key_file` configured, serve uses autocert with Let's Encrypt for exactly the configured name, accepting its terms; contact is omitted unless `email` is set.",
 		Example: `  swarm serve --dev`,
 		Args:    argcount.MaximumNArgs(1),
 		PreRunE: func(cmd *cobra.Command, args []string) error {

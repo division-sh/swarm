@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"sync"
 	"testing"
@@ -17,6 +18,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
 	"github.com/division-sh/swarm/tests/support/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
@@ -260,6 +262,30 @@ func TestSemanticEventPublicationEvidencePreservesExactCutsBothStores(t *testing
 				if inserted, err := CommitSemanticEventFixtureForTest(ctx, selected, admitted, settlement, routes, scope, disposition); err != nil || !inserted {
 					t.Fatalf("commit exact publication: inserted=%v err=%v", inserted, err)
 				}
+				if phase == "direct" {
+					var capture func(context.Context, string, ...runforkrevision.Family) (int64, error)
+					switch owner := selected.(type) {
+					case *PostgresStore:
+						capture = owner.runForkPostgresOwner.CaptureSelectedRunForkRevisionForTest
+					case *SQLiteRuntimeStore:
+						capture = owner.runForkSQLiteOwner.CaptureSelectedRunForkRevisionForTest
+					}
+					for _, invalid := range []struct {
+						run      string
+						families []runforkrevision.Family
+					}{{"invalid", []runforkrevision.Family{runforkrevision.FamilyEvents}}, {runID, nil}, {runID, []runforkrevision.Family{runforkrevision.FamilyEvents, "invalid"}}} {
+						if revision, err := capture(ctx, invalid.run, invalid.families...); err == nil || revision != 0 {
+							t.Fatalf("invalid capture returned a receipt: %d, %v", revision, err)
+						}
+					}
+					revision, err := capture(ctx, runID, runforkrevision.FamilyEvents)
+					if err != nil || revision <= 0 {
+						t.Fatalf("native acknowledged revision: %d, %v", revision, err)
+					}
+					if unchanged, err := capture(ctx, runID, runforkrevision.FamilyEvents); err != nil || unchanged != revision {
+						t.Fatalf("unchanged projection lost exact receipt: %d -> %d, %v", revision, unchanged, err)
+					}
+				}
 				probe, restore, err := InstallTransactionProbeForTest(selected, transactiontest.Options{})
 				if err != nil {
 					t.Fatal(err)
@@ -372,12 +398,30 @@ func TestSemanticEventEvidenceRejectsNonPlatformReceiptsBothStores(t *testing.T)
 				t.Fatal(err)
 			}
 			for _, kind := range []string{"agent", "node"} {
-				err := runUnrevisionedEventFixtureTransactionForTest(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-					_, err := tx.ExecContext(ctx, `INSERT INTO event_receipts
+				err := func() error {
+					fixtureContext := ctx
+					fixtureOwner := any(selected)
+					write := func(ctx context.Context, tx *sql.Tx) error {
+						_, err := tx.ExecContext(ctx, `INSERT INTO event_receipts
 						(receipt_id,event_id,subscriber_type,subscriber_id,outcome,side_effects,processed_at)
 						VALUES ($1,$2,$3,'fixture-agent','success','{}',$4)`, uuid.NewString(), eventID, kind, time.Now().UTC())
-					return err
-				})
+						return err
+					}
+					switch owner := fixtureOwner.(type) {
+					case *PostgresStore:
+						if owner == nil || owner.backend == nil {
+							return fmt.Errorf("postgres event fixture store is required")
+						}
+						return owner.backend.RunTransaction(fixtureContext, write)
+					case *SQLiteRuntimeStore:
+						if owner == nil || owner.backend == nil {
+							return fmt.Errorf("sqlite event fixture store is required")
+						}
+						return owner.backend.RunTransaction(fixtureContext, "unrevisioned event fixture", write)
+					default:
+						return fmt.Errorf("event fixture store %T is unsupported", fixtureOwner)
+					}
+				}()
 				var postgresError interface{ SQLState() string }
 				var sqliteError interface{ Code() int }
 				if err == nil || !((errors.As(err, &postgresError) && postgresError.SQLState() == "23514") || (errors.As(err, &sqliteError) && sqliteError.Code() == 275)) {

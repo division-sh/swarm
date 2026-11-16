@@ -83,6 +83,32 @@ func (t *exitFaultTx) Commit() error {
 	return err
 }
 
+func TestObservedReadDisposalPreservesIndependentRollbackFailure(t *testing.T) {
+	for _, failRollback := range []bool{false, true} {
+		t.Run(fmt.Sprint(failRollback), func(t *testing.T) {
+			control := &exitFaultConnector{path: "file:" + filepath.Join(t.TempDir(), "observed.db")}
+			db := sql.OpenDB(control)
+			defer db.Close()
+			backend := originalTransactionTestBackend(t, db, control.path)
+			primary := errors.New("independent failed read")
+			control.rollbackFail.Store(failRollback)
+			disposed, err := backend.RunReadTransactionObserved(context.Background(), func(ctx context.Context, tx *sql.Tx) error {
+				var value int
+				if err := tx.QueryRowContext(ctx, `SELECT 1`).Scan(&value); err != nil {
+					return err
+				}
+				return primary
+			})
+			if !disposed || !errors.Is(err, primary) || (failRollback && !errors.Is(err, errInjectedCleanup)) {
+				t.Fatalf("disposal=%v err=%v", disposed, err)
+			}
+			if failRollback && control.closes.Load() == 0 {
+				t.Fatal("uncertain read rollback did not discard connection")
+			}
+		})
+	}
+}
+
 func TestTransactionExitFaultDisposition(t *testing.T) {
 	for _, poolSize := range []int{1, 3} {
 		for _, scenario := range []string{"success", "callback", "rollback_failure", "panic_rollback_failure", "committed_error", "cancel_committed_error", "cancel_callback", "cancel_before_acquire"} {

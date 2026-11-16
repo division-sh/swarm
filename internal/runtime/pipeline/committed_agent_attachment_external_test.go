@@ -266,7 +266,7 @@ func provePartialAttachmentContinuation(t *testing.T, ctx context.Context, selec
 		events.EnvelopeForTargetRoute(events.EventEnvelope{}, route.Target.Route()), time.Now().UTC())
 	ack := pipelineobligation.Acknowledged("pipeline_persisted")
 	t.Log("partial continuation: native publication started")
-	storetest.CommitNativeDeliveryPublication(t, ctx, selected.events.(storetest.DeliveryPublicationFixtureStore), storetest.AdmitNativeDeliveryEvent(t, event), []events.DeliveryRoute{route}, authority, nil)
+	storetest.CommitNativeDeliveryPublication(t, ctx, selected.events, selected.events.PipelineObligations(), storetest.AdmitNativeDeliveryEvent(t, event), []events.DeliveryRoute{route}, authority, nil)
 	t.Log("partial continuation: native publication acknowledged; event claim started")
 	publication, err := selected.events.PipelineObligations().ClaimEvent(ctx, event.ID(), pipelineobligation.PurposeRecovery)
 	if err != nil {

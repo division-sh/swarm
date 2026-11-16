@@ -2,7 +2,6 @@ package runtimepersistence
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"time"
 
@@ -27,8 +26,12 @@ func SetObservabilityReceiptConflictForTest(ctx context.Context, selected any, e
 	if conflict < PendingDeliveryWithDeadLetterReceipt || conflict > FailedDeliveryWithDeadLetterReceipt || at.IsZero() {
 		return fmt.Errorf("observability receipt fault requires a named conflict and exact clock")
 	}
-	_, postgres := selected.(*PostgresStore)
-	return runUnrevisionedEventFixtureTransactionForTest(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		return pipelinepersistence.InsertObservabilityReceiptConflictForTest(ctx, tx, postgres, eventID, conflict, at)
-	})
+	switch owner := selected.(type) {
+	case *PostgresStore:
+		return owner.pipelinePostgresOwner.SetObservabilityReceiptConflictForTest(ctx, eventID, conflict, at)
+	case *SQLiteRuntimeStore:
+		return owner.pipelineSQLiteOwner.SetObservabilityReceiptConflictForTest(ctx, eventID, conflict, at)
+	default:
+		return fmt.Errorf("event fixture store %T is unsupported", selected)
+	}
 }

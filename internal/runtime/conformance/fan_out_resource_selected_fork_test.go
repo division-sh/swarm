@@ -27,6 +27,7 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -535,11 +536,16 @@ func assertSelectedDeploymentRows(t *testing.T, f *deploymentResourceFixture, se
 }
 
 func assertSelectedDeploymentRowsWithClosedExecutions(t *testing.T, f *deploymentResourceFixture, server *httptest.Server, runID, route string, compiledVersion string, rows []byte, wantClosed int) {
-	assertSelectedDeploymentRowSet(t, f, server, runID, route, compiledVersion, [][]byte{rows}, wantClosed)
+	documentRows := bytes.Split(bytes.TrimSpace(rows), []byte("\n"))
+	assertSelectedDeploymentRowSet(t, f, server, runID, route, compiledVersion, documentRows, wantClosed, len(documentRows))
 }
 
-func assertSelectedDeploymentRowSet(t *testing.T, f *deploymentResourceFixture, server *httptest.Server, runID, route string, compiledVersion string, rows [][]byte, wantClosed int) {
+func assertSelectedDeploymentRowSet(t *testing.T, f *deploymentResourceFixture, server *httptest.Server, runID, route string, compiledVersion string, rows [][]byte, wantClosed int, expectedCommitted ...int) {
 	t.Helper()
+	wantCommitted := 1
+	if len(expectedCommitted) != 0 {
+		wantCommitted = expectedCommitted[0]
+	}
 	defer func() {
 		if t.Failed() {
 			logDeploymentResourceFailure(t, f.db, runID)
@@ -585,7 +591,7 @@ func assertSelectedDeploymentRowSet(t *testing.T, f *deploymentResourceFixture, 
 			}
 		}
 	}
-	if events != len(rows) || delivered != len(rows) || committed != 1 || pipelineReceipts != len(rows) || stampedHandoffs != len(rows) {
+	if events != len(rows) || delivered != len(rows) || committed != wantCommitted || pipelineReceipts != len(rows) || stampedHandoffs != len(rows) {
 		t.Fatalf("%s selected route did not settle: events=%d delivered=%d committed=%d pipeline_receipts=%d stamped_handoffs=%d", route, events, delivered, committed, pipelineReceipts, stampedHandoffs)
 	}
 	var parentRunID sql.NullString
@@ -639,6 +645,9 @@ func assertSelectedDeploymentRowSet(t *testing.T, f *deploymentResourceFixture, 
 
 func TestDeploymentSourceChangedPinPublicForkReplayAfterReconstruction(t *testing.T) {
 	proveSourceChangedPinPublicForkAndLostResponse(t, runfork.RunForkPointStateRevision)
+	t.Run("inserted_prefix", func(t *testing.T) {
+		proveSourceChangedPinPublicForkAndLostResponse(t, runfork.RunForkPointStateRevision, true)
+	})
 }
 
 func TestEventSourceChangedPinPublicForkReplayAfterReconstruction(t *testing.T) {
@@ -647,14 +656,22 @@ func TestEventSourceChangedPinPublicForkReplayAfterReconstruction(t *testing.T) 
 
 // The historical helper name is retained for declaration-keyed debt evidence.
 // This proves replay after a decoded response, not a dropped wire response.
-func proveSourceChangedPinPublicForkAndLostResponse(t *testing.T, pointKind runfork.RunForkPointKind) {
-	for _, route := range []string{"root", "singleton"} {
+func proveSourceChangedPinPublicForkAndLostResponse(t *testing.T, pointKind runfork.RunForkPointKind, insertedPrefix ...bool) {
+	prefix := len(insertedPrefix) != 0 && insertedPrefix[0]
+	routes := []string{"root", "singleton"}
+	if prefix {
+		routes = []string{"root"}
+	}
+	for _, route := range routes {
 		t.Run(route, func(t *testing.T) {
 			for _, backend := range []string{"sqlite", "postgres"} {
 				t.Run(backend, func(t *testing.T) {
 					f := selectedDeploymentResourceFixture(t, backend, route)
 					server := f.operatorServer(t)
 					originalRows := []byte("{\"account_id\":\"original\",\"document\":{\"nested\":[1,{\"value\":2}]}}\n")
+					if prefix {
+						originalRows = []byte("{\"account_id\":\"A\",\"document\":{\"value\":1}}\n{\"account_id\":\"B\",\"document\":{\"value\":2}}\n{\"account_id\":\"C\",\"document\":{\"value\":3}}\n")
+					}
 					original := selectedDeploymentVersion(t, f, originalRows)
 					originalPath := filepath.Join(t.TempDir(), "original.jsonl")
 					if err := os.WriteFile(originalPath, originalRows, 0o600); err != nil {
@@ -664,11 +681,24 @@ func proveSourceChangedPinPublicForkAndLostResponse(t *testing.T, pointKind runf
 					forkEventID := waitDeploymentForkRowEvent(t, f.ctx, f.selected, sourceRunID, f.runtime.fanOutServing.Wake)
 					assertSelectedDeploymentRows(t, f, server, sourceRunID, route, string(original.VersionID), originalRows)
 					page := selectedDeploymentPublicEvents(t, f.ctx, server, sourceRunID)
-					if len(page.Events) != 1 || page.Events[0].EventID != forkEventID {
+					wantOriginalRows := 1
+					if prefix {
+						wantOriginalRows = 3
+					}
+					foundPoint := false
+					for _, event := range page.Events {
+						foundPoint = foundPoint || event.EventID == forkEventID
+					}
+					if len(page.Events) != wantOriginalRows || !foundPoint {
 						t.Fatalf("public source event disagrees with delivered fork point: %+v point=%s", page.Events, forkEventID)
 					}
 
 					changedRows := []byte("{\"account_id\":\"changed\",\"document\":{\"nested\":[3,{\"value\":4}]}}\n")
+					changedAccount := "changed"
+					if prefix {
+						changedRows = append([]byte("{\"account_id\":\"X\",\"document\":{\"value\":0}}\n"), originalRows...)
+						changedAccount = "X"
+					}
 					changed := selectedDeploymentVersion(t, f, changedRows)
 					changedPath := filepath.Join(t.TempDir(), "changed.jsonl")
 					if err := os.WriteFile(changedPath, changedRows, 0o600); err != nil {
@@ -714,13 +744,18 @@ func proveSourceChangedPinPublicForkAndLostResponse(t *testing.T, pointKind runf
 						t.Fatalf("public result lost its exact typed point: %+v", result)
 					}
 					forkRows := [][]byte{changedRows}
+					wantCommitted := 1
+					if prefix {
+						forkRows = bytes.Split(bytes.TrimSpace(changedRows), []byte("\n"))
+						wantCommitted = len(forkRows)
+					}
 					if pointKind == runfork.RunForkPointEvent {
 						// The explicit event cut replays its recorded row once; the
 						// selected deployment feed contributes the changed row once.
 						forkRows = append(forkRows, originalRows)
 					}
 					assertForkRows := func() {
-						assertSelectedDeploymentRowSet(t, f, server, result.ForkRunID, route, string(changed.VersionID), forkRows, 1)
+						assertSelectedDeploymentRowSet(t, f, server, result.ForkRunID, route, string(changed.VersionID), forkRows, 1, wantCommitted)
 						lifecycle, err := storetest.ReadRuntimeLogRunSnapshot(f.ctx, f.selected, result.ForkRunID)
 						instances, instanceErr := f.selected.ListWorkflowInstances(f.ctx, result.ForkRunID)
 						finals := 0
@@ -736,7 +771,24 @@ func proveSourceChangedPinPublicForkAndLostResponse(t *testing.T, pointKind runf
 							t.Fatalf("selected fixture did not retain live/final/settled facts: %+v instances=%+v errors=%v/%v", lifecycle, instances, err, instanceErr)
 						}
 					}
-					assertSelectedDeploymentRowSet(t, f, server, result.ForkRunID, route, string(changed.VersionID), forkRows, 1)
+					assertSelectedDeploymentRowSet(t, f, server, result.ForkRunID, route, string(changed.VersionID), forkRows, 1, wantCommitted)
+					if prefix {
+						reader := f.selected.(operatorread.FanOutReader)
+						intents, err := reader.ListFanOutIntents(f.ctx, fanoutobligation.ListQuery{RunID: result.ForkRunID})
+						if err != nil || len(intents.Intents) != 1 || intents.Intents[0].Cardinality != 4 || intents.Intents[0].Cursor != 4 {
+							t.Fatalf("inserted prefix did not issue the full new feed: %+v %v", intents, err)
+						}
+						zero := 0
+						outcomes, err := reader.ListFanOutIntents(f.ctx, fanoutobligation.ListQuery{RunID: result.ForkRunID, OutcomeFromOrdinal: &zero, Filter: fanoutobligation.ListFilter{DeploymentFeedID: intents.Intents[0].Key.DeploymentFeedID}})
+						if err != nil || outcomes.DeploymentOutcomes == nil || len(outcomes.DeploymentOutcomes.Outcomes) != 4 {
+							t.Fatalf("inserted prefix outcome page: %+v %v", outcomes, err)
+						}
+						for i, outcome := range outcomes.DeploymentOutcomes.Outcomes {
+							if outcome.Ordinal != i {
+								t.Fatalf("new feed skipped ordinal zero or spliced an old index: %+v", outcomes)
+							}
+						}
+					}
 					beforeRefusals, err := storetest.ReadSelectedForkSourceDomain(f.ctx, f.selected, result.ForkRunID)
 					if err != nil {
 						t.Fatal(err)
@@ -755,7 +807,7 @@ func proveSourceChangedPinPublicForkAndLostResponse(t *testing.T, pointKind runf
 						{"canceled_caller", owner, canceled, result.ForkRunID},
 					} {
 						observed, err := refused.owner.PublishSelectedFixtureCloseForTest(refused.ctx, refused.runID,
-							runforkexecution.SelectedFixtureCloseInputForTest{AccountID: "changed"})
+							runforkexecution.SelectedFixtureCloseInputForTest{AccountID: changedAccount})
 						if err == nil || observed != (runforkexecution.SelectedFixtureCloseResultForTest{}) {
 							t.Fatalf("%s fixture close acquired a child: %+v error=%v", refused.name, observed, err)
 						}
@@ -792,7 +844,7 @@ func proveSourceChangedPinPublicForkAndLostResponse(t *testing.T, pointKind runf
 					if closed != 1 || executionID == "" {
 						t.Fatalf("fixture lost its exact closed selected predecessor: matches=%d execution=%s", closed, executionID)
 					}
-					publishNotifyAllChildrenEvent(t, f.ctx, f.runtime, f.source, result.ForkRunID, "fixture.close.requested", map[string]any{"account_id": "changed"})
+					publishNotifyAllChildrenEvent(t, f.ctx, f.runtime, f.source, result.ForkRunID, "fixture.close.requested", map[string]any{"account_id": changedAccount})
 					assertForkRows()
 					if closes, err := storetest.CountRunEventNameStorage(f.ctx, f.selected, result.ForkRunID, "fixture.close.requested"); err != nil || closes != 1 {
 						t.Fatalf("selected fixture close publication count=%d, want one: %v", closes, err)
@@ -891,7 +943,7 @@ func proveSourceChangedPinPublicForkAndLostResponse(t *testing.T, pointKind runf
 						t.Fatalf("completed selected fork requires exactly one terminal recovery result, got %d: %+v", matched, recovery)
 					}
 					if _, err := recoveredOwner.PublishSelectedFixtureCloseForTest(f.ctx, result.ForkRunID,
-						runforkexecution.SelectedFixtureCloseInputForTest{AccountID: "changed"}); err == nil {
+						runforkexecution.SelectedFixtureCloseInputForTest{AccountID: changedAccount}); err == nil {
 						t.Fatal("completed terminal-preserved child acquired another close input")
 					}
 					restartedServer := deploymentForkServer(t, f, recoveredOwner)

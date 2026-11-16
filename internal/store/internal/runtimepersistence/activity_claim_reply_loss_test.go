@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/google/uuid"
@@ -14,28 +15,64 @@ func TestWorkflowActivityAttemptStatusDiagnosticDiscardsPartialRowsBothStores(t 
 		t.Run(backend.name, func(t *testing.T) {
 			fixture, ctx := backend.open(t), testAuthorActivityContext()
 			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
-			if err := runUnrevisionedEventFixtureTransactionForTest(ctx, fixture.store, func(ctx context.Context, tx *sql.Tx) error {
-				for _, statement := range []string{
-					`ALTER TABLE activity_attempts RENAME TO saved_activity_status_diagnostic`,
-					`CREATE TABLE activity_attempts (request_event_id TEXT, status TEXT)`,
-					`INSERT INTO activity_attempts VALUES ('00000000-0000-4000-8000-000000000001', 'started'), ('00000000-0000-4000-8000-000000000002', NULL)`,
-				} {
-					if _, err := tx.ExecContext(ctx, statement); err != nil {
-						return err
+			if err := func() error {
+				fixtureContext := ctx
+				fixtureOwner := any(fixture.store)
+				write := func(ctx context.Context, tx *sql.Tx) error {
+					for _, statement := range []string{
+						`ALTER TABLE activity_attempts RENAME TO saved_activity_status_diagnostic`,
+						`CREATE TABLE activity_attempts (request_event_id TEXT, status TEXT)`,
+						`INSERT INTO activity_attempts VALUES ('00000000-0000-4000-8000-000000000001', 'started'), ('00000000-0000-4000-8000-000000000002', NULL)`,
+					} {
+						if _, err := tx.ExecContext(ctx, statement); err != nil {
+							return err
+						}
 					}
+					return nil
 				}
-				return nil
-			}); err != nil {
+				switch owner := fixtureOwner.(type) {
+				case *PostgresStore:
+					if owner == nil || owner.backend == nil {
+						return fmt.Errorf("postgres event fixture store is required")
+					}
+					return owner.backend.RunTransaction(fixtureContext, write)
+				case *SQLiteRuntimeStore:
+					if owner == nil || owner.backend == nil {
+						return fmt.Errorf("sqlite event fixture store is required")
+					}
+					return owner.backend.RunTransaction(fixtureContext, "unrevisioned event fixture", write)
+				default:
+					return fmt.Errorf("event fixture store %T is unsupported", fixtureOwner)
+				}
+			}(); err != nil {
 				t.Fatal(err)
 			}
 			defer func() {
-				if err := runUnrevisionedEventFixtureTransactionForTest(ctx, fixture.store, func(ctx context.Context, tx *sql.Tx) error {
-					if _, err := tx.ExecContext(ctx, `DROP TABLE activity_attempts`); err != nil {
+				if err := func() error {
+					fixtureContext := ctx
+					fixtureOwner := any(fixture.store)
+					write := func(ctx context.Context, tx *sql.Tx) error {
+						if _, err := tx.ExecContext(ctx, `DROP TABLE activity_attempts`); err != nil {
+							return err
+						}
+						_, err := tx.ExecContext(ctx, `ALTER TABLE saved_activity_status_diagnostic RENAME TO activity_attempts`)
 						return err
 					}
-					_, err := tx.ExecContext(ctx, `ALTER TABLE saved_activity_status_diagnostic RENAME TO activity_attempts`)
-					return err
-				}); err != nil {
+					switch owner := fixtureOwner.(type) {
+					case *PostgresStore:
+						if owner == nil || owner.backend == nil {
+							return fmt.Errorf("postgres event fixture store is required")
+						}
+						return owner.backend.RunTransaction(fixtureContext, write)
+					case *SQLiteRuntimeStore:
+						if owner == nil || owner.backend == nil {
+							return fmt.Errorf("sqlite event fixture store is required")
+						}
+						return owner.backend.RunTransaction(fixtureContext, "unrevisioned event fixture", write)
+					default:
+						return fmt.Errorf("event fixture store %T is unsupported", fixtureOwner)
+					}
+				}(); err != nil {
 					t.Error(err)
 				}
 			}()

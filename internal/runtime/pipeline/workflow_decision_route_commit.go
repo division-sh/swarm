@@ -52,7 +52,7 @@ func (c HumanTaskDeferredRouteCommand) Validate() error {
 	if c.Publication == nil {
 		return fmt.Errorf("human-task deferred route requires one durable publication")
 	}
-	return c.Publication.ValidateDurablePublicationPlan()
+	return validateHumanTaskReturnPublication(c.Publication, c.CardID, c.RouteEventID, c.OccurredAt, false)
 }
 
 type HumanTaskOutcomeRouteCommand struct {
@@ -69,7 +69,20 @@ func (c HumanTaskOutcomeRouteCommand) Validate() error {
 	if c.Publication == nil {
 		return fmt.Errorf("human-task outcome route requires one durable publication")
 	}
-	return c.Publication.ValidateDurablePublicationPlan()
+	return validateHumanTaskReturnPublication(c.Publication, c.CardID, c.RouteEventID, c.OccurredAt, true)
+}
+
+func validateHumanTaskReturnPublication(publication runtimeengine.DurablePublicationPlan, cardID, routeEventID string, occurredAt time.Time, terminal bool) error {
+	if err := publication.ValidateDurablePublicationPlan(); err != nil {
+		return err
+	}
+	bound, ok := publication.(interface {
+		ValidateHumanTaskReturnCommand(string, string, time.Time, bool) error
+	})
+	if !ok {
+		return fmt.Errorf("human-task route publication requires its native requester-return binding")
+	}
+	return bound.ValidateHumanTaskReturnCommand(cardID, routeEventID, occurredAt, terminal)
 }
 
 type CommittedHumanTaskRoute struct {

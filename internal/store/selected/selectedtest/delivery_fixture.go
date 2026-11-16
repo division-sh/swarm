@@ -24,6 +24,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -36,7 +37,9 @@ import (
 )
 
 type SelectedDeliveryFixtureStore interface {
-	storetest.DeliveryPublicationFixtureStore
+	storetest.RunFixtureStore
+	runtimepkg.AuthorActivityCatalogRegistrar
+	bus.CommitPublicationOwner
 	sourceartifactfixture.Writer
 	startupownership.Store
 	runforkexecution.SourceArtifactSelectedContractSourceStore
@@ -54,7 +57,7 @@ type SelectedDeliveryFixture struct {
 
 // OpenSelectedDeliveryExecution reuses the existing native manager-delivery
 // claim gate and joins the real selected owner before capability/store release.
-func OpenSelectedDeliveryExecution(t *testing.T, ctx context.Context, owner SelectedDeliveryFixtureStore, original ...startupownership.ProcessCapability) *SelectedDeliveryFixture {
+func OpenSelectedDeliveryExecution(t *testing.T, ctx context.Context, owner SelectedDeliveryFixtureStore, obligations pipelineobligation.Store, original ...startupownership.ProcessCapability) *SelectedDeliveryFixture {
 	t.Helper()
 	fixture := &SelectedDeliveryFixture{}
 	repo := canonicalrouting.RepoRoot(t)
@@ -120,7 +123,7 @@ func OpenSelectedDeliveryExecution(t *testing.T, ctx context.Context, owner Sele
 	}
 	identity := agentidentitytest.RootDeclaredForRun(t, input.RunID(), "test-agent", ".")
 	root := selectedDeliverySourceRoot(t, ctx, semanticview.Wrap(bundle), source, input)
-	storetest.CommitNativeDeliveryPublication(t, ctx, owner, storetest.AdmitNativeDeliveryEvent(t, input), []events.DeliveryRoute{{Recipient: events.MustAgentDeliveryRecipient(identity.AgentID()), AgentIdentity: identity}}, normal, &root)
+	storetest.CommitNativeDeliveryPublication(t, ctx, owner, obligations, storetest.AdmitNativeDeliveryEvent(t, input), []events.DeliveryRoute{{Recipient: events.MustAgentDeliveryRecipient(identity.AgentID()), AgentIdentity: identity}}, normal, &root)
 	finished := make(chan error, 1)
 	loader := runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, Store: owner}
 	go func() {

@@ -67,7 +67,7 @@ func TestServedWhatsAppLogoutReservationProcessDeathBothStores(t *testing.T) {
 			peer.mu.Unlock()
 			params := map[string]any{"operation_id": ready.Operation.OperationID, "expected_revision": ready.Operation.Revision,
 				"idempotency_key": "reserved-logout-process-death"}
-			done := beginServedNativeInterruptedLogout(t, endpoint, params)
+			done, _ := beginServedNativeInterruptedLogout(t, endpoint, params)
 			deadline := time.Now().Add(5 * time.Second)
 			for !strings.Contains(process.output.String(), "NATIVE_LOGOUT_RESERVED ") {
 				if time.Now().After(deadline) {
@@ -163,10 +163,11 @@ func TestServedWhatsAppLogoutLaunchedProcessDeathBothStores(t *testing.T) {
 			peer.mu.Unlock()
 			params := map[string]any{"operation_id": ready.Operation.OperationID, "expected_revision": ready.Operation.Revision,
 				"idempotency_key": "launched-logout-process-death"}
-			done := beginServedNativeInterruptedLogout(t, endpoint, params)
+			done, reply := beginServedNativeInterruptedLogout(t, endpoint, params)
 			select {
 			case <-peer.logouts:
 			case err := <-done:
+				t.Logf("public logout HTTP response: status=%d body=%q", reply.statusCode, reply.body)
 				t.Fatal("public logout returned before the unacknowledged unlink frame", err)
 			case <-time.After(5 * time.Second):
 				t.Fatal("public logout never reached the actual SDK unlink frame")
@@ -239,7 +240,12 @@ func requireServedNativeUncertainLogout(t *testing.T, endpoint string, params ma
 	requireServedJSONRPCError(t, endpoint, "channel.logout", changed)
 }
 
-func beginServedNativeInterruptedLogout(t *testing.T, endpoint string, params map[string]any) <-chan error {
+type servedNativeLogoutReply struct {
+	statusCode int
+	body       []byte
+}
+
+func beginServedNativeInterruptedLogout(t *testing.T, endpoint string, params map[string]any) (<-chan error, *servedNativeLogoutReply) {
 	t.Helper()
 	body, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": "interrupted-logout", "method": "channel.logout", "params": params})
 	if err != nil {
@@ -254,11 +260,14 @@ func beginServedNativeInterruptedLogout(t *testing.T, endpoint string, params ma
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+apiv1.DefaultLoopbackAPIToken)
 	done, joined := make(chan error, 1), make(chan struct{})
+	reply := &servedNativeLogoutReply{}
 	go func() {
 		defer close(joined)
 		response, err := http.DefaultClient.Do(req)
 		if response != nil {
-			_, readErr := io.Copy(io.Discard, response.Body)
+			reply.statusCode = response.StatusCode
+			var readErr error
+			reply.body, readErr = io.ReadAll(response.Body)
 			err = errors.Join(err, readErr, response.Body.Close())
 		}
 		done <- err
@@ -271,5 +280,5 @@ func beginServedNativeInterruptedLogout(t *testing.T, endpoint string, params ma
 			t.Error("original logout HTTP caller did not join")
 		}
 	})
-	return done
+	return done, reply
 }

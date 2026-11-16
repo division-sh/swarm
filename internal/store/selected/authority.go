@@ -19,6 +19,7 @@ type authorityInspectionPort interface {
 	InspectSnapshot(context.Context, func(context.Context) error) error
 	InspectAuthority(context.Context) (runtimestartupownership.AuthorityInspection, error)
 	InspectStartupRecovery(context.Context, time.Time, bool) (effects.StartupRecoveryCounts, error)
+	ForecastStartupRecovery(context.Context, time.Time) (effects.StartupRecoveryCounts, error)
 	ProbePossession(context.Context) (runtimestartupownership.PossessionObservation, error)
 }
 
@@ -62,7 +63,12 @@ func (s *AuthorityInspection) InspectStartupStatus(ctx context.Context) (runtime
 		if err != nil || inspection.Authority == nil {
 			return err
 		}
-		counts, err := s.store.InspectStartupRecovery(ctx, time.Now().UTC(), observation.Available)
+		var counts effects.StartupRecoveryCounts
+		if observation.Available {
+			counts, err = s.store.ForecastStartupRecovery(ctx, time.Now().UTC())
+		} else {
+			counts, err = s.store.InspectStartupRecovery(ctx, time.Now().UTC(), false)
+		}
 		if err == nil {
 			inspection.Interrupted = &counts
 		}

@@ -57,6 +57,38 @@ func proveContextCompactionCheckpointCustody(t *testing.T, fixture completionSet
 	if err := handle.MarkResponseObserved(ctx, map[string]any{"response_fingerprint": "exact summary response"}); err != nil {
 		t.Fatal(err)
 	}
+	neutral := newNeutralEffectParityFixture(t, fixture.store, fixture.db, fixture.sqlite)
+	httpCall := beginNeutralRecoveryAttempt(t, neutral, "authored_http_tool", "compaction-inspection", true, false)
+	now := time.Now().UTC()
+	if !completionAttemptLease(t, fixture, handle.Attempt().AttemptID).After(now) {
+		t.Fatal("current maintenance attempt has already expired")
+	}
+	beforeInspection := historicalContextDatabaseRows(t, fixture.db, !fixture.sqlite)
+	counts, err := fixture.store.(startupRecoveryInspector).InspectStartupRecovery(ctx, now, true)
+	if err != nil || counts != (runtimeeffects.StartupRecoveryCounts{HTTPToolCallsUnknown: 1}) {
+		t.Fatalf("current compaction blocked independent inspection: %+v %v", counts, err)
+	}
+	historicalContextRequireUnchanged(t, beforeInspection, historicalContextDatabaseRows(t, fixture.db, !fixture.sqlite))
+	queries := []struct{ query, key string }{
+		{`SELECT * FROM runtime_external_effect_attempts WHERE attempt_id=$1`, handle.Attempt().AttemptID},
+		{`SELECT * FROM runtime_external_effect_operations WHERE operation_id=$1`, handle.Attempt().OperationID},
+		{`SELECT * FROM runtime_effect_budget_reservations WHERE attempt_id=$1`, handle.Attempt().AttemptID},
+		{`SELECT * FROM agent_sessions WHERE session_id=$1`, fixture.sessionID},
+	}
+	beforeRecovery := make([][]string, len(queries))
+	for i, query := range queries {
+		beforeRecovery[i] = snapshotRotationTableRows(t, ctx, fixture.db, query.query, query.key)
+	}
+	recovery, err := fixture.store.ReconcileExternalEffectAttempts(fixture.original, liveExternalEffectRecoveryRequest(now))
+	if err != nil || recovery.OutcomeUncertain != 1 || recovery.PrelaunchTerminal != 0 {
+		t.Fatalf("current compaction blocked independent recovery: %+v %v", recovery, err)
+	}
+	requireExternalAttemptState(t, fixture.db, fixture.sqlite, httpCall.Attempt().AttemptID, runtimeeffects.StateOutcomeUncertain)
+	for i, query := range queries {
+		if after := snapshotRotationTableRows(t, ctx, fixture.db, query.query, query.key); !reflect.DeepEqual(beforeRecovery[i], after) {
+			t.Fatalf("independent recovery changed current compaction: %s", query.query)
+		}
+	}
 	checkpoint.AttemptID, checkpoint.ResultFingerprint, checkpoint.Summary = handle.Attempt().AttemptID, "exact summary response", "The old fact remains exact."
 	checkpoint.ID, err = checkpoint.Fingerprint()
 	if err != nil {

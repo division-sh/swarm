@@ -32,6 +32,7 @@ const debtPortableGlobalRoleCollectorTo = "19b3a4ce5b9c7baa7cbb66980ae2b66ab522d
 const debtPortableAgentFixtureCollectorTo = "90e301f3d5080732c31703c1a9cfa7377cc9175e86e185aec924003858ab93b9"
 const debtW2DeliveryEvidenceCollectorTo = "0f8b0b73cf2634a5d0d3780795bd73a8e059731621746baa1a852402552c251d"
 const debtChannelCrashPreparationCollectorTo = "3acef74e89c4bf99f03cc63649c398e3706fb3b833240ecbfe21b40655dbb041"
+const debtChannelObservationCollectorTo = "f9aa468bcdd8931e796550d7787c0398b66da97bdafb78f4580cb3965fb1e385"
 const debtR52LiveFixtureCollectorTo = "a2ec4884aba6f3258d74e3cfe0bd68bf6ccc907828fac40d18d1775ce7d4d878"
 
 const debtS2OriginalContextCollectorTo = "97c60588009aa53ed5506745a2497fae2f37aed2c3a14c734effda0053643c70"
@@ -50,6 +51,124 @@ func debtRunFixtureTransitionStates() (map[string]authorityDebtSite, map[string]
 
 func TestPersistenceAuthorityDebtRunFixtureSignatureTransitionIsExact(t *testing.T) {
 	old, current := debtRunFixtureTransitionStates()
+	t.Run("channel-observation-counted-signatures", func(t *testing.T) {
+		baseline, source, actual := debtControlSet(), debtControlSet(), debtControlSet()
+		var rows [][3]authorityDebtSite
+		for _, pair := range debtChannelObservationSignatureTransitions() {
+			rows = append(rows, [3]authorityDebtSite{pair[0], pair[0], pair[1]})
+		}
+		for _, row := range debtChannelCrashWaiterCountedTransitions() {
+			rows = append(rows, row)
+		}
+		for _, row := range rows {
+			baseline[row[0].identity()], source[row[1].identity()], actual[row[2].identity()] = row[0], row[1], row[2]
+		}
+		if len(rows) != 6 || authorityDebtCount(baseline) != 11 || authorityDebtCount(source) != 9 || authorityDebtCount(actual) != 8 ||
+			rows[0][1].Multiplicity != 2 || rows[0][2].Multiplicity != 1 {
+			t.Fatal("channel counts must be baseline11/source9/actual8, including constructor2->1")
+		}
+		check := func(t *testing.T, states [4]map[string]authorityDebtSite, accept bool) {
+			t.Helper()
+			var originals [4]map[string]authorityDebtSite
+			for index := range states {
+				originals[index] = maps.Clone(states[index])
+			}
+			failures := authorityDebtRatchet(states[0], states[1], states[2], states[3])
+			if (len(failures) == 0) != accept {
+				t.Fatalf("accepted=%v failures=%v", accept, failures)
+			}
+			for index := range states {
+				if !maps.Equal(states[index], originals[index]) {
+					t.Fatalf("comparison mutated raw input %d", index)
+				}
+			}
+		}
+		for _, head := range []map[string]authorityDebtSite{baseline, actual} {
+			for _, trustedSource := range []map[string]authorityDebtSite{source, actual} {
+				states := [4]map[string]authorityDebtSite{actual, head, baseline, trustedSource}
+				check(t, states, true)
+				for _, row := range rows {
+					for slot := range states {
+						for _, mutation := range []string{"kind", "path", "declaration", "operation", "argument", "receiver", "result", "family", "owner", "count-up", "count-down", "missing", "coexists"} {
+							t.Run(row[2].Declaration+"/"+row[2].Operation+"/"+[]string{"actual", "head", "base", "source"}[slot]+"/"+mutation, func(t *testing.T) {
+								inputs := states
+								inputs[slot] = maps.Clone(states[slot])
+								present := inputs[slot][row[1].identity()]
+								if present.Multiplicity == 0 {
+									present = inputs[slot][row[2].identity()]
+								}
+								delete(inputs[slot], present.identity())
+								changed := present
+								switch mutation {
+								case "kind":
+									changed.Kind += "Other"
+								case "path":
+									changed.File += "Other"
+								case "declaration":
+									changed.Declaration += "Other"
+								case "operation":
+									changed.Operation += "Other"
+								case "argument":
+									changed.Resolved = strings.Replace(changed.Resolved, "|arg=*testing.T|", "|arg=int|", 1)
+								case "receiver":
+									changed.Resolved = strings.Replace(changed.Resolved, "|recv=<nil>|", "|recv=*database/sql.DB|", 1)
+								case "result":
+									changed.Resolved += ",error"
+								case "family":
+									changed.Family += "Other"
+								case "owner":
+									changed.Replacement += "Other"
+								case "count-up":
+									changed.Multiplicity++
+								case "count-down":
+									changed.Multiplicity--
+								case "coexists":
+									inputs[slot][row[0].identity()], inputs[slot][row[2].identity()] = row[0], row[2]
+								}
+								if mutation != "missing" && mutation != "coexists" {
+									if changed == present {
+										t.Fatal("hostile mutation did not change its tuple")
+									}
+									inputs[slot][changed.identity()] = changed
+								}
+								removedActual := slot == 0 && (mutation == "missing" || (mutation == "count-down" && present.Multiplicity == 1))
+								headRetainsOld := head[row[0].identity()] == row[0] && head[row[2].identity()].Multiplicity == 0
+								check(t, inputs, removedActual && headRetainsOld)
+							})
+						}
+					}
+				}
+			}
+		}
+		for _, pair := range debtChannelObservationSignatureTransitions() {
+			for _, landed := range []bool{false, true} {
+				t.Run("existing-hostiles/"+pair[0].Declaration+"/"+pair[0].Operation, func(t *testing.T) {
+					debtRunFixtureSignatureHostileControls(t, pair, source, actual, landed)
+				})
+			}
+		}
+		check(t, [4]map[string]authorityDebtSite{source, baseline, actual, actual}, false)
+		check(t, [4]map[string]authorityDebtSite{actual, baseline, baseline, debtControlSet()}, false)
+		for _, row := range rows {
+			removed := maps.Clone(actual)
+			delete(removed, row[2].identity())
+			check(t, [4]map[string]authorityDebtSite{removed, baseline, baseline, source}, true)
+			check(t, [4]map[string]authorityDebtSite{removed, actual, actual, actual}, true)
+			for _, resurrected := range []authorityDebtSite{row[1], row[2]} {
+				grown := maps.Clone(removed)
+				grown[resurrected.identity()] = resurrected
+				check(t, [4]map[string]authorityDebtSite{grown, baseline, baseline, removed}, false)
+				check(t, [4]map[string]authorityDebtSite{grown, removed, removed, removed}, false)
+			}
+		}
+		grown := maps.Clone(actual)
+		escape := debtControlSite("call:UnrelatedEscape", 1)
+		grown[escape.identity()] = escape
+		if authorityDebtCount(grown) >= authorityDebtCount(baseline) {
+			t.Fatal("unrelated growth control must retain the lower total")
+		}
+		check(t, [4]map[string]authorityDebtSite{grown, grown, baseline, source}, false)
+	})
 	t.Run("channel-crash-preparation-signatures", func(t *testing.T) {
 		before, after := debtControlSet(), debtControlSet()
 		pairs := debtChannelCrashPreparationSignatureTransitions()
@@ -662,6 +781,7 @@ func TestPersistenceAuthorityDebtRunFixtureCollectorTransitionIsPinned(t *testin
 			{debtPortableGlobalRoleCollectorTo, debtPortableAgentFixtureCollectorTo},
 			{debtPortableAgentFixtureCollectorTo, debtW2DeliveryEvidenceCollectorTo},
 			{debtW2DeliveryEvidenceCollectorTo, debtChannelCrashPreparationCollectorTo},
+			{debtR241CollectorTo, debtChannelObservationCollectorTo},
 		} {
 			t.Run(edge[0], func(t *testing.T) {
 				for _, mutation := range []string{"exact", "foreign-base", "trusted-collector", "foreign-current", "head-collector", "unreviewed", "foreign-review", "reverse", "bootstrap", "remove-site", "add-site", "multiplicity", "replace-site"} {

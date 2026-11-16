@@ -19,7 +19,7 @@ func TestNativeBusStopStoragePreservesPhysicalPredicatesAndEveryField(t *testing
 		}
 		matched++
 		control := selectedCausalObservationBody(t, "internal/store/internal/backend/runlifecycle/standalone_fixture_storage.go", "ReadStopRunControlStorageTx")
-		deliveries := selectedCausalObservationBody(t, "internal/store/internal/backend/delivery/read_projections.go", "ReadStopPendingDeliveryCountTx")
+		deliveries := selectedCausalObservationBody(t, "internal/store/internal/backend/runlifecycle/test_run_stop_storage.go", "readStopPendingDeliveryCountTx")
 		revisions := selectedCausalObservationBody(t, "internal/store/internal/backend/runforkrevision/postgres.go", "CountActivityJournalRevisionsForTest")
 		if !reflect.DeepEqual(eventDeliveryDiagnosticSQL(t, row.Before), eventDeliveryDiagnosticSQL(t, control+"\n"+deliveries+"\n"+revisions)) {
 			t.Fatal("stop witness changed physical status/default/pending/revision predicates")
@@ -30,9 +30,15 @@ func TestNativeBusStopStoragePreservesPhysicalPredicatesAndEveryField(t *testing
 			t.Fatal("stop witness changed context, original owner, identity or field mapping")
 		}
 		adapter := selectedCausalObservationBody(t, "internal/store/internal/runtimepersistence/test_run_stop_storage.go", "ReadRunStopStorageForTest")
-		for _, call := range []string{"readServedDeliveryObservation(ctx, selected,", "runlifecycle.ReadStopRunControlStorageTx(ctx, tx, runID)", "delivery.ReadStopPendingDeliveryCountTx(ctx, tx, runID)", "runforkrevision.CountActivityJournalRevisionsForTest(ctx, tx, runID)", "return RunStopStorage{}, err"} {
+		for _, call := range []string{"validateChannelObservationOwner(selected)", "store.runLifecyclePostgresOwner.ReadRunStopStorageForTest(ctx, runID)", "store.runLifecycleSQLiteOwner.ReadRunStopStorageForTest(ctx, runID)"} {
 			if !strings.Contains(adapter, call) {
 				t.Fatalf("stop witness lost %s", call)
+			}
+		}
+		native := selectedCausalObservationBody(t, "internal/store/internal/backend/runlifecycle/test_run_stop_storage.go", "readRunStopStorageTxForTest")
+		for _, call := range []string{"ReadStopRunControlStorageTx(ctx, tx, runID)", "readStopPendingDeliveryCountTx(ctx, tx, runID)", "runforkrevision.CountActivityJournalRevisionsForTest(ctx, tx, runID)", "return RunStopStorage{}, err"} {
+			if !strings.Contains(native, call) {
+				t.Fatalf("native stop witness lost %s", call)
 			}
 		}
 	}

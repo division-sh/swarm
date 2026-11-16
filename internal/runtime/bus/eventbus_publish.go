@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/apiidempotency"
 	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/operatorread"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimechannelactivation "github.com/division-sh/swarm/internal/runtime/channelactivation"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -23,6 +24,7 @@ import (
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
+	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -472,8 +474,8 @@ type eventBusCommitPublishPlan struct {
 	event                 events.Event
 	providerRawSettlement providerRawSettlementAdmission
 	direct                bool
-	directRecipients      []string
-	directRoutes          []events.DeliveryRoute
+	recordedReplay        operatorread.ReplaySelection
+	requesterReturn       decisioncard.HumanTaskReturn
 	admitted              events.AdmittedEvent
 	publicationClaim      *pipelinePublicationClaim
 	dynamicFlowCreation   *runtimepipeline.DynamicFlowRuntimeCreationOccurrenceRequest
@@ -529,6 +531,13 @@ func (eb *EventBus) preparePublishCommand(ctx context.Context, plan eventBusComm
 		return preparedCtx, PreparedPublish{}, PublicationCommand{}, err
 	}
 	prepared, command, err := eb.prepareClosedPublication(preparedCtx, plan)
+	if err == nil {
+		if await, ok := runtimeeffects.CompletionAwaitPublicationForEvent(preparedCtx, prepared.Event.ID()); ok {
+			retained := await.Clone()
+			prepared.completionAwait = &retained
+			command.Commit.CompletionAwait = &await
+		}
+	}
 	if err == nil && plan.stageFeedback != nil {
 		request := *plan.stageFeedback
 		if err := request.ValidateEvent(prepared.Event); err != nil {
@@ -722,6 +731,18 @@ func (eb *EventBus) prepareClosedPublication(ctx context.Context, publication ev
 
 	admitted := publication.admitted
 	evt := admitted.Event()
+	if publication.direct && publication.requesterReturn.Empty() {
+		if err := publication.recordedReplay.ValidateEvent(evt); err != nil {
+			return releaseFailure(err)
+		}
+		original, err := eb.preparedEventForReplay(ctx, publication.recordedReplay.OriginalEventID())
+		if err != nil {
+			return releaseFailure(err)
+		}
+		if err := publication.recordedReplay.ValidateRecorded(original.Event.Event(), original.DeliveryRoutes); err != nil {
+			return releaseFailure(err)
+		}
+	}
 	descriptor, hasDescriptor, descriptorErr := publicationAuthorDescriptor(ctx, evt)
 	if descriptorErr != nil {
 		return releaseFailure(descriptorErr)
@@ -865,31 +886,22 @@ func (eb *EventBus) planClosedPublicationRoutes(ctx context.Context, evt events.
 	}
 	if publication.direct {
 		switch {
-		case len(publication.directRoutes) > 0:
-			routes := events.NormalizeDeliveryRoutes(publication.directRoutes)
-			planRoutes = func(context.Context, events.Event) (RoutePlan, error) {
-				return eb.planExactDirectRoutePlan(withClosedPublicationPlanning(ctx), evt, routes)
-			}
-		default:
-			requested := uniqueStrings(publication.directRecipients)
-			if len(requested) == 0 {
-				return closedPublicationRoutes{}, errors.New("direct event publication requires at least one recipient")
-			}
+		case !publication.requesterReturn.Empty():
 			planRoutes = func(context.Context, events.Event) (RoutePlan, error) {
 				var plan RoutePlan
 				err := eb.withPublicationInstancePlanning(ctx, evt, planner, func(ctx context.Context, bounded deliveryPlanner) error {
 					var err error
-					plan, err = bounded.PlanDirect(withClosedPublicationPlanning(ctx), evt, requested)
+					plan, err = eb.routeTable.requesterReturn.bind(ctx, bounded, evt, publication.requesterReturn)
 					return err
 				})
-				if err != nil {
-					return RoutePlan{}, err
-				}
-				if filtered := filteredRecipients(requested, plan.RecipientIDs()); len(filtered) > 0 {
-					return RoutePlan{}, fmt.Errorf("direct delivery rejected recipients: %s", strings.Join(filtered, ", "))
-				}
-				return plan.WithDefaultDeliveryContext(events.DeliveryContextFromContext(ctx)), nil
+				return plan.WithDefaultDeliveryContext(events.DeliveryContextFromContext(ctx)), err
 			}
+		case !publication.recordedReplay.Empty():
+			planRoutes = func(context.Context, events.Event) (RoutePlan, error) {
+				return eb.recordedReplayPlan(withClosedPublicationPlanning(ctx), evt, publication.recordedReplay)
+			}
+		default:
+			return closedPublicationRoutes{}, errors.New("closed return requires native requester or recorded delivery evidence")
 		}
 	}
 
@@ -964,6 +976,7 @@ func publicationAuthorDescriptor(ctx context.Context, evt events.Event) (runtime
 // Its route plan remains EventBus-owned; callers may persist the exported
 // delivery-route manifest but cannot reinterpret or replace the plan.
 type PreparedPublish struct {
+	completionAwait           *runtimeeffects.CompletionAwaitPublication
 	Event                     events.Event
 	admitted                  events.AdmittedEvent
 	plan                      RoutePlan
@@ -1047,6 +1060,10 @@ func (p PreparedPublish) CommitRequest() CommitPublishRequest {
 		ReplyReturns:        append([]runtimepinrouting.ReplyReturnContinuation(nil), p.plan.ReplyReturns...),
 		ReplyClaims:         append([]runtimereplycontext.ClaimCommand(nil), p.plan.ReplyClaims...),
 		JoinAdmissionFences: append([]runtimepipeline.WorkflowJoinAdmissionFence(nil), p.plan.JoinAdmissionFences...),
+	}
+	if p.completionAwait != nil {
+		await := p.completionAwait.Clone()
+		request.CompletionAwait = &await
 	}
 	if failure := p.plan.TargetFailure; !failure.Empty() && !p.providerRawSettlement.authorizes(p.Event, p.targetFailureInput, p.plan) {
 		disposition := runtimepipelineobligation.DeadLetter(failure.Code(), targetDeliveryFailureEnvelope(failure))
@@ -2435,9 +2452,6 @@ func (eb *EventBus) planSubscribedRoutePlanWithPlanner(ctx context.Context, evt 
 	if err != nil {
 		return RoutePlan{}, err
 	}
-	if err := validateRoutedNodeDeliveryAuthority(eb.semanticSource, evt, plan.RoutedRecipients, plan); err != nil {
-		return RoutePlan{}, err
-	}
 	routePlan := plan.Normalized()
 	routePlan = routePlan.WithDefaultDeliveryContext(events.DeliveryContextFromContext(ctx))
 	routePlan, err = restoreSelectedForkRecipientContexts(ctx, evt, routePlan)
@@ -2468,17 +2482,17 @@ func (eb *EventBus) authorizePublishRecipientPlanning(ctx context.Context, evt e
 func (eb *EventBus) materializePublishRecipientPlanWithPlanner(ctx context.Context, evt events.Event, routePlan RoutePlan, planner deliveryPlanner) (RoutePlan, error) {
 	routePlan = routePlan.Normalized()
 	if eb == nil || eb.recipientPlanMaterializer == nil {
-		return routePlan, nil
+		return routePlan, routePlan.requireAdmittedNodeIntents()
 	}
 	if routePlan.CanonicalRouteOwnerMatched() {
-		return routePlan, nil
+		return routePlan, routePlan.requireAdmittedNodeIntents()
 	}
 	routes, err := eb.recipientPlanMaterializer(ctx, evt, eb.publishRecipientPlan(evt, routePlan))
 	if err != nil {
 		return RoutePlan{}, err
 	}
 	if len(routes) == 0 {
-		return routePlan, nil
+		return routePlan, routePlan.requireAdmittedNodeIntents()
 	}
 	routePlan.recordOrdinaryRouteProducer()
 	routePlan.AddDeliveryIntents(routePlanDeliveryIntentsFromRoutes(routes, routeIntentProducerOrdinary)...)
@@ -2486,7 +2500,11 @@ func (eb *EventBus) materializePublishRecipientPlanWithPlanner(ctx context.Conte
 	if err != nil {
 		return RoutePlan{}, err
 	}
-	return planner.resolvePreparedRoutePlan(projection, routePlan)
+	routePlan, err = planner.resolvePreparedRoutePlan(projection, routePlan)
+	if err != nil {
+		return RoutePlan{}, err
+	}
+	return routePlan, routePlan.requireAdmittedNodeIntents()
 }
 
 func (eb *EventBus) authorizePublishRecipientPlan(ctx context.Context, evt events.Event, routePlan RoutePlan) error {
@@ -2515,7 +2533,7 @@ func (eb *EventBus) publishRecipientPlan(evt events.Event, routePlan RoutePlan) 
 			!routePlan.TargetFailure.Empty() || classification.DeliberateNoSubscriber(),
 	}
 	if eb != nil {
-		out.RoutedRecipients = eb.describeSubscribersForEvent(string(evt.Type()), routePlan.RoutedRecipients)
+		out.RoutedRecipients = eb.describeSubscribersForEvent(string(evt.Type()), routePlan.routedRecipients())
 	}
 	return out
 }
@@ -2641,55 +2659,14 @@ func (eb *EventBus) recordPublishDiagnostic(ctx context.Context, evt events.Even
 		EventType:              strings.TrimSpace(string(evt.Type())),
 		EntityID:               strings.TrimSpace(evt.EntityID()),
 		ParentEventID:          strings.TrimSpace(evt.ParentEventID()),
-		RoutedRecipients:       eb.describeSubscribersForEvent(string(evt.Type()), routePlan.RoutedRecipients),
+		RoutedRecipients:       eb.describeSubscribersForEvent(string(evt.Type()), routePlan.routedRecipients()),
 		SubscriptionRecipients: uniqueStrings(routePlan.SubscribedRecipients),
 	})
 }
 
-// planExactDirectRoutePlan uses current policy only to resolve live recipient
-// capabilities. The supplied routes remain the sole persistence and delivery
-// authority for target, context, and payload projection facts.
-func (eb *EventBus) planExactDirectRoutePlan(ctx context.Context, evt events.Event, routes []events.DeliveryRoute) (RoutePlan, error) {
-	routes = events.NormalizeDeliveryRoutes(routes)
-	if err := events.ValidateDeliveryRoutes(routes); err != nil {
-		return RoutePlan{}, err
-	}
-	plan, err := eb.deliveryPlanner.PlanExactDirect(ctx, evt, routes)
-	if err != nil {
-		return RoutePlan{}, err
-	}
-	if err := plan.ValidatePersistentDeliveries(); err != nil {
-		return RoutePlan{}, fmt.Errorf("validate exact direct delivery routes: %w", err)
-	}
-	return plan.WithDefaultDeliveryContext(events.DeliveryContextFromContext(ctx)), nil
-}
-
-// PublishDirect persists an event and delivers it to an explicit caller-supplied
-// recipient set. The recipient manifest still routes through the canonical
-// delivery policy so explicit delivery cannot bypass scoped-recipient rules.
-func (eb *EventBus) PublishDirect(ctx context.Context, evt events.Event, recipients []string) error {
-	ctx, lease, err := eb.beginRuntimeWork(ctx)
-	if err != nil {
-		return err
-	}
-	if lease != nil {
-		defer func() { _ = lease.Done() }()
-	}
-	ctx = WithCurrentRuntimeEpoch(ctx)
-	if err := ensurePublishEpoch(ctx); err != nil {
-		return err
-	}
-	prepared, ready, err := eb.commitPublish(ctx, eventBusCommitPublishPlan{bus: eb, event: evt, direct: true, directRecipients: uniqueStrings(recipients)})
-	if !ready {
-		return err
-	}
-	return errors.Join(err, eb.dispatchPreparedPublish(publicationHandoffContext(ctx, err), prepared))
-}
-
-// PublishDirectRoutes persists and dispatches exactly the caller-supplied
-// agent routes. It is the closed public-replay boundary: current policy may
-// prove recipient availability but cannot replace route-owned facts.
-func (eb *EventBus) PublishDirectRoutes(ctx context.Context, evt events.Event, routes []events.DeliveryRoute) error {
+// PublishRecordedReplay consumes original delivery rows. Current policy may
+// prove availability, but cannot replace the selected route-owned facts.
+func (eb *EventBus) PublishRecordedReplay(ctx context.Context, evt events.Event, selection operatorread.ReplaySelection) error {
 	ctx, lease, err := eb.beginRuntimeWork(ctx)
 	if err != nil {
 		return err
@@ -2702,7 +2679,7 @@ func (eb *EventBus) PublishDirectRoutes(ctx context.Context, evt events.Event, r
 		return err
 	}
 	prepared, ready, err := eb.commitPublish(ctx, eventBusCommitPublishPlan{
-		bus: eb, event: evt, direct: true, directRoutes: events.NormalizeDeliveryRoutes(routes),
+		bus: eb, event: evt, direct: true, recordedReplay: selection,
 	})
 	if !ready {
 		return err
@@ -2805,10 +2782,10 @@ func acceptedWorkExecutionContext(accepted context.Context, carryOriginal func(c
 	return ctx, closeContext, nil
 }
 
-// CheckDirectRoutes applies the same exact-route policy used by
-// PublishDirectRoutes without creating replay evidence.
-func (eb *EventBus) CheckDirectRoutes(ctx context.Context, evt events.Event, routes []events.DeliveryRoute) (ExactDirectRouteStatus, error) {
-	requested := events.NormalizeDeliveryRoutes(routes)
+// CheckRecordedReplay observes availability of an exact original selection
+// without creating a replay publication.
+func (eb *EventBus) CheckRecordedReplay(ctx context.Context, evt events.Event, selection operatorread.ReplaySelection) (ExactDirectRouteStatus, error) {
+	requested := selection.Routes()
 	status := ExactDirectRouteStatus{Requested: append([]events.DeliveryRoute(nil), requested...)}
 	if eb == nil {
 		status.Missing = append([]events.DeliveryRoute(nil), requested...)
@@ -2835,7 +2812,7 @@ func (eb *EventBus) CheckDirectRoutes(ctx context.Context, evt events.Event, rou
 	if runID := strings.TrimSpace(evt.RunID()); runID != "" {
 		ctx = runtimecorrelation.WithRunID(ctx, runID)
 	}
-	plan, err := eb.planExactDirectRoutePlan(ctx, evt, requested)
+	plan, err := eb.recordedReplayPlan(ctx, evt, selection)
 	if err != nil {
 		var unavailable *exactDirectRecipientsUnavailableError
 		if errors.As(err, &unavailable) {

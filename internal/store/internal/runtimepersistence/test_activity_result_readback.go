@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 
+	"github.com/division-sh/swarm/internal/store/internal/backend/activityjournal"
 	storedelivery "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 )
 
@@ -15,7 +16,7 @@ type ActivityResultPublicationStorage struct {
 	ResetOperations, ActivityAttempts, SuccessfulActivityAttempts   int
 }
 
-type ProposedEffectRunExecutionStorage struct{ Requests, SuccessfulAttempts int }
+type ProposedEffectRunExecutionStorage = activityjournal.ProposedEffectRunExecutionStorage
 
 func ReadProposedEffectRunExecutionStorageForTest(ctx context.Context, selected any, runID string) (ProposedEffectRunExecutionStorage, error) {
 	var observed ProposedEffectRunExecutionStorage
@@ -25,14 +26,11 @@ func ReadProposedEffectRunExecutionStorageForTest(ctx context.Context, selected 
 	if err := validateSelectedForkStorageIdentity(runID); err != nil {
 		return observed, err
 	}
-	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		return tx.QueryRowContext(ctx, `SELECT
-			(SELECT COUNT(*) FROM events WHERE CAST(run_id AS TEXT)=$1 AND event_name='platform.activity_requested'),
-			(SELECT COUNT(*) FROM activity_attempts WHERE CAST(run_id AS TEXT)=$1 AND status='succeeded')`, runID).
-			Scan(&observed.Requests, &observed.SuccessfulAttempts)
-	})
-	if err != nil {
-		return ProposedEffectRunExecutionStorage{}, err
+	switch owner := selected.(type) {
+	case *PostgresStore:
+		return owner.activityPostgresOwner.ReadProposedEffectRunExecutionStorageForTest(ctx, runID)
+	case *SQLiteRuntimeStore:
+		return owner.activitySQLiteOwner.ReadProposedEffectRunExecutionStorageForTest(ctx, runID)
 	}
 	return observed, nil
 }

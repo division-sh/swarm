@@ -70,7 +70,8 @@ func TestS1DirectRecipientPreviewAdmitsFrozenRootBeforeSourceConsumers(t *testin
 			identity := testAgentRouteIdentity(t, agentID, "")
 			requested := []events.DeliveryRoute{{Recipient: events.MustAgentDeliveryRecipient(agentID), AgentIdentity: identity}}
 			event := eventtest.RunCreatingRootIngress(eventtest.UUID("rooted-direct-preview"), "bootstrap.requested", "operator", "", []byte(`{}`), 0, busInternalTestRunID, "", events.EventEnvelope{}, time.Now().UTC())
-			status, err := bus.CheckDirectRoutes(test.ctx, event, requested)
+			event, selection := recordedReplaySelectionForTest(t, event, requested)
+			status, err := bus.CheckRecordedReplay(test.ctx, event, selection)
 			if test.valid {
 				if err != nil || payloadCalls != 1 || len(status.Deliverable) != 1 || status.Deliverable[0].AgentIdentity != identity {
 					t.Fatalf("valid direct preview lost its frozen source or exact recipient: payload_calls=%d status=%+v err=%v", payloadCalls, status, err)

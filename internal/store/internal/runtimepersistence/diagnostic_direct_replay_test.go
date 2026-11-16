@@ -12,7 +12,6 @@ import (
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	eventtestsql "github.com/division-sh/swarm/internal/store/testsql"
-	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/tests/support/testutil"
 	"github.com/google/uuid"
 )
@@ -31,10 +30,12 @@ func TestSQLiteRuntimeStoreListEventsMissingPipelineReceiptExcludesDiagnosticDir
 
 		events.EventType("workflow.executable"),
 		"runtime", "", json.RawMessage(`{"ok":true}`), 0, runID, "", events.EventEnvelope{}, now.Add(3*time.Second)))
-	eventtestsql.CorruptEventStore(t, ctx, store.backend.ConstructionHandle(), authoractivityfixture.DialectSQLite, eventtestsql.EventCorruptionClaim{
+	claim := eventtestsql.EventCorruptionClaim{
 		Invariant: "store.event_record.named_operation_atomicity",
 		Reason:    "prove recovery fails closed when durable replay-scope evidence is missing",
-	}, `DELETE FROM committed_replay_scopes WHERE event_id = ?`, "", executableID)
+	}
+	eventtestsql.RequireEventCorruptionClaim(t, claim)
+	eventtestsql.RequireEventCorruptionResult(t, claim, RemoveCommittedReplayScopeEvidenceForTest(ctx, store, executableID))
 
 	presence, err := store.PipelineObligations().GlobalWorkPresence(ctx)
 	if err != nil {
@@ -95,10 +96,12 @@ func TestPostgresStoreListEventsMissingPipelineReceiptExcludesDiagnosticDirectEv
 
 		events.EventType("workflow.executable"),
 		"runtime", "", json.RawMessage(`{"ok":true}`), 0, runID, "", events.EventEnvelope{}, now.Add(3*time.Second)))
-	eventtestsql.CorruptEventStore(t, ctx, pg.backend.ConstructionHandle(), authoractivityfixture.DialectPostgres, eventtestsql.EventCorruptionClaim{
+	claim := eventtestsql.EventCorruptionClaim{
 		Invariant: "store.event_record.named_operation_atomicity",
 		Reason:    "prove recovery fails closed when durable replay-scope evidence is missing",
-	}, "", `DELETE FROM committed_replay_scopes WHERE event_id = $1::uuid`, executableID)
+	}
+	eventtestsql.RequireEventCorruptionClaim(t, claim)
+	eventtestsql.RequireEventCorruptionResult(t, claim, RemoveCommittedReplayScopeEvidenceForTest(ctx, pg, executableID))
 
 	presence, err := pg.PipelineObligations().GlobalWorkPresence(ctx)
 	if err != nil {

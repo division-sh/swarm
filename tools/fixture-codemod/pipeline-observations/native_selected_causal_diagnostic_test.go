@@ -79,7 +79,7 @@ func TestNativeSelectedCausalDiagnosticRootRetainsEveryLifecycleCut(t *testing.T
 	}
 }
 
-func selectedCausalObservationBody(t *testing.T, path, name string) string {
+func selectedCausalObservationBody(t *testing.T, path, name string, receiver ...string) string {
 	t.Helper()
 	path = filepath.Join("..", "..", "..", path)
 	body, err := os.ReadFile(path)
@@ -92,6 +92,11 @@ func selectedCausalObservationBody(t *testing.T, path, name string) string {
 		t.Fatal(err)
 	}
 	fn, err := uniqueFunction(file, name)
+	if len(receiver) == 1 {
+		fn, err = uniqueRecipeFunction(file, recipe{Function: name, After: "func (s *" + receiver[0] + ") " + name + "() {}"})
+	} else if len(receiver) != 0 {
+		t.Fatal("native observation requires at most one exact receiver")
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,10 +139,10 @@ func TestNativeSelectedCausalDiagnosticOwnersPreserveEveryOriginalQuery(t *testi
 	want := append(eventDeliveryDiagnosticSQL(t, row.Before), eventDeliveryDiagnosticSQL(t, callback.Before)...)
 	var got []string
 	for _, operation := range [][2]string{
-		{"internal/store/internal/backend/eventrecord/lifecycle_diagnostic_observation.go", "ReadLifecycleDiagnosticEventLineage"},
-		{"internal/store/internal/backend/eventpersistence/lifecycle_diagnostic_observation.go", "ReadLifecycleDiagnosticProjection"},
-		{"internal/store/internal/backend/eventrecord/lifecycle_diagnostic_observation.go", "CountLifecycleDiagnosticEvents"},
-		{"internal/store/internal/backend/eventpersistence/lifecycle_diagnostic_observation.go", "CountPendingLifecycleDiagnostic"},
+		{"internal/store/internal/backend/eventpersistence/test_event_record_observation_queries.go", "readLifecycleDiagnosticEventLineage"},
+		{"internal/store/internal/backend/eventpersistence/test_event_record_observation_queries.go", "readLifecycleDiagnosticProjection"},
+		{"internal/store/internal/backend/eventpersistence/test_event_record_observation_queries.go", "countLifecycleDiagnosticEvents"},
+		{"internal/store/internal/backend/eventpersistence/test_event_record_observation_queries.go", "countPendingLifecycleDiagnostic"},
 	} {
 		got = append(got, eventDeliveryDiagnosticSQL(t, selectedCausalObservationBody(t, operation[0], operation[1]))...)
 	}
@@ -152,15 +157,15 @@ func TestNativeSelectedCausalDiagnosticOwnersPreserveEveryOriginalQuery(t *testi
 	if len(original) != 6 || !reflect.DeepEqual(got, original) {
 		t.Fatalf("global predicates, casts or projected-at cut changed: got=%v want=%v", got, original)
 	}
-	lineage := selectedCausalObservationBody(t, "internal/store/internal/backend/eventrecord/lifecycle_diagnostic_observation.go", "ReadLifecycleDiagnosticEventLineage")
+	lineage := selectedCausalObservationBody(t, "internal/store/internal/backend/eventpersistence/test_event_record_observation_queries.go", "readLifecycleDiagnosticEventLineage")
 	for _, required := range []string{"tx.QueryContext(ctx, query, outboxID)", "rows.Scan(&row.RunID, &row.SourceEventID)", "rows.Err()", "rows.Close()"} {
 		if !strings.Contains(lineage, required) {
 			t.Fatalf("strict lineage or complete read boundary missing: %s", required)
 		}
 	}
 	for _, pair := range [][3]string{
-		{"ReadSelectedCausalDiagnosticStorageForTest", "eventrecord.ReadLifecycleDiagnosticEventLineage", "ReadLifecycleDiagnosticProjection"},
-		{"ReadSelectedCausalDiagnosticConservationForTest", "eventrecord.CountLifecycleDiagnosticEvents", "CountPendingLifecycleDiagnostic"},
+		{"ReadSelectedCausalDiagnosticStorageForTest", "readLifecycleDiagnosticEventLineage", "readLifecycleDiagnosticProjection"},
+		{"ReadSelectedCausalDiagnosticConservationForTest", "countLifecycleDiagnosticEvents", "countPendingLifecycleDiagnostic"},
 	} {
 		name := pair[0]
 		adapter := selectedCausalObservationBody(t, "internal/store/internal/runtimepersistence/test_event_support.go", name)

@@ -143,6 +143,35 @@ func newExitProbe(t *testing.T) (*Backend, *exitProbeConnector) {
 	return b, p
 }
 
+func TestObservedReadDisposalPreservesIndependentRollbackFailure(t *testing.T) {
+	for _, failRollback := range []bool{false, true} {
+		t.Run(fmt.Sprint(failRollback), func(t *testing.T) {
+			backend, probe := newExitProbe(t)
+			primary := errors.New("read failed independently")
+			rollback := errors.New("rollback failed independently")
+			if failRollback {
+				probe.rollbackFailure = rollback
+			}
+			disposed, err := backend.RunReadTransactionObserved(context.Background(), func(ctx context.Context, tx *sql.Tx) error {
+				var value int
+				if err := tx.QueryRowContext(ctx, `SELECT 1`).Scan(&value); err != nil {
+					return err
+				}
+				return primary
+			})
+			if !disposed || !errors.Is(err, primary) || (failRollback && !errors.Is(err, rollback)) {
+				t.Fatalf("disposal=%v err=%v", disposed, err)
+			}
+			if _, clean := CleanCancellationBeforeCommit(err); clean {
+				t.Fatal("read disposal fabricated clean write cancellation")
+			}
+			if failRollback && probe.closed.Load() == 0 {
+				t.Fatal("failed rollback did not discard the native connection")
+			}
+		})
+	}
+}
+
 func originalProcessContext(t *testing.T, dsn string) context.Context {
 	t.Helper()
 	db, err := sql.Open("postgres", dsn)

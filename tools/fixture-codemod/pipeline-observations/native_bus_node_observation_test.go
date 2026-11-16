@@ -24,9 +24,9 @@ func TestNativeBusNodeObservationPreservesAllPhysicalDiagnosticQueries(t *testin
 		want := eventDeliveryDiagnosticSQL(t, row.Before)
 		got := []string{}
 		for _, owner := range [][2]string{
-			{"internal/store/internal/backend/delivery/read_projections.go", "ReadNodeDeliveryDiagnosticLinesTx"},
-			{"internal/store/internal/backend/delivery/read_projections.go", "ReadNodeDeadLetterDiagnosticLinesTx"},
-			{"internal/store/internal/backend/pipelinepersistence/owner_operations.go", "ReadNodeReceiptDiagnosticLinesTx"},
+			{"internal/store/internal/backend/pipelinepersistence/test_node_delivery_diagnostic.go", "readNodeDeliveryDiagnosticLinesTx"},
+			{"internal/store/internal/backend/pipelinepersistence/test_node_delivery_diagnostic.go", "readNodeDeadLetterDiagnosticLinesTx"},
+			{"internal/store/internal/backend/pipelinepersistence/test_node_delivery_diagnostic.go", "readNodeReceiptDiagnosticLinesTx"},
 		} {
 			queries := eventDeliveryDiagnosticSQL(t, selectedCausalObservationBody(t, owner[0], owner[1]))
 			got = append(got, queries[1])

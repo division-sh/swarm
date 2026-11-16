@@ -251,15 +251,15 @@ func TestMaterializeRunForkRootAuthoritiesExecuteWithForkIdentitySelectedStorePa
 			ctx = originalStoreFixtureContext(t, ctx, selected)
 			requireRunningRunForTest(t, ctx, selected, sourceRunID, now)
 
-			rootOutcomes := map[string]runtimecontracts.WorkflowGateOutcomePlan{
-				"approve": {
-					Verdict:    "approve",
-					AdvancesTo: "done",
-					Emit:       runtimecontracts.EmitSpec{Event: "run_fork.compiled_root_gate_approved"},
-					EmitSchema: map[string]any{"type": "object", "properties": map[string]any{}, "additionalProperties": false},
-				},
-			}
 			rootBundle := runForkRootGateBundleForTest(t)
+			rootPlan, found := rootBundle.WorkflowGateForStage(".", "awaiting_review")
+			if !found || rootPlan.Decision != "root_review" {
+				t.Fatal("root gate declaration has no exact admitted plan")
+			}
+			rootOutcomes, err := decisioncard.ResolveGateOutcomes(semanticview.Wrap(rootBundle), rootPlan)
+			if err != nil {
+				t.Fatal(err)
+			}
 			target, err := runtimecontracts.BootBundleIdentity(rootBundle)
 			if err != nil {
 				t.Fatal(err)
@@ -295,14 +295,7 @@ func TestMaterializeRunForkRootAuthoritiesExecuteWithForkIdentitySelectedStorePa
 			}
 			sourceCard, err := decisioncard.New(decisioncard.Card{
 				CardID: sourceActivation.CardID, RunID: sourceRunID, ExecutionMode: "live", Anchor: sourceAnchor,
-				Snapshot: freezeDecisionCardTestSnapshot(t, sourceActivation.DecisionID, map[string]any{"summary": "root source"}, map[string]runtimecontracts.WorkflowGateOutcomePlan{
-					"approve": {
-						Verdict:    "approve",
-						AdvancesTo: "done",
-						Emit:       runtimecontracts.EmitSpec{Event: "run_fork.compiled_root_gate_approved"},
-						EmitSchema: map[string]any{"type": "object", "properties": map[string]any{}, "additionalProperties": false},
-					},
-				}),
+				Snapshot:   freezeDecisionCardTestSnapshot(t, sourceActivation.DecisionID, map[string]any{"summary": "root source"}, rootOutcomes),
 				BundleHash: sourceActivation.BundleHash, WorkflowVersion: "1", CreatedAt: now,
 			})
 			if err != nil {
@@ -1138,29 +1131,47 @@ func TestPrepareRunForkApprovedProposedEffectRequiresUnambiguousTerminalEvidence
 // clock representation is substituted, as in the timestamp reuse controls.
 func seedApprovedActivityRecordedEvidence(t *testing.T, ctx context.Context, fixture authorActivityReceiptFixture, postgres bool, record runtimepipeline.ActivityAttemptRecord, startedAt string, completedAt any) {
 	t.Helper()
-	err := runUnrevisionedEventFixtureTransactionForTest(ctx, fixture.store, func(ctx context.Context, tx *sql.Tx) error {
-		dialect := activityjournal.DialectSQLite
-		active := func(ctx context.Context, runID string) error { return runstate.RequireSQLiteActiveTx(ctx, tx, runID) }
-		if postgres {
-			dialect = activityjournal.DialectPostgres
-			active = func(ctx context.Context, runID string) error { return runstate.RequirePostgresActiveTx(ctx, tx, runID) }
-		}
-		story := &activityStorySpy{}
-		if _, inserted, err := activityjournal.Start(ctx, tx, dialect, active, story, record); err != nil {
-			return err
-		} else if !inserted {
-			return fmt.Errorf("approved recorded activity already exists")
-		}
-		if record.Status != runtimepipeline.ActivityAttemptStatusStarted {
-			if _, committed, err := activityjournal.Complete(ctx, tx, dialect, active, story, record); err != nil {
-				return err
-			} else if !committed {
-				return fmt.Errorf("approved recorded activity did not settle")
+	err := func() error {
+		fixtureContext := ctx
+		fixtureOwner := any(fixture.store)
+		write := func(ctx context.Context, tx *sql.Tx) error {
+			dialect := activityjournal.DialectSQLite
+			active := func(ctx context.Context, runID string) error { return runstate.RequireSQLiteActiveTx(ctx, tx, runID) }
+			if postgres {
+				dialect = activityjournal.DialectPostgres
+				active = func(ctx context.Context, runID string) error { return runstate.RequirePostgresActiveTx(ctx, tx, runID) }
 			}
+			story := &activityStorySpy{}
+			if _, inserted, err := activityjournal.Start(ctx, tx, dialect, active, story, record); err != nil {
+				return err
+			} else if !inserted {
+				return fmt.Errorf("approved recorded activity already exists")
+			}
+			if record.Status != runtimepipeline.ActivityAttemptStatusStarted {
+				if _, committed, err := activityjournal.Complete(ctx, tx, dialect, active, story, record); err != nil {
+					return err
+				} else if !committed {
+					return fmt.Errorf("approved recorded activity did not settle")
+				}
+			}
+			_, err := tx.ExecContext(ctx, `UPDATE activity_attempts SET started_at=$1,completed_at=$2,updated_at=$1 WHERE request_event_id=$3`, startedAt, completedAt, record.RequestEventID)
+			return err
 		}
-		_, err := tx.ExecContext(ctx, `UPDATE activity_attempts SET started_at=$1,completed_at=$2,updated_at=$1 WHERE request_event_id=$3`, startedAt, completedAt, record.RequestEventID)
-		return err
-	})
+		switch owner := fixtureOwner.(type) {
+		case *PostgresStore:
+			if owner == nil || owner.backend == nil {
+				return fmt.Errorf("postgres event fixture store is required")
+			}
+			return owner.backend.RunTransaction(fixtureContext, write)
+		case *SQLiteRuntimeStore:
+			if owner == nil || owner.backend == nil {
+				return fmt.Errorf("sqlite event fixture store is required")
+			}
+			return owner.backend.RunTransaction(fixtureContext, "unrevisioned event fixture", write)
+		default:
+			return fmt.Errorf("event fixture store %T is unsupported", fixtureOwner)
+		}
+	}()
 	if err != nil {
 		t.Fatal(err)
 	}

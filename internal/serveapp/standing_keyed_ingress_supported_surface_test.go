@@ -8,12 +8,14 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/credentials"
@@ -172,8 +174,121 @@ func a9KeyedRootIngressConstruction(t *testing.T, autoEmit bool) {
 			}); err != nil || found {
 				t.Fatalf("root-key contradiction left a receipt: found=%t err=%v", found, err)
 			}
+			if !autoEmit {
+				t.Run("retained_keyless_audit", func(t *testing.T) {
+					proveRetainedKeylessAudit(t, backend, secret)
+				})
+			}
 		})
 	}
+}
+
+func proveRetainedKeylessAudit(t *testing.T, backend, secret string) {
+	t.Helper()
+	root := canonicalrouting.CopyConcurrentKeyedRootRawIngress(t)
+	path := filepath.Join(root, "schema.yaml")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range map[string]string{
+		"schema.yaml":       string(raw) + "\noutputs: [audit.observed]\nconnect:\n  - {event: audit.observed, from: ., to: audit}\n",
+		"audit/schema.yaml": "stages: []\ninputs: [audit.observed]\n",
+		"audit/state.yaml":  "observations: 0\nlast_delivery: \"\"\n",
+		"audit/nodes.yaml":  "audit:\n  audit.observed:\n    data_accumulation:\n      writes:\n        - {target_field: observations, value: state.observations + 1}\n        - {target_field: last_delivery, value: payload.delivery}\n",
+	} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(body), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	path = filepath.Join(root, "events.yaml")
+	raw, err = os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, append(raw, []byte("\naudit.observed:\n  delivery: text\n")...), 0600); err != nil {
+		t.Fatal(err)
+	}
+	path = filepath.Join(root, "nodes.yaml")
+	raw, err = os.ReadFile(path)
+	if err != nil || strings.Count(string(raw), "  inbound.partner.raw:\n") != 1 {
+		t.Fatalf("retained audit fixture: %s %v", raw, err)
+	}
+	raw = []byte(strings.Replace(string(raw), "  inbound.partner.raw:\n", "  inbound.partner.raw:\n    emit: {event: audit.observed, fields: {delivery: payload.provider_event_id}}\n", 1))
+	if err := os.WriteFile(path, raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	_, start := clockDeploymentHarness(t, backend, root)
+	process, served := start()
+	t.Cleanup(func() {
+		if code := process.stop(); code != 0 {
+			t.Errorf("retained audit shutdown=%d", code)
+		}
+	})
+	send := func(id string) string {
+		t.Helper()
+		endpoint := strings.TrimSuffix(served.Endpoint, "/v1/rpc") + "/webhooks/keyed-shop/partner"
+		code, raw := a9PostSignedRawIngress(t, endpoint, secret, `{"delivery_id":"`+id+`","account_id":"account-7"}`)
+		var receipt struct {
+			RunID string `json:"run_id"`
+		}
+		if err := json.Unmarshal(raw, &receipt); err != nil || code != http.StatusAccepted || receipt.RunID == "" {
+			t.Fatalf("retained audit input: status=%d body=%s err=%v", code, raw, err)
+		}
+		return receipt.RunID
+	}
+	runID := send("before-restart")
+	load := func(want int64) map[string]pipeline.WorkflowInstance {
+		t.Helper()
+		rt := servedTestProcessRuntime(t, process)
+		deadline := time.Now().Add(servedProofPollDeadline)
+		for {
+			instances, err := rt.Pipeline.ListWorkflowInstances(t.Context(), runID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			byFlow := map[string]pipeline.WorkflowInstance{}
+			for _, instance := range instances {
+				flow := instance.WorkflowName
+				if instance.StorageRef == runID {
+					flow = "."
+				}
+				byFlow[flow] = instance
+			}
+			if audit, found := byFlow["audit"]; found && audit.Fields["observations"] == want {
+				if len(byFlow) != 2 || audit.ParentEntityID != byFlow["."].EntityID || audit.Life != 1 || byFlow["."].Life != 1 {
+					t.Fatalf("retained parent/audit ownership: %+v", byFlow)
+				}
+				var diagnosis cliapp.DiagnosticRunDiagnosisResult
+				requireServedJSONRPCResult(t, served.Endpoint, "run.diagnose", map[string]any{"run_id": runID}, &diagnosis)
+				if diagnosis.TestQuiescence != nil && cliapp.BoolPointerValue(diagnosis.TestQuiescence.Ready) {
+					return byFlow
+				}
+			}
+			if !time.Now().Before(deadline) {
+				t.Fatalf("retained audit count=%d: %+v", want, byFlow)
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	before := load(1)
+	requireServedRunStatus(t, served.Endpoint, runID, "live")
+	if code := process.stop(); code != 0 {
+		t.Fatalf("retained audit predecessor shutdown=%d", code)
+	}
+	process, served = start()
+	after := load(1)
+	requireServedRunStatus(t, served.Endpoint, runID, "live")
+	for flow, instance := range before {
+		current := after[flow]
+		if current.EntityID != instance.EntityID || current.InstanceID != instance.InstanceID || current.StorageRef != instance.StorageRef || current.Life != instance.Life || !reflect.DeepEqual(current.Fields, instance.Fields) {
+			t.Fatalf("restart changed retained %s: before=%+v after=%+v", flow, instance, current)
+		}
+	}
+	if got := send("after-restart"); got != runID {
+		t.Fatalf("retained parent replaced on next event: %s != %s", got, runID)
+	}
+	load(2)
 }
 
 func a9RequireRootIngressSettlement(t *testing.T, endpoint, runID, eventID string) {

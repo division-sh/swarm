@@ -66,6 +66,7 @@ type RouteTable struct {
 	staticAgentPlans    map[agentidentity.Plan]struct{}
 	connectGraph        runtimepinrouting.CompiledConnectGraph
 	compiledSourceReady bool
+	requesterReturn     requesterReturnRelation
 }
 
 type routeFlowTemplate struct {
@@ -117,6 +118,7 @@ func deriveRouteTableWithInputProducers(source semanticview.Source, graph runtim
 		staticAgentPlans:    make(map[agentidentity.Plan]struct{}),
 		connectGraph:        graph,
 		compiledSourceReady: true,
+		requesterReturn:     requesterReturnRelation{compiled: true},
 	}
 	if source == nil {
 		return rt, nil

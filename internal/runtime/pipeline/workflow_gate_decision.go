@@ -19,6 +19,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 	runtimeworkflowlifecycle "github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 	"github.com/google/uuid"
@@ -281,7 +282,7 @@ func (pc *PipelineCoordinator) handleDecisionCardDeferredEvent(ctx context.Conte
 	if err != nil {
 		return nil, runtimepipelineobligation.Continue(), err
 	}
-	committed, err := pc.commitHumanTaskRoute(ctx, product, []string{anchor.RequesterAgentID}, continuation.ReplyContextID, card.CardID, evt.ID(), evt.CreatedAt(), false)
+	committed, err := pc.commitHumanTaskRoute(ctx, product, card, continuation, evt.ID(), evt.CreatedAt(), false)
 	return nil, runtimepipelineobligation.ExecutionOutcome{Committed: committed}, err
 }
 
@@ -331,7 +332,7 @@ func (pc *PipelineCoordinator) handleDecisionCardExpiredEvent(ctx context.Contex
 	if err != nil {
 		return nil, runtimepipelineobligation.Continue(), err
 	}
-	committed, err := pc.commitHumanTaskRoute(ctx, product, []string{anchor.RequesterAgentID}, continuation.ReplyContextID, card.CardID, evt.ID(), card.DecidedAt, true)
+	committed, err := pc.commitHumanTaskRoute(ctx, product, card, continuation, evt.ID(), card.DecidedAt, true)
 	return nil, runtimepipelineobligation.ExecutionOutcome{Committed: committed}, err
 }
 
@@ -359,7 +360,9 @@ func humanTaskRequesterOutcomeEnvelope(continuation decisioncard.HumanTaskContin
 }
 
 func (pc *PipelineCoordinator) handleStageGateDecisionCard(ctx context.Context, evt events.Event, card decisioncard.Card) ([]events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
-	if current := workflowGateBundleHash(ctx, pc); current == "" || current != card.BundleHash {
+	current := workflowGateBundleHash(ctx, pc)
+	bundle, compiled := semanticview.Bundle(pc.SemanticSource())
+	if current == "" || !compiled || bundle == nil || bundle.SourceArtifact == nil || bundle.SourceArtifact.BundleHash() != current {
 		failure := runtimefailures.Normalize(runtimefailures.New(
 			runtimefailures.ClassDependencyUnavailable,
 			"decision_card_bundle_unavailable",
@@ -414,7 +417,19 @@ func (pc *PipelineCoordinator) loadStageGateRoute(ctx context.Context, card deci
 	if activation.ActivationID != anchor.StageActivationID || activation.CardID != card.CardID {
 		return gateruntime.Route{}, fmt.Errorf("decision card activation is no longer authoritative")
 	}
-	return gateruntime.RouteFor(activation.RoutesJSON, card.Verdict)
+	if activation.Status == gateruntime.StatusRouted && activation.DecisionEventID == card.DecisionEventID {
+		// Exact settled evidence is readback, not a fresh current-source execution.
+		return gateruntime.RouteFor(activation.RoutesJSON, card.Verdict)
+	}
+	prepared, err := pc.prepareGateOffer(ctx, card, instance, activation)
+	if err != nil {
+		return gateruntime.Route{}, err
+	}
+	routes, err := prepared.offer.RoutesJSON()
+	if err != nil {
+		return gateruntime.Route{}, err
+	}
+	return gateruntime.RouteFor(routes, card.Verdict)
 }
 
 func validateStageGateInstanceOwner(anchor decisioncard.StageGateAnchor, instance WorkflowInstance, activation gateruntime.Activation) error {
@@ -472,16 +487,15 @@ func (pc *PipelineCoordinator) handleHumanTaskDecisionCard(ctx context.Context, 
 	if err != nil {
 		return nil, runtimepipelineobligation.Continue(), err
 	}
-	committed, err := pc.commitHumanTaskRoute(ctx, product, []string{anchor.RequesterAgentID}, continuation.ReplyContextID, card.CardID, evt.ID(), card.DecidedAt, true)
+	committed, err := pc.commitHumanTaskRoute(ctx, product, card, continuation, evt.ID(), card.DecidedAt, true)
 	return nil, runtimepipelineobligation.ExecutionOutcome{Committed: committed}, err
 }
 
 func (pc *PipelineCoordinator) commitHumanTaskRoute(
 	ctx context.Context,
 	product events.Event,
-	recipients []string,
-	replyContextID string,
-	cardID string,
+	card decisioncard.Card,
+	continuation decisioncard.HumanTaskContinuation,
 	routeEventID string,
 	occurredAt time.Time,
 	completeOutcome bool,
@@ -493,10 +507,11 @@ func (pc *PipelineCoordinator) commitHumanTaskRoute(
 	if !ok {
 		return false, fmt.Errorf("human-task route requires the publication planner")
 	}
-	intent := runtimeengine.EmitIntent{Event: product, Recipients: append([]string(nil), recipients...)}
-	if strings.TrimSpace(replyContextID) != "" {
-		intent.Context = events.DeliveryContext{Reply: &events.ReplyContextRef{ID: strings.TrimSpace(replyContextID)}}
+	binding, err := decisioncard.BindHumanTaskReturn(card, continuation, product)
+	if err != nil {
+		return false, err
 	}
+	intent := runtimeengine.EmitIntent{Event: product, Context: binding.Context(), RequesterReturn: binding}
 	plans, err := planner.PrepareEnginePublications(ctx, []runtimeengine.EmitIntent{intent})
 	if err != nil {
 		return false, err
@@ -508,11 +523,11 @@ func (pc *PipelineCoordinator) commitHumanTaskRoute(
 	var committed CommittedHumanTaskRoute
 	if completeOutcome {
 		committed, err = pc.workflowStore.decisionRoutes.CommitHumanTaskOutcomeRoute(ctx, HumanTaskOutcomeRouteCommand{
-			CardID: cardID, RouteEventID: routeEventID, OccurredAt: occurredAt, Publication: plans[0],
+			CardID: card.CardID, RouteEventID: routeEventID, OccurredAt: occurredAt, Publication: plans[0],
 		})
 	} else {
 		committed, err = pc.workflowStore.decisionRoutes.CommitHumanTaskDeferredRoute(ctx, HumanTaskDeferredRouteCommand{
-			CardID: cardID, RouteEventID: routeEventID, OccurredAt: occurredAt, Publication: plans[0],
+			CardID: card.CardID, RouteEventID: routeEventID, OccurredAt: occurredAt, Publication: plans[0],
 		})
 	}
 	if committed.Publication == nil {

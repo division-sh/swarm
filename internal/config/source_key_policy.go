@@ -63,6 +63,7 @@ func SourceKeyRules() map[string]SourceKeyRule {
 		"serve.api_token_file":                    {SecretReference: true},
 		"serve.public_webhook":                    section,
 		"serve.public_webhook.hostname":           {},
+		"serve.public_webhook.port":               {},
 		"serve.public_webhook.certificate_file":   {SecretReference: true},
 		"serve.public_webhook.private_key_file":   {SecretReference: true},
 		"serve.public_webhook.email":              {},

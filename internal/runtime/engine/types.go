@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/core/values"
+	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/failures"
@@ -318,12 +319,12 @@ func (s *ExecutionState) SetLoop(values map[string]any) {
 }
 
 type EmitIntent struct {
-	Event          events.Event
-	Context        events.DeliveryContext
-	Recipients     []string
-	ChainDepth     int
-	ParentEventID  string
-	DeadLetterHint string
+	Event           events.Event
+	Context         events.DeliveryContext
+	RequesterReturn decisioncard.HumanTaskReturn `json:"-"`
+	ChainDepth      int
+	ParentEventID   string
+	DeadLetterHint  string
 }
 
 type ActivityIntent struct {

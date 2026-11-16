@@ -240,11 +240,11 @@ func newRuntimeHarness(t *testing.T, fixtureRoot string, start bool) *runtimeHar
 }
 
 func newRuntimeHarnessForBackend(t *testing.T, fixtureRoot string, backend catalogRuntimeBackend, start bool, additionalRunIDs ...string) *runtimeHarness {
-	return newRuntimeHarnessWithTerminalProvider(t, fixtureRoot, backend, start, nil, nil, nil, runlifecycle.LiveRunScope{}, additionalRunIDs...)
+	return newRuntimeHarnessWithTerminalProvider(t, fixtureRoot, backend, start, nil, nil, nil, runlifecycle.LiveRunScope{}, nil, additionalRunIDs...)
 }
 
 func newRuntimeHarnessFromTranscript(t *testing.T, fixtureRoot string, backend catalogRuntimeBackend, start bool, transcript *catalogExecutionTranscript) *runtimeHarness {
-	return newRuntimeHarnessWithTerminalProvider(t, fixtureRoot, backend, start, transcript, nil, nil, runlifecycle.LiveRunScope{})
+	return newRuntimeHarnessWithTerminalProvider(t, fixtureRoot, backend, start, transcript, nil, nil, runlifecycle.LiveRunScope{}, nil)
 }
 
 func newLiveForkCatalogHarness(t *testing.T, fixtureRoot string, backend catalogRuntimeBackend, chunkObserver ...func(context.Context, runtimepipeline.FanOutChunkCommand)) *runtimeHarness {
@@ -256,10 +256,10 @@ func newLiveForkCatalogHarness(t *testing.T, fixtureRoot string, backend catalog
 	if len(chunkObserver) == 1 {
 		observer = chunkObserver[0]
 	}
-	return newRuntimeHarnessWithTerminalProvider(t, fixtureRoot, backend, true, nil, nil, observer, runlifecycle.LiveRunScope{FlowPath: "."})
+	return newRuntimeHarnessWithTerminalProvider(t, fixtureRoot, backend, true, nil, nil, observer, runlifecycle.LiveRunScope{FlowPath: "."}, nil)
 }
 
-func newRuntimeHarnessWithTerminalProvider(t *testing.T, fixtureRoot string, backend catalogRuntimeBackend, start bool, transcript *catalogExecutionTranscript, provider *terminalProviderProbe, chunkObserver func(context.Context, runtimepipeline.FanOutChunkCommand), scope runlifecycle.LiveRunScope, additionalRunIDs ...string) *runtimeHarness {
+func newRuntimeHarnessWithTerminalProvider(t *testing.T, fixtureRoot string, backend catalogRuntimeBackend, start bool, transcript *catalogExecutionTranscript, provider *terminalProviderProbe, chunkObserver func(context.Context, runtimepipeline.FanOutChunkCommand), scope runlifecycle.LiveRunScope, project func(*runtime.RuntimeDeps), additionalRunIDs ...string) *runtimeHarness {
 	t.Helper()
 	strictCatalogFixtureStartupPolicy().apply(t)
 	bundle := loadFixtureBundle(t, fixtureRoot)
@@ -350,6 +350,9 @@ func newRuntimeHarnessWithTerminalProvider(t *testing.T, fixtureRoot string, bac
 	if provider != nil {
 		deps.Options.LLMRuntime = &terminalManagedProvider{scriptedLLMRuntime: llmRuntime, probe: provider,
 			controller: runtimeeffects.NewCompletionController(deps.EffectsStore, deps.CompletionStore, deps.CompletionHeartbeatStore, nil).WithExecutionPosture(deps.Options.ExecutionPosture)}
+	}
+	if project != nil {
+		project(&deps)
 	}
 	rt, err := runtime.NewRuntime(ctx, deps)
 	if err != nil {

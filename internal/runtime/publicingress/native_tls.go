@@ -4,14 +4,30 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+	"net"
 	"net/http"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/division-sh/swarm/internal/config"
 	"golang.org/x/crypto/acme/autocert"
 )
+
+func NativeTLSAddresses(settings *config.PublicWebhookConfig) (origin, listenAddress string, err error) {
+	if settings == nil {
+		return "", "", nil
+	}
+	if err := settings.Validate(); err != nil {
+		return "", "", err
+	}
+	host, port := strings.TrimSpace(settings.Hostname), strconv.Itoa(settings.PortNumber())
+	if settings.PortNumber() != 443 {
+		host = net.JoinHostPort(host, port)
+	}
+	return "https://" + host, net.JoinHostPort("", port), nil
+}
 
 // NativeTLSConfig prepares serving only; automatic issuance starts on a TLS
 // handshake, never during configuration admission.

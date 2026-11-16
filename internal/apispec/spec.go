@@ -512,6 +512,9 @@ func validateFilterParity(api *APISpecification) []string {
 		if listOK != subscribeOK || listFilter != subscribeFilter {
 			problems = append(problems, fmt.Sprintf("%s filter ref %q must match %s filter ref %q", methodName, subscribeFilter, listName, listFilter))
 		}
+		if methodName == "event.subscribe" && runScopedFilterRef(subscribe) != "#/components/schemas/EventListFilter" {
+			problems = append(problems, "event.subscribe filter must retain its required run_id scope")
+		}
 	}
 	return problems
 }
@@ -535,9 +538,33 @@ func paramSchemaRef(method Method, name string) (string, bool) {
 				return ref, true
 			}
 		}
+		if name == "filter" {
+			return runScopedFilterRef(method), true
+		}
 		return "", true
 	}
 	return "", false
+}
+
+// A scope-only composition preserves the shared filter's fields and types.
+func runScopedFilterRef(method Method) string {
+	param, ok := methodParam(method, "filter")
+	if !ok {
+		return ""
+	}
+	schema, _ := normalizeValue(param.Schema).(map[string]any)
+	parts, _ := schema["allOf"].([]any)
+	if len(schema) != 1 || len(parts) != 2 {
+		return ""
+	}
+	base, _ := parts[0].(map[string]any)
+	scope, _ := parts[1].(map[string]any)
+	required, _ := scope["required"].([]any)
+	if len(base) != 1 || len(scope) != 1 || len(required) != 1 || required[0] != "run_id" {
+		return ""
+	}
+	ref, _ := base["$ref"].(string)
+	return ref
 }
 
 func walkRefs(value any, visit func(string)) {

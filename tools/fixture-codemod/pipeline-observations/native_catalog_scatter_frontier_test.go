@@ -179,7 +179,7 @@ func TestNativeCatalogScatterFrontierKeepsActualProbeCasesAndOneSQLBody(t *testi
 	if err := json.Unmarshal(recipeBytes, &rows); err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join("..", "..", "..", "internal", "store", "internal", "backend", "delivery", "read_projections.go")
+	path := filepath.Join("..", "..", "..", "internal", "store", "internal", "backend", "delivery", "test_selected_read_projections_queries.go")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
@@ -209,7 +209,7 @@ func TestNativeCatalogScatterFrontierKeepsActualProbeCasesAndOneSQLBody(t *testi
 	if !queryMatched {
 		t.Fatal("canonical frontier SQL changed any original predicate, aggregate or materialization")
 	}
-	fn, err := uniqueFunction(file, "ProbeCausalDeliveryFrontier")
+	fn, err := uniqueFunction(file, "probeCausalDeliveryFrontier")
 	if err != nil {
 		t.Fatal(err)
 	}

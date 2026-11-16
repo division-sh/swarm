@@ -131,6 +131,7 @@ type FanOutRetryableRelease struct {
 	Now              time.Time
 	ObservedDuration time.Duration
 	Failure          runtimefailures.Envelope
+	ReadEvaluation   bool
 }
 
 type FanOutBlockRequest struct {
@@ -207,15 +208,29 @@ type SelectedFanOutObligationOwner interface {
 	ReconcileFanOutBarriers(context.Context) ([]runtimerunlifecycle.CommittedGenericScheduleActivation, error)
 }
 
-// Evaluation-load failures retain the pump's blocking disposition independently
-// of publication-group acquisition failures (which can yield or retry).
+type FanOutReadDisposition uint8
+
+const (
+	FanOutReadUncertain FanOutReadDisposition = iota
+	FanOutReadYield
+	FanOutReadRetry
+	FanOutReadDefect
+)
+
+// The native read owner supplies the disposition after its operation joins.
+// An absent disposition is uncertainty, never permission to retry or block.
 type FanOutEvaluationLoadError struct {
-	Cause error
-	Stage string
+	Cause       error
+	Stage       string
+	Disposition FanOutReadDisposition
 }
 
 func (e *FanOutEvaluationLoadError) Error() string { return e.Cause.Error() }
 func (e *FanOutEvaluationLoadError) Unwrap() error { return e.Cause }
+
+type FanOutResumeOwner interface {
+	ResumeRunFanOut(context.Context, string) (fanoutobligation.ResumeResult, error)
+}
 
 // FanOutClaimSettlement carries selected-store commit truth independently of
 // post-commit cleanup errors.

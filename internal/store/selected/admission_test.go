@@ -25,9 +25,11 @@ import (
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	storeconstruction "github.com/division-sh/swarm/internal/store/construction"
 	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/tests/support/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/tests/support/testutil"
 	"github.com/division-sh/swarm/tests/support/testutil/sourceartifactfixture"
+	"github.com/google/uuid"
 )
 
 func TestAdmissionInspectionMissingSQLiteDoesNotCreateState(t *testing.T) {
@@ -250,6 +252,52 @@ func TestAdmissionInspectionRealReadScopeBothStores(t *testing.T) {
 			if stamp != beforeInspection {
 				t.Fatal("read inspection changed the fixture's original process authority")
 			}
+			t.Run("retained_active_population", func(t *testing.T) {
+				want := make(map[string]string)
+				for _, state := range []runlifecycle.State{runlifecycle.StateRunning, runlifecycle.StatePaused, runlifecycle.StateLive} {
+					runID := uuid.NewString()
+					fixture := storetest.RunFixture{
+						RunID: runID, State: state, Origin: runlifecycle.ScenarioSetupRunOrigin(),
+						Artifact: rooted.Artifact(), RootAdmission: rooted.Admission(), StartedAt: time.Now().UTC(),
+					}
+					if state == runlifecycle.StateLive {
+						fixture.LiveScope = runlifecycle.LiveRunScope{FlowPath: "global"}
+						fixture.Origin = runlifecycle.DeploymentRunOrigin()
+					}
+					storetest.RequireRun(t, original, bootstrap.(storetest.RunFixtureStore), fixture)
+					want[runID] = string(state)
+				}
+				_, err := inspection.Inspect(ctx, request, func(snapshot *AdmissionSnapshot) error {
+					population, err := snapshot.ActiveNonStandingRunBundleAvailabilities(ctx)
+					if err != nil {
+						return err
+					}
+					if len(population) != len(want) {
+						t.Fatalf("active source census omitted an idle/paused/live run: %+v", population)
+					}
+					for _, availability := range population {
+						if availability.Status != want[availability.RunID] || !availability.Available() {
+							t.Fatalf("retained run lost its status or exact source: %+v", availability)
+						}
+						got, err := snapshot.LoadRunRootedSource(ctx, availability.RunID)
+						if err != nil || got.Admission().Reference() != availability.RootReference || got.Admission().Reference() != rooted.Admission().Reference() {
+							t.Fatalf("per-run source read escaped the retained snapshot/root: %+v err=%v", got.Admission().Reference(), err)
+						}
+						delete(want, availability.RunID)
+					}
+					if len(want) != 0 {
+						t.Fatalf("retained run census lost exact identities: %+v", want)
+					}
+					return nil
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				stamp, err := generationauthority.ReadProcessGeneration(ctx, db, backend == storebackend.BackendSQLite)
+				if err != nil || stamp != beforeInspection {
+					t.Fatalf("retained source inspection changed process authority: %+v err=%v", stamp, err)
+				}
+			})
 		})
 	}
 }

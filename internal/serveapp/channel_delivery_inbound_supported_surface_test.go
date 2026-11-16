@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -25,6 +26,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
+	"github.com/division-sh/swarm/internal/servedparity"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/tests/support/testutil"
@@ -960,6 +962,14 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 	if err != nil {
 		t.Fatal(err)
 	}
+	if unheld {
+		selected := servedparity.BackendDefaultSQLite
+		if backend == "postgres" {
+			selected = servedparity.BackendExplicitPostgres
+		}
+		proveUnheldNonOperatorIsolation(t, &channelOnboardingE2EHarness{backend: selected, opts: cliapp.ServeOptions{ConfigPath: configPath},
+			process: process, endpoint: endpoint, storeDSN: observerDSN}, registered, provider, callbackURL, signing, update)
+	}
 	if rollback {
 		rt := servedTestProcessRuntime(t, process)
 		proveDeploymentCallbackRollback(t, worklifetime.WithProcess(t.Context(), rt.Options.ProcessWorkOwner), rt.Bus.Store(), provider, callbackURL, signing, update, requestBody)
@@ -1144,6 +1154,61 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 			t.Fatalf("%s flow did not answer %q; deliveries=%v acknowledgments=%v edits=%v", scenario, inputText, provider.Delivery(1), provider.Acknowledgments(), provider.Edits())
 		}
 		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func proveUnheldNonOperatorIsolation(t *testing.T, h *channelOnboardingE2EHarness, registered channelonboarding.Operation,
+	provider *telegramapi.Double, callback, signing string, operatorUpdate map[string]any) {
+	t.Helper()
+	read := func() channelonboarding.Result {
+		var out, errOut lockedBuffer
+		code := cliapp.Execute(t.Context(), []string{"--config", h.opts.ConfigPath, "channel", "list", "--json", "--api-server", h.endpoint},
+			&out, &errOut, nil, nil, OpenChannelRegistration)
+		var listed struct {
+			Accounts []channelonboarding.Result `json:"accounts"`
+		}
+		if code != 0 || json.Unmarshal([]byte(out.String()), &listed) != nil || len(listed.Accounts) != 1 {
+			t.Fatalf("unheld account observation exit=%d out=%s err=%s", code, out.String(), errOut.String())
+		}
+		current := listed.Accounts[0]
+		if current.Operation.OperationID != registered.OperationID || current.Status == nil || len(current.Status.Holders) != 0 || current.Status.Unclaimed != nil ||
+			current.Connection != nil && current.Connection.Unclaimed != nil || strings.Contains(out.String(), "account_unclaimed") {
+			t.Fatal("unheld Telegram acquired a count or holder", out.String())
+		}
+		return current
+	}
+	before := read()
+	beforeCards := receptionistPendingMailbox(t, h)
+	reader := openChannelFixtureObservation(t, string(h.backend), h.storeDSN)
+	entries, err := reader.CountEntryIntents(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain := `{"update_id":84531,"message":{"message_id":84531,"from":{"id":84531},"chat":{"id":84531,"type":"private"},"text":"unheld customer must not acquire authority"}}`
+	status, body := postProviderAliasUpdate(t, callback, "", signing, plain)
+	if status != http.StatusNotFound {
+		t.Fatalf("unheld customer received business admission: status=%d body=%s", status, body)
+	}
+	original := operatorUpdate["callback_query"].(map[string]any)
+	foreign := map[string]any{"update_id": 84532, "callback_query": map[string]any{
+		"id": "unheld-foreign-84532", "from": map[string]any{"id": 84532},
+		"message": original["message"], "data": original["data"],
+	}}
+	acknowledgments := len(provider.Acknowledgments())
+	if names := postChannelTelegramOperatorUpdate(t, callback, signing, foreign); len(names) != 0 {
+		t.Fatal("unheld foreign action acquired business authority", names)
+	}
+	waitReceptionistActionRejection(t, h, "84532")
+	if len(provider.Acknowledgments()) != acknowledgments || !reflect.DeepEqual(beforeCards, receptionistPendingMailbox(t, h)) {
+		t.Fatal("unheld foreign input acknowledged or changed an operator card")
+	}
+	after := read()
+	if !reflect.DeepEqual(before.Operation, after.Operation) || !reflect.DeepEqual(before.IdentityOperation, after.IdentityOperation) ||
+		!reflect.DeepEqual(before.Binding, after.Binding) {
+		t.Fatal("unheld non-operator input changed registration or operator authority")
+	}
+	if afterEntries, err := reader.CountEntryIntents(t.Context()); err != nil || afterEntries != entries {
+		t.Fatalf("unheld non-operator input created business entries: %d -> %d, err=%v", entries, afterEntries, err)
 	}
 }
 

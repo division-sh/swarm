@@ -199,6 +199,7 @@ func TestRunForkRevisionStateAccessorInventoryIsClosed(t *testing.T) {
 	want := []string{
 		"internal/runtime/destructivereset/cleanup_catalog.go",
 		"internal/store/internal/adminpersistence/destructive_reset_cleanup.go",
+		"internal/store/internal/backend/eventpersistence/test_semantic_event_observation.go", // fixed read-only semantic evidence COUNT in original snapshot; no revision writer
 		"internal/store/internal/backend/pipelinepersistence/flow_instance_index.go",
 		"internal/store/internal/backend/runforkpersistence/captured_construction_history.go", // read-only exact lineage cuts; no revision writer
 		"internal/store/internal/backend/runforkpersistence/receiver_historical_observation.go",

@@ -116,7 +116,7 @@ func TestRenderModesKeepHumanProseSeparateFromTypedNDJSON(t *testing.T) {
 			t.Fatalf("plain output leaked %q: %s", forbidden, plainText)
 		}
 	}
-	if !strings.Contains(plainText, "normalizer ✗ failed — internal error") || !strings.Contains(plainText, "swarm logs --run 11111111-1111-1111-1111-111111111111 --level error") {
+	if !strings.Contains(plainText, "normalizer ✗ failed — internal error") || !strings.Contains(plainText, "swarm logs --run-id 11111111-1111-1111-1111-111111111111 --level error") {
 		t.Fatalf("plain output = %q", plainText)
 	}
 
@@ -147,7 +147,7 @@ func TestAgentLifecycleFailureWithoutEnvelopeStillRendersDiagnosticRoute(t *test
 		t.Fatal(err)
 	}
 	text := plain.String()
-	if !strings.Contains(text, "normalizer ✗ failed") || !strings.Contains(text, "swarm logs --run 11111111-1111-1111-1111-111111111111 --level error") {
+	if !strings.Contains(text, "normalizer ✗ failed") || !strings.Contains(text, "swarm logs --run-id 11111111-1111-1111-1111-111111111111 --level error") {
 		t.Fatalf("agent failure output = %q", text)
 	}
 }

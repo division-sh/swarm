@@ -122,7 +122,7 @@ func TestNativeCatalogCausalDeliveryOwnerKeepsAllOriginalPhysicalPredicates(t *t
 	if err := json.Unmarshal(recipeBytes, &rows); err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join("..", "..", "..", "internal", "store", "internal", "backend", "delivery", "read_projections.go")
+	path := filepath.Join("..", "..", "..", "internal", "store", "internal", "backend", "delivery", "test_selected_read_projections_queries.go")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
@@ -132,7 +132,7 @@ func TestNativeCatalogCausalDeliveryOwnerKeepsAllOriginalPhysicalPredicates(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	owners := map[string]string{"catalogDeliveryAttemptCounts": "ReadNonLogRunDeliveryClaimTotals", "scatterGatherDeliveryProgress": "ReadCausalDeliveryStatusCounts", "logScatterGatherAttempts": "ReadDeliveryAttemptDiagnosticRows"}
+	owners := map[string]string{"catalogDeliveryAttemptCounts": "readNonLogRunDeliveryClaimTotals", "scatterGatherDeliveryProgress": "readCausalDeliveryStatusCounts", "logScatterGatherAttempts": "readDeliveryAttemptDiagnosticRows"}
 	for _, row := range rows {
 		if row.Family != "native-catalog-causal-delivery-observation" {
 			continue

@@ -38,7 +38,7 @@ func (s *DeliveryPostgresOwner) ReadNodeDeliveryTargetEncodingForTest(ctx contex
 	var out string
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
-		out, err = ReadNodeDeliveryTargetEncodingTx(ctx, tx, true, eventID, nodeID)
+		out, err = readNodeDeliveryTargetEncodingTx(ctx, tx, true, eventID, nodeID)
 		return err
 	})
 	if err != nil {
@@ -51,7 +51,7 @@ func (s *DeliverySQLiteOwner) ReadNodeDeliveryTargetEncodingForTest(ctx context.
 	var out string
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
-		out, err = ReadNodeDeliveryTargetEncodingTx(ctx, tx, false, eventID, nodeID)
+		out, err = readNodeDeliveryTargetEncodingTx(ctx, tx, false, eventID, nodeID)
 		return err
 	})
 	if err != nil {
@@ -60,11 +60,61 @@ func (s *DeliverySQLiteOwner) ReadNodeDeliveryTargetEncodingForTest(ctx context.
 	return out, nil
 }
 
+func readNodeDeliveryTargetEncodingTx(ctx context.Context, tx *sql.Tx, postgres bool, eventID, nodeID string) (string, error) {
+	query := `SELECT delivery_target_route FROM event_deliveries WHERE event_id = ? AND subscriber_type = 'node' AND subscriber_id = ?`
+	if postgres {
+		query = `SELECT delivery_target_route::text FROM event_deliveries WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2`
+	}
+	var raw string
+	if err := tx.QueryRowContext(ctx, query, eventID, nodeID).Scan(&raw); err != nil {
+		return "", err
+	}
+	return raw, nil
+}
+
+func (s *DeliveryPostgresOwner) ReadAgentSettledAttemptCountForTest(ctx context.Context, eventID, agentID string) (int, error) {
+	var count int
+	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		count, err = readAgentSettledAttemptCountTx(ctx, tx, true, eventID, agentID)
+		return err
+	})
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+func (s *DeliverySQLiteOwner) ReadAgentSettledAttemptCountForTest(ctx context.Context, eventID, agentID string) (int, error) {
+	var count int
+	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		count, err = readAgentSettledAttemptCountTx(ctx, tx, false, eventID, agentID)
+		return err
+	})
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+func readAgentSettledAttemptCountTx(ctx context.Context, tx *sql.Tx, postgres bool, eventID, agentID string) (int, error) {
+	query := `SELECT COUNT(*) FROM (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o JOIN event_deliveries d ON d.delivery_id = o.delivery_id WHERE d.event_id = ? AND d.subscriber_type = 'agent' AND d.subscriber_id = ?`
+	if postgres {
+		query = `SELECT COUNT(*) FROM (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o JOIN event_deliveries d ON d.delivery_id = o.delivery_id WHERE d.event_id = $1::uuid AND d.subscriber_type = 'agent' AND d.subscriber_id = $2`
+	}
+	var count int
+	if err := tx.QueryRowContext(ctx, query, eventID, agentID).Scan(&count); err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
 func (s *DeliveryPostgresOwner) ReadCausalDeliveryFrontierForTest(ctx context.Context, runID, eventID string) (CausalDeliveryFrontier, error) {
 	var out CausalDeliveryFrontier
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
-		out, err = ReadCausalDeliveryFrontier(ctx, tx, runID, eventID)
+		out, err = readCausalDeliveryFrontier(ctx, tx, runID, eventID)
 		return err
 	})
 	if err != nil {
@@ -77,7 +127,7 @@ func (s *DeliverySQLiteOwner) ReadCausalDeliveryFrontierForTest(ctx context.Cont
 	var out CausalDeliveryFrontier
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
-		out, err = ReadCausalDeliveryFrontier(ctx, tx, runID, eventID)
+		out, err = readCausalDeliveryFrontier(ctx, tx, runID, eventID)
 		return err
 	})
 	if err != nil {
@@ -90,7 +140,7 @@ func (s *DeliveryPostgresOwner) ProbeCausalDeliveryFrontierForTest(ctx context.C
 	var out CausalDeliveryFrontier
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
-		out, err = ProbeCausalDeliveryFrontier(ctx, tx, probe)
+		out, err = probeCausalDeliveryFrontier(ctx, tx, probe)
 		return err
 	})
 	if err != nil {
@@ -103,7 +153,7 @@ func (s *DeliverySQLiteOwner) ProbeCausalDeliveryFrontierForTest(ctx context.Con
 	var out CausalDeliveryFrontier
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
-		out, err = ProbeCausalDeliveryFrontier(ctx, tx, probe)
+		out, err = probeCausalDeliveryFrontier(ctx, tx, probe)
 		return err
 	})
 	if err != nil {
@@ -116,7 +166,7 @@ func (s *DeliveryPostgresOwner) ReadEventDeliveryDiagnosticRowsForTest(ctx conte
 	var out []EventDeliveryDiagnosticRow
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
-		out, err = ReadEventDeliveryDiagnosticRows(ctx, tx, eventID, true)
+		out, err = readEventDeliveryDiagnosticRows(ctx, tx, eventID, true)
 		return err
 	})
 	if err != nil {
@@ -129,7 +179,7 @@ func (s *DeliverySQLiteOwner) ReadEventDeliveryDiagnosticRowsForTest(ctx context
 	var out []EventDeliveryDiagnosticRow
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
-		out, err = ReadEventDeliveryDiagnosticRows(ctx, tx, eventID, false)
+		out, err = readEventDeliveryDiagnosticRows(ctx, tx, eventID, false)
 		return err
 	})
 	if err != nil {
@@ -142,7 +192,7 @@ func (s *DeliveryPostgresOwner) ReadSubscriberEventNamesCreatedSinceForTest(ctx 
 	var out []string
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
-		out, err = ReadSubscriberEventNamesCreatedSince(ctx, tx, since, subscriberID)
+		out, err = readSubscriberEventNamesCreatedSince(ctx, tx, since, subscriberID)
 		return err
 	})
 	if err != nil {
@@ -155,7 +205,7 @@ func (s *DeliverySQLiteOwner) ReadSubscriberEventNamesCreatedSinceForTest(ctx co
 	var out []string
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
-		out, err = ReadSubscriberEventNamesCreatedSince(ctx, tx, since, subscriberID)
+		out, err = readSubscriberEventNamesCreatedSince(ctx, tx, since, subscriberID)
 		return err
 	})
 	if err != nil {
@@ -168,7 +218,7 @@ func (s *DeliveryPostgresOwner) ReadCausalDeliveryStatusCountsForTest(ctx contex
 	var out []CausalDeliveryStatusCount
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
-		out, err = ReadCausalDeliveryStatusCounts(ctx, tx, runID, eventID)
+		out, err = readCausalDeliveryStatusCounts(ctx, tx, runID, eventID)
 		return err
 	})
 	if err != nil {
@@ -181,7 +231,7 @@ func (s *DeliverySQLiteOwner) ReadCausalDeliveryStatusCountsForTest(ctx context.
 	var out []CausalDeliveryStatusCount
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
-		out, err = ReadCausalDeliveryStatusCounts(ctx, tx, runID, eventID)
+		out, err = readCausalDeliveryStatusCounts(ctx, tx, runID, eventID)
 		return err
 	})
 	if err != nil {
@@ -194,7 +244,7 @@ func (s *DeliveryPostgresOwner) ReadNonLogRunDeliveryClaimTotalsForTest(ctx cont
 	var deliveries, claims int64
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
-		deliveries, claims, err = ReadNonLogRunDeliveryClaimTotals(ctx, tx, runID)
+		deliveries, claims, err = readNonLogRunDeliveryClaimTotals(ctx, tx, runID)
 		return err
 	})
 	if err != nil {
@@ -207,7 +257,7 @@ func (s *DeliverySQLiteOwner) ReadNonLogRunDeliveryClaimTotalsForTest(ctx contex
 	var deliveries, claims int64
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
-		deliveries, claims, err = ReadNonLogRunDeliveryClaimTotals(ctx, tx, runID)
+		deliveries, claims, err = readNonLogRunDeliveryClaimTotals(ctx, tx, runID)
 		return err
 	})
 	if err != nil {
@@ -220,7 +270,7 @@ func (s *DeliveryPostgresOwner) ReadDeliveryAttemptDiagnosticRowsForTest(ctx con
 	var out []DeliveryAttemptDiagnosticRow
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
-		out, err = ReadDeliveryAttemptDiagnosticRows(ctx, tx, deliveryID)
+		out, err = readDeliveryAttemptDiagnosticRows(ctx, tx, deliveryID)
 		return err
 	})
 	if err != nil {
@@ -233,7 +283,7 @@ func (s *DeliverySQLiteOwner) ReadDeliveryAttemptDiagnosticRowsForTest(ctx conte
 	var out []DeliveryAttemptDiagnosticRow
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
-		out, err = ReadDeliveryAttemptDiagnosticRows(ctx, tx, deliveryID)
+		out, err = readDeliveryAttemptDiagnosticRows(ctx, tx, deliveryID)
 		return err
 	})
 	if err != nil {

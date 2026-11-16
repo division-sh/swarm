@@ -47,6 +47,7 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
@@ -1435,6 +1436,12 @@ func newRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 		}
 		rt.RunControl = runtimeruncontrol.NewController(runtimeDeps.RunControlStore, rt.Bus, runtimeruncontrol.Options{
 			TimerCancellations: timerCancellations,
+			ResumeFanOut: func(ctx context.Context, runID string) (fanoutobligation.ResumeResult, error) {
+				rt.lifecycleMu.Lock()
+				registration := rt.fanOutServing
+				rt.lifecycleMu.Unlock()
+				return registration.ResumeRunFanOut(ctx, runID)
+			},
 		})
 		rt.Bus.SetRunDispatchGate(rt.RunControl)
 	}

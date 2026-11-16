@@ -6,7 +6,9 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )
@@ -85,6 +87,9 @@ func TestHelpExamplesUseCurrentDirectory(t *testing.T) {
 			if code != 0 || !strings.Contains(stdout.String(), "\n  "+example.line+"\n") ||
 				strings.Contains(stdout.String(), "swarm "+example.command+" .") {
 				t.Fatalf("help code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+			}
+			if example.command == "serve" && (!strings.Contains(stdout.String(), "Let's Encrypt") || !strings.Contains(stdout.String(), "accepting its terms")) {
+				t.Fatalf("serve help must name Let's Encrypt and its accepted terms: %s", stdout.String())
 			}
 		})
 	}
@@ -168,6 +173,21 @@ func TestRootHelpHidesIdempotencyAndRetiredCommands(t *testing.T) {
 func TestExamplesReferenceRealCommandsAndFlags(t *testing.T) {
 	var out, errOut bytes.Buffer
 	root := newRootCommand(context.Background(), t.TempDir(), &out, &errOut)
+	var diagnostic bytes.Buffer
+	occurrence := authoractivity.Occurrence{
+		OccurrenceID: "33333333-3333-4333-8333-333333333333", Sequence: 1,
+		Kind: authoractivity.KindAgentLifecycle, Version: authoractivity.Version, Transition: "failed",
+		SourceOwner: "agent_lifecycle_transition_facts", SourceIdentity: "transition-a",
+		DedupKey: "agent-transition:transition-a", OccurredAt: time.Unix(0, 0).UTC(),
+		RunID:   "11111111-1111-4111-8111-111111111111",
+		Scope:   authoractivity.BundleScope("22222222-2222-4222-8222-222222222222", "bundle-v2:sha256:"+strings.Repeat("a", 64)),
+		AgentID: "normalizer", Projection: authoractivity.Projection{SubjectType: "agent", SubjectID: "normalizer", NextPhase: "failed"},
+	}
+	if err := authoractivity.Render(&diagnostic, []authoractivity.Occurrence{occurrence}, authoractivity.RenderOptions{Mode: authoractivity.RenderPlain, Width: 120}); err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(diagnostic.String()), "\n")
+	findSubcommand(root, "logs").Example += "\n" + strings.TrimPrefix(strings.TrimSpace(lines[len(lines)-1]), "\u2514 ")
 	walkCommands(root, func(cmd *cobra.Command) {
 		if strings.TrimSpace(cmd.Example) == "" {
 			return

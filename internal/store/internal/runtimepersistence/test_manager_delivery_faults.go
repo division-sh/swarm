@@ -2,13 +2,11 @@ package runtimepersistence
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
-	"github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 )
 
 func MakeManagerRetryEligibleForTest(ctx context.Context, selected any, event events.Event, route events.DeliveryRoute) error {
@@ -18,9 +16,14 @@ func MakeManagerRetryEligibleForTest(ctx context.Context, selected any, event ev
 	if _, err := eventFixtureDialectForTest(selected); err != nil {
 		return err
 	}
-	return runUnrevisionedEventFixtureTransactionForTest(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		return delivery.MakeManagerRetryEligibleTx(ctx, tx, event, route)
-	})
+	switch store := selected.(type) {
+	case *PostgresStore:
+		return store.deliveryPostgresOwner.MakeManagerRetryEligibleForTest(ctx, event, route)
+	case *SQLiteRuntimeStore:
+		return store.deliverySQLiteOwner.MakeManagerRetryEligibleForTest(ctx, event, route)
+	default:
+		return fmt.Errorf("manager retry cut requires the original selected owner")
+	}
 }
 
 func WaitManagerRetryDecisionForTest(ctx context.Context, selected any, event events.Event, route events.DeliveryRoute) error {
@@ -67,7 +70,12 @@ func AgeManagerClaimStartedAtForTest(ctx context.Context, selected any, claim de
 	if _, err := eventFixtureDialectForTest(selected); err != nil {
 		return err
 	}
-	return runUnrevisionedEventFixtureTransactionForTest(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		return delivery.AgeManagerClaimStartedAtTx(ctx, tx, claim, startedAt)
-	})
+	switch store := selected.(type) {
+	case *PostgresStore:
+		return store.deliveryPostgresOwner.AgeManagerClaimStartedAtForTest(ctx, claim, startedAt)
+	case *SQLiteRuntimeStore:
+		return store.deliverySQLiteOwner.AgeManagerClaimStartedAtForTest(ctx, claim, startedAt)
+	default:
+		return fmt.Errorf("manager claim age cut requires the original selected owner")
+	}
 }

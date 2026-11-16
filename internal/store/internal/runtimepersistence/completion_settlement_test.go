@@ -1457,6 +1457,12 @@ func completionAttemptLease(t *testing.T, fixture completionSettlementFixture, a
 
 func proveCompletionRecoveryPreservesLiveOrdinaryAuthority(t *testing.T, fixture completionSettlementFixture) {
 	t.Helper()
+	for _, state := range []runtimeeffects.State{runtimeeffects.StateAuthorized, runtimeeffects.StateLaunched, runtimeeffects.StateResponseObserved} {
+		t.Run("own_expiry_"+string(state), func(t *testing.T) {
+			current := newCompletionSettlementFixture(t, fixture.store, fixture.db, fixture.sqlite, fixture.original)
+			proveCompletionOwnExpiryIsNotAbandonment(t, current, state)
+		})
+	}
 	ctx := runtimeeffects.WithLogicalOperationIdentity(fixture.context, "ordinary-recovery:authorized")
 	ctx = withManagedCompletionTestSurface(t, ctx, fixture.authority, "anthropic_api")
 	authorized, err := beginManagedCompletionForTest(t, ctx, "anthropic_api", []byte("authorized"))
@@ -1518,6 +1524,68 @@ func proveCompletionRecoveryPreservesLiveOrdinaryAuthority(t *testing.T, fixture
 	}
 	requireExternalAttemptState(t, fixture.db, fixture.sqlite, launched.Attempt().AttemptID, runtimeeffects.StateLaunched)
 	requireCompletionRecoveryRows(t, fixture, launched.Attempt().AttemptID, 0, 0, 1)
+}
+
+func proveCompletionOwnExpiryIsNotAbandonment(t *testing.T, fixture completionSettlementFixture, state runtimeeffects.State) {
+	t.Helper()
+	const adapter = "anthropic_api"
+	ctx := runtimeeffects.WithLogicalOperationIdentity(fixture.context, "current-process:"+string(state))
+	ctx = withManagedCompletionTestSurface(t, ctx, fixture.authority, adapter)
+	handle, err := beginManagedCompletionForTest(t, ctx, adapter, []byte("current-process"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantFrame := loadCompletionFrameBytes(t, fixture, "runtime_external_effect_operations", "operation_id", handle.Attempt().OperationID)
+	if state != runtimeeffects.StateAuthorized {
+		if err := handle.MarkLaunched(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if state == runtimeeffects.StateResponseObserved {
+		if err := handle.MarkResponseObserved(ctx, map[string]any{"response_fingerprint": "current-process-response"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	now := time.Now().UTC()
+	setCompletionAttemptLease(t, fixture, handle.Attempt().AttemptID, now.Add(-time.Minute))
+	before := historicalContextDatabaseRows(t, fixture.db, !fixture.sqlite)
+	reader := fixture.store.(startupRecoveryInspector)
+	counts, err := reader.InspectStartupRecovery(context.Background(), now, true)
+	if err != nil || counts != (runtimeeffects.StartupRecoveryCounts{}) {
+		t.Fatalf("own-expiry inspection abandoned current process: counts=%+v error=%v", counts, err)
+	}
+	historicalContextRequireUnchanged(t, before, historicalContextDatabaseRows(t, fixture.db, !fixture.sqlite))
+	summary, err := fixture.store.ReconcileExternalEffectAttempts(fixture.original, liveExternalEffectRecoveryRequest(now))
+	if err != nil || summary != (runtimeeffects.RecoverySummary{}) {
+		t.Fatalf("own-expiry recovery abandoned current process: summary=%+v error=%v", summary, err)
+	}
+	historicalContextRequireUnchanged(t, before, historicalContextDatabaseRows(t, fixture.db, !fixture.sqlite))
+	requireExternalAttemptState(t, fixture.db, fixture.sqlite, handle.Attempt().AttemptID, state)
+	requireCompletionRecoveryRows(t, fixture, handle.Attempt().AttemptID, 0, 0, 1)
+	if err := handle.Heartbeat(ctx, 2*time.Minute); err != nil {
+		t.Fatalf("late renewal of current process: %v", err)
+	}
+	if !completionAttemptLease(t, fixture, handle.Attempt().AttemptID).After(now) {
+		t.Fatal("late renewal did not advance the expired attempt")
+	}
+	if state == runtimeeffects.StateAuthorized {
+		failure := runtimefailures.FromError(context.Canceled, "completion-test", "prelaunch-cleanup")
+		if err := handle.Settle(ctx, runtimeeffects.StateTerminalFailure, &failure.Failure, map[string]any{"prelaunch": true}); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	if state == runtimeeffects.StateLaunched {
+		if err := handle.MarkResponseObserved(ctx, map[string]any{"response_fingerprint": "current-process-response"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	settlement := completionSettlementForTest(t, handle.Attempt().Authority.Target, fixture, adapter, "provider-head-current", "provider-head-after-expiry")
+	if _, err := handle.SettleCompletion(ctx, settlement); err != nil {
+		t.Fatalf("accepted return after own expiry and late renewal: %v", err)
+	}
+	assertCompletionFrameBytes(t, fixture, "agent_turns", "turn_id", handle.Attempt().Authority.Target.ID, wantFrame)
+	requireCompletionRecoveryRows(t, fixture, handle.Attempt().AttemptID, 1, 1, 0)
 }
 
 func proveCompletionProviderHeadStaleAuthorityCannotSettle(t *testing.T, fixture completionSettlementFixture) {
@@ -1679,6 +1747,25 @@ func beginObservedCompletionForSettlementTest(t *testing.T, ctx context.Context,
 
 func completionSettlementForTest(t testing.TB, target runtimeeffects.UsageTarget, fixture completionSettlementFixture, adapter, expectedHead, newHead string) runtimeeffects.CompletionSettlement {
 	t.Helper()
+	settlement := completionSettlementForAuthority(t, target, fixture.authority, adapter)
+	settlement.ProviderHead = &runtimeeffects.CompletionProviderHead{
+		Identity:  testAgentMemoryIdentity(t, target.RunID, fixture.agentID, target.FlowInstance),
+		SessionID: fixture.sessionID, LockOwner: fixture.leaseHolder, GrantID: fixture.grantID,
+		ExpectedProviderHead: expectedHead, NewProviderHead: newHead,
+	}
+	return settlement
+}
+
+func completionSettlementForAuthority(t testing.TB, target runtimeeffects.UsageTarget, authority runtimeeffects.Authority, adapter string) runtimeeffects.CompletionSettlement {
+	t.Helper()
+	authority.Target = target
+	settlement := completionSettlementForFrame(t, target, authority, adapter, managedCompletionTestFrame(t, authority, adapter))
+	settlement.AgentTurn.Identity = testAgentMemoryIdentity(t, target.RunID, target.AgentID, target.FlowInstance)
+	return settlement
+}
+
+func completionSettlementForFrame(t testing.TB, target runtimeeffects.UsageTarget, authority runtimeeffects.Authority, adapter string, frame agentframe.Frame) runtimeeffects.CompletionSettlement {
+	t.Helper()
 	input, output := int64(12), int64(4)
 	settlement := runtimeeffects.CompletionSettlement{
 		Settlement: runtimeeffects.Settlement{State: runtimeeffects.StateSettled, Evidence: map[string]any{"provider_result": true}},
@@ -1688,7 +1775,7 @@ func completionSettlementForTest(t testing.TB, target runtimeeffects.UsageTarget
 		},
 		AgentTurn: &runtimeeffects.CompletionAgentTurn{
 			TurnID: target.ID, AgentID: target.AgentID, SessionID: target.SessionID,
-			RunID: target.RunID, Identity: testAgentMemoryIdentity(t, target.RunID, target.AgentID, target.FlowInstance),
+			RunID: target.RunID, Identity: frame.Session.AgentIdentity,
 			Memory: target.Memory, FlowInstance: target.FlowInstance, EntityID: target.EntityID, ParseOK: true,
 		},
 		Spend: runtimeeffects.CompletionSpend{
@@ -1697,20 +1784,12 @@ func completionSettlementForTest(t testing.TB, target runtimeeffects.UsageTarget
 			BackendProfile: "test", Provider: "anthropic", Transport: "process", ResolvedModel: "claude-test",
 			CostUSD: 0.25, InvocationType: "agent_turn",
 		},
-		ProviderHead: &runtimeeffects.CompletionProviderHead{
-			Identity:  testAgentMemoryIdentity(t, target.RunID, fixture.agentID, target.FlowInstance),
-			SessionID: fixture.sessionID, LockOwner: fixture.leaseHolder, GrantID: fixture.grantID,
-			ExpectedProviderHead: expectedHead, NewProviderHead: newHead,
-		},
 		Now: time.Now().UTC(),
 	}
-	authority := fixture.authority
 	authority.Target = target
-	event := managedCompletionTestEvent(authority)
-	settlement.AgentTurn.TriggerEventID = event.ID()
-	settlement.AgentTurn.TriggerEventType = string(event.Type())
 	applyManagedCompletionTestSurface(t, settlement.AgentTurn, authority, adapter)
-	frame := managedCompletionTestFrame(t, authority, adapter)
+	settlement.AgentTurn.TriggerEventID = frame.Turn.Event.ID
+	settlement.AgentTurn.TriggerEventType = frame.Turn.Event.Type
 	bound, err := runtimeeffects.BindCompletionRequest(authority, runtimeeffects.AuthorizeRequest{AgentFrame: &frame})
 	if err != nil {
 		t.Fatal(err)

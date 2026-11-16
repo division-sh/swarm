@@ -32,7 +32,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	runforkrevision "github.com/division-sh/swarm/internal/store/testutil/runforkrevisionfixture"
 	"github.com/division-sh/swarm/tests/support/testutil"
 	"github.com/google/uuid"
 )
@@ -1397,7 +1396,7 @@ status: text
 	`, sourceRunID, entityID, stateEventID, at); err != nil {
 		t.Fatalf("seed mutations: %v", err)
 	}
-	captureEntityToolRunForkRevision(t, db, sourceRunID)
+	captureEntityToolRunForkRevision(t, ctx, pg, sourceRunID)
 	storetest.InsertCanonicalEventRecord(t, ctx, pg, eventtest.PersistedProjectionForProducer(
 		forkEventID, "fork.field_only", eventtest.Producer(events.EventProducerPlatform, "test"),
 		"", []byte(`{}`), 0, sourceRunID, "",
@@ -1416,7 +1415,7 @@ status: text
 	`, sourceRunID, entityID, at.Add(time.Minute)); err != nil {
 		t.Fatalf("advance live source entity_state: %v", err)
 	}
-	captureEntityToolRunForkRevision(t, db, sourceRunID)
+	captureEntityToolRunForkRevision(t, ctx, pg, sourceRunID)
 	result, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: forkEventID, RootAdmission: rooted.Admission()})
 	if err != nil {
 		t.Fatalf("MaterializeRunFork: %v", err)
@@ -1454,19 +1453,9 @@ status: text
 	}
 }
 
-func captureEntityToolRunForkRevision(t *testing.T, db *sql.DB, runID string) {
+func captureEntityToolRunForkRevision(t *testing.T, ctx context.Context, selected any, runID string) {
 	t.Helper()
-	tx, err := db.BeginTx(context.Background(), nil)
-	if err != nil {
-		t.Fatalf("begin entity-tool run-fork revision: %v", err)
-	}
-	defer tx.Rollback()
-	if _, err := runforkrevision.Capture(context.Background(), tx, runID, runforkrevision.AllFamilies()...); err != nil {
-		t.Fatalf("capture entity-tool run-fork revision: %v", err)
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("commit entity-tool run-fork revision: %v", err)
-	}
+	storetest.CaptureRunForkSnapshot(t, ctx, selected, runID)
 }
 
 func TestEntityTools_SearchAndQueryUseStoredCurrentState(t *testing.T) {
