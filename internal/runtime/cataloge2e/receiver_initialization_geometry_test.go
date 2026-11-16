@@ -1,15 +1,20 @@
 package cataloge2e
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	eventtypes "github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/operatorread"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -231,7 +236,162 @@ func TestReceiverInitializationNestedGeometryBothStores(t *testing.T) {
 					})
 				}
 			}
+			for _, changed := range []string{"account", "intermediate"} {
+				t.Run("nested_stale_"+changed, func(t *testing.T) {
+					proveCrossInstanceStaleAncestor(t, backend, changed)
+				})
+			}
 		})
+	}
+}
+
+func proveCrossInstanceStaleAncestor(t *testing.T, backend catalogRuntimeBackend, changed string) {
+	t.Helper()
+	root := canonicalrouting.CopyCrossInstanceConnection(t, canonicalrouting.CrossInstanceNestedKeyless)
+	canonicalrouting.AddCrossInstanceKeylessIntermediate(t, root)
+	canonicalrouting.UseCrossInstanceFanOut(t, root)
+	first := make(chan error, 1)
+	retry := make(chan struct{}, 1)
+	resume := make(chan struct{})
+	var release sync.Once
+	unblock := func() { release.Do(func() { close(resume) }) }
+	var turns atomic.Int32
+	var h *runtimeHarness
+	var changedPath, receiverPath string
+	observe := func(ctx context.Context, command pipeline.FanOutChunkCommand) {
+		if command.Claim.Key.RunID != catalogRuntimeRunID {
+			return
+		}
+		switch turns.Add(1) {
+		case 1:
+			if len(command.Outcomes) != 1 || command.Outcomes[0].Publication == nil {
+				first <- fmt.Errorf("stale-ancestor fixture lacks its exact prepared ordinal: %+v", command.Outcomes)
+				return
+			}
+			plan, ok := command.Outcomes[0].Publication.(runtimebus.EnginePublicationPlan)
+			if !ok {
+				first <- fmt.Errorf("unexpected publication plan %T", command.Outcomes[0].Publication)
+				return
+			}
+			routes := plan.PublicationCommand().Commit.DeliveryRoutes
+			if len(routes) != 1 || routes[0].Target.Route().FlowInstance != receiverPath {
+				first <- fmt.Errorf("stale-ancestor fixture did not select the final receiver: %+v", routes)
+				return
+			}
+			var selected any = h.pg
+			if h.sqlite != nil {
+				selected = h.sqlite
+			}
+			count, err := storetest.SetWorkflowProjectionDraining(ctx, selected, catalogRuntimeRunID, changedPath)
+			if err == nil && count != 1 {
+				err = fmt.Errorf("stale-ancestor fixture changed %d headers", count)
+			}
+			first <- err
+		case 2:
+			retry <- struct{}{}
+			select {
+			case <-resume:
+			case <-ctx.Done():
+			}
+		}
+	}
+	h = newLiveForkCatalogHarness(t, root, backend, observe)
+	t.Cleanup(unblock)
+	seedCatalogRootStateForRun(t, h, catalogRuntimeRunID)
+	for _, key := range []string{"7", "8"} {
+		h.publishAndWait(catalogTriggerStep{Event: "opened", Payload: map[string]any{"account_id": key, "ticket_id": "42"}}, catalogRuntimePublishTimeout)
+	}
+	h.waitForCatalogStoreQuiescence(catalogRuntimePublishTimeout)
+	ctx := catalogRunContext(h, catalogRuntimeRunID)
+	instances, err := h.workflow.ListWorkflowInstances(ctx, catalogRuntimeRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var account, bridge, receiver pipeline.WorkflowInstance
+	for _, instance := range instances {
+		if instance.WorkflowName == "account" && instance.Fields["account_id"] == "8" {
+			account = instance
+		}
+	}
+	for _, instance := range instances {
+		if instance.WorkflowName == "account/bridge" && instance.ParentEntityID == account.EntityID {
+			bridge = instance
+		}
+	}
+	for _, instance := range instances {
+		if instance.WorkflowName == "account/bridge/audit" && instance.ParentEntityID == bridge.EntityID {
+			receiver = instance
+		}
+	}
+	if account.EntityID == "" || bridge.EntityID == "" || receiver.EntityID == "" {
+		t.Fatalf("stale-ancestor fixture lacks its native chain: account=%+v bridge=%+v receiver=%+v", account, bridge, receiver)
+	}
+	changedPath, receiverPath = account.StorageRef, receiver.StorageRef
+	if changed == "intermediate" {
+		changedPath = bridge.StorageRef
+	}
+	h.publishAndWait(catalogTriggerStep{Event: "cross.requested", eventID: uuid.NewString(), Payload: map[string]any{"source_account_id": "7", "ticket_id": "42", "target_account_id": "8", "targets": []any{"8"}}}, catalogRuntimePublishTimeout)
+	phase, cancel := context.WithTimeout(ctx, catalogRuntimePublishTimeout)
+	defer cancel()
+	select {
+	case err := <-first:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-phase.Done():
+		t.Fatalf("nested publication never reached its prepared native chunk: %v", phase.Err())
+	}
+	select {
+	case <-retry:
+	case <-phase.Done():
+		t.Fatalf("changed ancestor did not cause native reobservation/retry: %v", phase.Err())
+	}
+	var logs interface {
+		ListOperatorRuntimeLogs(context.Context, operatorread.OperatorRuntimeLogListOptions) (operatorread.OperatorRuntimeLogListResult, error)
+	} = h.pg
+	if h.sqlite != nil {
+		logs = h.sqlite
+	}
+	page, err := logs.ListOperatorRuntimeLogs(phase, operatorread.OperatorRuntimeLogListOptions{RunID: catalogRuntimeRunID, ErrorCode: "flow_instance_planning_stale", Limit: 20})
+	if err != nil || len(page.Logs) != 1 {
+		t.Fatalf("native retry lost the exact stale-planning cause: logs=%+v err=%v", page.Logs, err)
+	}
+	public, err := catalogRunScopedOperatorEvents(h, catalogRuntimeRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range public {
+		if strings.HasSuffix(event.EventName, "/ticket.cross") {
+			t.Fatalf("stale native plan leaked its ordinal before the fresh retry: %+v", event)
+		}
+	}
+	instances, err = h.workflow.ListWorkflowInstances(phase, catalogRuntimeRunID)
+	var current pipeline.WorkflowInstance
+	for _, instance := range instances {
+		if instance.StorageRef == receiver.StorageRef {
+			current = instance
+		}
+	}
+	if err != nil || !reflect.DeepEqual(receiver, current) {
+		t.Fatalf("unchanged final receiver concealed changed ancestor: before=%+v after=%+v err=%v", receiver, current, err)
+	}
+	unblock()
+	h.waitForCatalogStoreQuiescence(catalogRuntimePublishTimeout)
+	public, err = catalogRunScopedOperatorEvents(h, catalogRuntimeRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	refused := 0
+	for _, event := range public {
+		if strings.HasSuffix(event.EventName, "/ticket.cross") {
+			refused++
+			if event.NoDelivery == nil || len(event.Deliveries) != 0 {
+				t.Fatalf("fresh retry ignored unavailable selected ancestry: %+v", event)
+			}
+		}
+	}
+	if refused != 1 {
+		t.Fatalf("fresh retry publications=%d, want exactly one counted refusal", refused)
 	}
 }
 
