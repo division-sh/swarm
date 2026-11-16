@@ -464,10 +464,21 @@ func proveSixtyOfHundredSelectedFork(t *testing.T, backend string) {
 	planner := f.selected.(interface {
 		PlanRunFork(context.Context, runfork.RunForkPlanRequest) (runfork.RunForkPlan, error)
 	})
+	pauseDeploymentFixtureRun(t, f, runID)
+	pausePlan, err := planner.PlanRunFork(f.ctx, runfork.RunForkPlanRequest{SourceRunID: runID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner, _ := deploymentForkOwner(t, f)
+	forkServer := deploymentForkServer(t, f, owner)
+	// The snapshot precedes the final plan read. A revision that lands between
+	// them has no classified facts and fails closed rather than moving the cut.
+	standing := selectedDeploymentPauseRevisionFacts(t, f, runID)
 	plan, err := planner.PlanRunFork(f.ctx, runfork.RunForkPlanRequest{SourceRunID: runID})
 	if err != nil {
 		t.Fatal(err)
 	}
+	selectedDeploymentRequirePauseRevisionProvenance(t, standing, pausePlan.ForkPoint.Revision, plan.ForkPoint.Revision, atCut)
 	if err := runfork.ValidateFanOutPendingReplayAdmission(plan); err != nil {
 		t.Fatal(err)
 	}
@@ -478,9 +489,6 @@ func proveSixtyOfHundredSelectedFork(t *testing.T, backend string) {
 	if owed != 40 {
 		t.Fatalf("fixed cut owes %d recipients, want40", owed)
 	}
-	pauseDeploymentFixtureRun(t, f, runID)
-	owner, _ := deploymentForkOwner(t, f)
-	forkServer := deploymentForkServer(t, f, owner)
 	params := map[string]any{"source_run_id": runID, "bundle_hash": f.runtime.sourceArtifactFact.BundleHash(), "idempotency_key": uuid.NewString()}
 	result, rpcErr := deploymentForkRPC(t, f.ctx, forkServer, params)
 	version := selectedDeploymentVersion(t, f, rows.Bytes())
@@ -515,6 +523,125 @@ func proveSixtyOfHundredSelectedFork(t *testing.T, backend string) {
 	replay, rpcErr := deploymentForkRPC(t, f.ctx, forkServer, params)
 	if len(rpcErr) != 0 || !reflect.DeepEqual(result, replay) || before != selectedDeploymentForkOperationSnapshot(t, f, result.ForkRunID) {
 		t.Fatalf("60/100 exact operation replay mutated evidence: %+v %s", replay, rpcErr)
+	}
+}
+
+type selectedDeploymentRevisionFact struct {
+	family, key string
+	present     bool
+	value       map[string]any
+}
+
+func selectedDeploymentPauseRevisionFacts(t *testing.T, f *deploymentResourceFixture, runID string) map[int64][]selectedDeploymentRevisionFact {
+	t.Helper()
+	snapshot, err := storetest.ReadSelectedForkApplicationStorageSnapshot(f.ctx, f.selected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := storetest.DecodeSelectedForkSnapshotRows(snapshot["run_fork_fact_revisions"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	readText := func(row map[string]storetest.SelectedForkSnapshotCell, column string) string {
+		t.Helper()
+		cell, ok := row[column]
+		if !ok {
+			t.Fatalf("revision fact lacks %s", column)
+		}
+		value, err := cell.Text()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return value
+	}
+	facts := make(map[int64][]selectedDeploymentRevisionFact)
+	for _, row := range rows {
+		if readText(row, "run_id") != runID {
+			continue
+		}
+		var revision int64
+		if err := json.Unmarshal(row["revision"].Value, &revision); err != nil {
+			t.Fatal(err)
+		}
+		var present bool
+		if err := json.Unmarshal(row["present"].Value, &present); err != nil {
+			t.Fatal(err)
+		}
+		var value map[string]any
+		if err := json.Unmarshal([]byte(readText(row, "fact")), &value); err != nil {
+			t.Fatalf("revision %d has unreadable fact kind: %v", revision, err)
+		}
+		facts[revision] = append(facts[revision], selectedDeploymentRevisionFact{
+			family: readText(row, "family"), key: readText(row, "fact_key"), present: present, value: value,
+		})
+	}
+	return facts
+}
+
+func selectedDeploymentRequirePauseRevisionProvenance(t *testing.T, facts map[int64][]selectedDeploymentRevisionFact, paused, planned int64, cut operatorread.OperatorEventListResult) {
+	t.Helper()
+	if planned < paused {
+		t.Fatalf("paused source revision regressed: pause=%d plan=%d", paused, planned)
+	}
+	eventsAtCut := make(map[string]operatorread.OperatorEventDelivery, len(cut.Events))
+	deliveriesAtCut := make(map[string]string, len(cut.Events))
+	for _, event := range cut.Events {
+		if len(event.Deliveries) != 1 {
+			t.Fatalf("issued event %s lost its sole receiver", event.EventID)
+		}
+		eventsAtCut[event.EventID] = event.Deliveries[0]
+		deliveriesAtCut[event.Deliveries[0].DeliveryID] = event.EventID
+	}
+	knownIntents := map[string]bool{}
+	for revision, recorded := range facts {
+		if revision > paused {
+			continue
+		}
+		for _, fact := range recorded {
+			if fact.family == "fan_out_obligations" && fact.value["fact_kind"] == "intent" && fact.value["origin_kind"] == "deployment" {
+				knownIntents[fact.key] = true
+			}
+		}
+	}
+	for revision := paused + 1; revision <= planned; revision++ {
+		recorded := facts[revision]
+		if len(recorded) == 0 {
+			t.Fatalf("paused source revision %d has no readable provenance (pause=%d plan=%d)", revision, paused, planned)
+		}
+		for _, fact := range recorded {
+			kind := ""
+			if fact.value != nil {
+				kind, _ = fact.value["fact_kind"].(string)
+			}
+			allowed := false
+			if fact.present {
+				switch fact.family {
+				case "event_deliveries":
+					eventID, _ := fact.value["event_id"].(string)
+					deliveryID, _ := fact.value["delivery_id"].(string)
+					atCut, issued := eventsAtCut[eventID]
+					status, _ := fact.value["status"].(string)
+					allowed = issued && deliveriesAtCut[deliveryID] == eventID &&
+						(status == atCut.Status || atCut.StartedAt != nil && status == "delivered")
+				case "event_receipts":
+					eventID, _ := fact.value["event_id"].(string)
+					_, issued := eventsAtCut[eventID]
+					allowed = issued && fact.value["subscriber_type"] == "platform" && fact.value["subscriber_id"] == "pipeline" && fact.value["outcome"] == "success"
+				case "fan_out_obligations":
+					switch kind {
+					case "intent":
+						allowed = knownIntents[fact.key] && fact.value["origin_kind"] == "deployment" && fact.value["cardinality"] == float64(100) && fact.value["cursor"] == float64(100)
+					case "outcome":
+						eventID, _ := fact.value["source_event_id"].(string)
+						_, issued := eventsAtCut[eventID]
+						allowed = issued && fact.value["origin_kind"] == "deployment"
+					}
+				}
+			}
+			if !allowed {
+				t.Fatalf("paused source advanced by unproved revision %d family=%s key=%s kind=%s present=%t fact=%v (pause=%d plan=%d)", revision, fact.family, fact.key, kind, fact.present, fact.value, paused, planned)
+			}
+		}
 	}
 }
 
