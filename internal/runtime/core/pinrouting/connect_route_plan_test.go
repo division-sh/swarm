@@ -1,6 +1,7 @@
 package pinrouting
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -392,6 +393,87 @@ func TestConnectExecutionClaimBindsConnectionPolicy(t *testing.T) {
 			}
 		}
 	}
+	for _, tc := range []struct {
+		name, receiver, event string
+		shape                 canonicalrouting.CrossInstanceConnectionShape
+	}{
+		{"same_keyed_flow_boundary", "account", "account.cross", canonicalrouting.CrossInstanceSameKeyedFlow},
+		{"nested_keyless_boundary", "account/audit", "ticket.cross", canonicalrouting.CrossInstanceNestedKeyless},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, canonicalrouting.CopyCrossInstanceConnection(t, tc.shape), runtimecontracts.DefaultPlatformSpecFile(repo))
+			if err != nil {
+				t.Fatal(err)
+			}
+			plans, issues := compileConnectPlans(semanticview.Wrap(bundle))
+			if len(issues) != 0 {
+				t.Fatal(issues)
+			}
+			var plan ConnectRoutePlan
+			for _, candidate := range plans {
+				if candidate.SourceEndpoint().Readback().LocalEvent == tc.event {
+					plan = candidate
+				}
+			}
+			if plan.InstanceKey() == nil || plan.SelectionFlowID() != "account" || plan.ReceiverEndpoint().FlowID() != tc.receiver || plan.InstanceKey().Readback().SourcePath != "payload.target_account_id" || plan.ResolutionKind() != ConnectResolutionInstanceKey || plan.InstanceKey().Mode() != runtimecontracts.FlowInputResolutionModeSelect {
+				t.Fatalf("compiled boundary/final receiver/source changed: %+v", plan.Readback())
+			}
+			node := identitytest.FlowNode(t, tc.receiver, "receiver")
+			route := ConnectDeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(node), Handler: MustConnectReceiverHandler(node), Target: events.RouteIdentity{FlowID: tc.receiver, FlowInstance: tc.receiver + "/selected", EntityID: eventtest.UUID(tc.name)}}
+			claim, err := ConnectExecutionClaim(plan, route)
+			if err != nil {
+				t.Fatal(err)
+			}
+			identity, err := ConnectPlanIdentity(plan)
+			if err != nil {
+				t.Fatal(err)
+			}
+			changed := plan
+			changed.instanceKey = cloneConnectRoutePlanInstanceKey(plan.instanceKey)
+			changed.instanceKey.selectionFlow = "different-account"
+			changedClaim, err := ConnectExecutionClaim(changed, route)
+			if err != nil {
+				t.Fatal(err)
+			}
+			changedIdentity, err := ConnectPlanIdentity(changed)
+			if err != nil || claim.Equal(changedClaim) || identity.String() == changedIdentity.String() {
+				t.Fatalf("selected keyed boundary escaped plan/delivery identity: err=%v", err)
+			}
+		})
+	}
+	t.Run("legacy_instance_identity_bytes", func(t *testing.T) {
+		bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, canonicalrouting.CopyLexicalAddressing(t, true), runtimecontracts.DefaultPlatformSpecFile(repo))
+		if err != nil {
+			t.Fatal(err)
+		}
+		plans, issues := compileConnectPlans(semanticview.Wrap(bundle))
+		if len(issues) != 0 {
+			t.Fatal(issues)
+		}
+		for _, plan := range plans {
+			if plan.SourceEndpoint().Readback().LocalEvent != "ticket.cross" {
+				continue
+			}
+			codec := connectPlanIdentityCodec(plan).InstanceKey
+			old, err := json.Marshal(struct {
+				Mode         runtimecontracts.FlowInputResolutionMode `json:"mode"`
+				Field        string                                   `json:"field"`
+				SourceKind   uint8                                    `json:"source_kind"`
+				SourcePath   string                                   `json:"source_path"`
+				SourceType   string                                   `json:"source_type"`
+				ReceiverType string                                   `json:"receiver_type"`
+			}{codec.Mode, codec.Field, codec.SourceKind, codec.SourcePath, codec.SourceType, codec.ReceiverType})
+			if err != nil {
+				t.Fatal(err)
+			}
+			current, err := json.Marshal(codec)
+			if err != nil || string(current) != string(old) || plan.SelectionFlowID() != "account" {
+				t.Fatalf("legacy canonical instance bytes changed: old=%s new=%s err=%v", old, current, err)
+			}
+			return
+		}
+		t.Fatal("legacy keyed ancestor row missing")
+	})
 }
 
 func TestW2CanonicalConnectPlanIdentityIgnoresTargetSetAuthorOrderAndReadbackIsImmutable(t *testing.T) {

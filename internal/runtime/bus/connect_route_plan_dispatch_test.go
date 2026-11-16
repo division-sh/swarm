@@ -2733,6 +2733,45 @@ func TestEventBusPublish_ConnectRoutePlanSelectResolutionUsesRenamedPayloadSourc
 }
 
 func TestEventBusCheckPublishRecipientPlan_RenamedInstanceSourceRemediationUsesAuthoredPath(t *testing.T) {
+	t.Run("nested_receiver_remediation", func(t *testing.T) {
+		source := loadConnectRoutePlanCanonicalSource(t, canonicalrouting.CopyCrossInstanceConnection(t, canonicalrouting.CrossInstanceNestedKeyless))
+		graph := runtimepinrouting.CompileConnectGraph(source)
+		if issues := graph.Issues(); len(issues) != 0 {
+			t.Fatal(issues)
+		}
+		var plan runtimepinrouting.ConnectRoutePlan
+		for _, candidate := range graph.Plans() {
+			if candidate.SourceEndpoint().Readback().LocalEvent == "ticket.cross" {
+				plan = candidate
+			}
+		}
+		if plan.InstanceKey() == nil || plan.SelectionFlowID() != "account" || plan.ReceiverEndpoint().FlowID() != "account/audit" {
+			t.Fatalf("nested remediation fixture lost distinct boundary/receiver: %+v", plan.Readback())
+		}
+		for _, tc := range []struct {
+			name, want       string
+			failure          runtimepinrouting.ConnectRoutePlanFailure
+			boundarySelected bool
+			values           map[string]string
+		}{
+			{"missing_source", "Provide payload.target_account_id before selecting account for receiver account/audit; resolution mode select requires a carried key value.", runtimepinrouting.ConnectFailureInstanceSourceValueMissing, false, nil},
+			{"missing_account", "Create or connect exactly one active account instance with account_id = 8 before publishing to account/audit; resolution mode select never creates a missing instance.", runtimepinrouting.ConnectFailureTargetUnresolved, false, map[string]string{"payload.target_account_id": "8"}},
+			{"ambiguous_account", "Ensure exactly one active account instance has account_id = 8 before publishing to account/audit; resolution mode select cannot choose between multiple matches.", runtimepinrouting.ConnectFailureTargetAmbiguous, false, map[string]string{"payload.target_account_id": "8"}},
+			{"unavailable_receiver", "Ensure account/audit exists and is available under the selected account instance before publishing; resolution mode select creates neither instance.", runtimepinrouting.ConnectFailureLifecycleUnavailable, true, map[string]string{"payload.target_account_id": "8"}},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				detail := connectRoutePlanFailureDetail(plan, tc.failure, tc.values, tc.boundarySelected)
+				if detail["connect_route_plan_failure_remediation"] != tc.want || detail["connect_route_plan_receiver_flow"] != "account/audit" || detail["connect_route_plan_resolution_mode"] != "select" {
+					t.Fatalf("nested remediation changed receiver semantics/approved text: %+v", detail)
+				}
+				for _, field := range []string{"connect_route_plan_instance_key_field", "connect_route_plan_instance_key_value"} {
+					if value, present := detail[field]; present {
+						t.Fatalf("keyless receiver acquired selected account key field %s=%v", field, value)
+					}
+				}
+			})
+		}
+	})
 	for _, mode := range []runtimecontracts.FlowInputResolutionMode{
 		runtimecontracts.FlowInputResolutionModeSelect,
 		runtimecontracts.FlowInputResolutionModeSelectOrCreate,

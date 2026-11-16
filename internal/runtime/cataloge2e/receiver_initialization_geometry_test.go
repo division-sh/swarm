@@ -1,6 +1,7 @@
 package cataloge2e
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -223,7 +224,120 @@ func TestReceiverInitializationNestedGeometryBothStores(t *testing.T) {
 			t.Run("C53_cross_account_delivery", func(t *testing.T) {
 				proveCrossAccountDelivery(t, backend)
 			})
+			for _, shape := range []canonicalrouting.CrossInstanceConnectionShape{canonicalrouting.CrossInstanceSameKeyedFlow, canonicalrouting.CrossInstanceNestedKeyless} {
+				for _, agent := range []bool{false, true} {
+					t.Run(fmt.Sprintf("one_key_shape_%d_agent_%t", shape, agent), func(t *testing.T) {
+						proveOneKeyCrossInstanceDelivery(t, backend, shape, agent)
+					})
+				}
+			}
 		})
+	}
+}
+
+func proveOneKeyCrossInstanceDelivery(t *testing.T, backend catalogRuntimeBackend, shape canonicalrouting.CrossInstanceConnectionShape, agent bool) {
+	t.Helper()
+	root := canonicalrouting.CopyCrossInstanceConnection(t, shape)
+	if agent {
+		canonicalrouting.UseCrossInstanceAgentReceiver(t, root, shape)
+	}
+	h := newRuntimeHarnessForBackend(t, root, backend, true)
+	seedCatalogRootStateForRun(t, h, catalogRuntimeRunID)
+	ctx := catalogRunContext(h, catalogRuntimeRunID)
+	for _, key := range []string{"7", "8"} {
+		h.publishAndWait(catalogTriggerStep{Event: "opened", Payload: map[string]any{"account_id": key, "ticket_id": "42"}}, catalogRuntimePublishTimeout)
+	}
+	h.waitForCatalogStoreQuiescence(catalogRuntimePublishTimeout)
+	load := func() map[string]pipeline.WorkflowInstance {
+		t.Helper()
+		instances, err := h.workflow.ListWorkflowInstances(ctx, catalogRuntimeRunID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		byPath := make(map[string]pipeline.WorkflowInstance, len(instances))
+		for _, instance := range instances {
+			byPath[instance.StorageRef] = instance
+		}
+		return byPath
+	}
+	before := load()
+	accounts := map[string]pipeline.WorkflowInstance{}
+	for _, instance := range before {
+		if instance.WorkflowName == "account" {
+			accounts[instance.Fields["account_id"].(string)] = instance
+		}
+	}
+	if len(accounts) != 2 || accounts["7"].EntityID == "" || accounts["8"].EntityID == "" || accounts["7"].EntityID == accounts["8"].EntityID {
+		t.Fatalf("one-key fixture lost distinct account owners: %+v", accounts)
+	}
+	sender, receiver := accounts["7"], accounts["8"]
+	eventName := "account.cross"
+	if shape == canonicalrouting.CrossInstanceNestedKeyless {
+		eventName = "ticket.cross"
+		for _, instance := range before {
+			if instance.WorkflowName == "account/ticket" && instance.ParentEntityID == accounts["7"].EntityID && instance.Fields["ticket_id"] == "42" {
+				sender = instance
+			}
+			if instance.WorkflowName == "account/audit" && instance.ParentEntityID == accounts["8"].EntityID {
+				receiver = instance
+			}
+		}
+		if sender.WorkflowName != "account/ticket" || receiver.WorkflowName != "account/audit" || receiver.ParentEntityID != accounts["8"].EntityID {
+			t.Fatalf("nested source/receiver were not constructed under distinct accounts: sender=%+v receiver=%+v", sender, receiver)
+		}
+	}
+	id := uuid.NewString()
+	h.publishAndWait(catalogTriggerStep{Event: "cross.requested", eventID: id, Payload: map[string]any{"source_account_id": "7", "ticket_id": "42", "target_account_id": "8"}}, catalogRuntimePublishTimeout)
+	h.waitForCatalogStoreQuiescence(catalogRuntimePublishTimeout)
+	public, err := catalogRunScopedOperatorEvents(h, catalogRuntimeRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var crossID string
+	for _, event := range public {
+		if !strings.HasSuffix(event.EventName, "/"+eventName) {
+			continue
+		}
+		if crossID != "" || event.SourceEventID != id || len(event.Deliveries) != 1 || event.Deliveries[0].Status != "delivered" || event.Deliveries[0].Route.Target.Route().FlowInstance != receiver.StorageRef || event.Deliveries[0].Route.Target.Route().EntityID != receiver.EntityID || event.Deliveries[0].Route.Recipient.IsAgent() != agent || len(event.DeadLetters) != 0 || event.NoDelivery != nil {
+			t.Fatalf("one-key publication did not reach only its selected receiver: %+v", event)
+		}
+		crossID = event.EventID
+		var selected any = h.pg
+		if h.sqlite != nil {
+			selected = h.sqlite
+		}
+		native, present, err := storetest.ReadCanonicalEventRecord(ctx, selected, event.EventID)
+		if err != nil || !present || native.SourceRoute().FlowInstance != sender.StorageRef || native.SourceRoute().EntityID != sender.EntityID {
+			t.Fatalf("cross-instance selection replaced the actual sender: %+v present=%t err=%v", native, present, err)
+		}
+	}
+	if crossID == "" {
+		t.Fatal("cross-instance source emitted no event")
+	}
+	after := load()
+	wantCount := int64(1)
+	if agent {
+		wantCount = 0
+		h.llm.mu.Lock()
+		calls := 0
+		for _, call := range h.llm.deliveryCalls {
+			if call.EventID == crossID && call.RunID == catalogRuntimeRunID && call.TargetEntityID == receiver.EntityID {
+				calls++
+			}
+		}
+		h.llm.mu.Unlock()
+		if calls != 1 {
+			t.Fatalf("selected agent provider calls=%d, want one at the receiver owner", calls)
+		}
+	}
+	if len(after) != len(before) || after[receiver.StorageRef].Fields["cross_count"] != wantCount {
+		t.Fatalf("one-key delivery changed construction or executed the wrong receiver: %+v", after)
+	}
+	for path, old := range before {
+		current := after[path]
+		if current.EntityID != old.EntityID || current.Life != old.Life || current.ParentEntityID != old.ParentEntityID || path != receiver.StorageRef && !reflect.DeepEqual(current.Fields, old.Fields) {
+			t.Fatalf("one-key delivery changed unrelated identity/fields: before=%+v after=%+v", old, current)
+		}
 	}
 }
 
