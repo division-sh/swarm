@@ -256,7 +256,9 @@ func TestSelectedContractExecutionUsesSemanticPorts(t *testing.T) {
 	assertOwnershipSourceContains(t, preparation,
 		"return o.prepareWithOperation(ctx, req, nil)",
 		"ports, err := o.require()",
-		"operation, err = o.beginPreparation(ctx)",
+		"operation, err = o.admitPreparationOperation(ctx, req, ports, operation, previous)",
+		"return o.beginPreparation(ctx)",
+		"return operation, o.requireAcceptedRefresh(previous)",
 		"req.Recovery != nil && entry.binding.ForkRunID == req.Recovery.RunID",
 	)
 	assertOwnershipSourceExcludes(t, execution,
