@@ -1080,6 +1080,17 @@ func TestCLI_ServeVerboseFlagConsumesServeOwner(t *testing.T) {
 	if captured.Output == nil {
 		t.Fatalf("serve output writer was not passed to serve owner")
 	}
+	stdout.Reset()
+	stderr.Reset()
+	if code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"serve", "--help"}, &stdout, &stderr, opts); code != 0 {
+		t.Fatalf("serve help code=%d stderr=%s", code, stderr.String())
+	}
+	help := strings.Join(strings.Fields(stdout.String()), " ")
+	for _, want := range []string{"messages may contain secrets", "reporting point, not the original failure"} {
+		if !strings.Contains(help, want) {
+			t.Fatalf("verbose help omits %q: %s", want, help)
+		}
+	}
 }
 
 func TestCLI_ServeRejectsAbandonActiveRunsBeforeOwner(t *testing.T) {
