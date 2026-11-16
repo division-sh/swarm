@@ -132,7 +132,10 @@ FROM dead_letters dl ORDER BY dl.created_at,dl.dead_letter_id`)
 			}
 			out = append(out, row)
 		}
-		return rows.Err()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		return nil
 	})
 	if err != nil {
 		return nil, err
@@ -158,7 +161,10 @@ FROM dead_letters dl ORDER BY dl.created_at,dl.dead_letter_id`)
 			}
 			out = append(out, row)
 		}
-		return rows.Err()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		return nil
 	})
 	if err != nil {
 		return nil, err
