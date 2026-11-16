@@ -51,7 +51,10 @@ func (s *ReplyPostgresOwner) ReadReplyContextRequestIDsForTest(ctx context.Conte
 		if err := rows.Err(); err != nil {
 			return err
 		}
-		return rows.Close()
+		if err := rows.Close(); err != nil {
+			return err
+		}
+		return nil
 	})
 	if err != nil {
 		return nil, err
@@ -77,7 +80,10 @@ func (s *ReplySQLiteOwner) ReadReplyContextRequestIDsForTest(ctx context.Context
 		if err := rows.Err(); err != nil {
 			return err
 		}
-		return rows.Close()
+		if err := rows.Close(); err != nil {
+			return err
+		}
+		return nil
 	})
 	if err != nil {
 		return nil, err

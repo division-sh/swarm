@@ -2,8 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -121,19 +119,21 @@ func TestNativeCatalogRootReplyRecipesPreserveRoutingRefusalAndNoRedispatch(t *t
 }
 
 func TestNativeCatalogRootReplyOwnerPreservesPhysicalCardinalityAndOrder(t *testing.T) {
-	path := filepath.Join("..", "..", "..", "internal", "store", "internal", "backend", "replycontext", "owner.go")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, fragment := range []string{
-		"SELECT CAST(request_event_id AS TEXT) FROM reply_contexts WHERE run_id=$1 ORDER BY request_event_id",
-		"FROM reply_contexts WHERE run_id=$1 ORDER BY reply_context_id LIMIT 1",
-		"SELECT count(*),count(accepted_reply_event_id),count(DISTINCT request_event_id),count(DISTINCT accepted_reply_event_id)",
-		"if err := rows.Err(); err != nil", "if err := rows.Close(); err != nil",
-	} {
-		if !strings.Contains(string(data), fragment) {
-			t.Fatalf("reply physical read contract missing %q", fragment)
+	for _, receiver := range []string{"ReplyPostgresOwner", "ReplySQLiteOwner"} {
+		for _, read := range []struct {
+			method    string
+			fragments []string
+		}{
+			{"ReadReplyContextRequestIDsForTest", []string{"SELECT CAST(request_event_id AS TEXT) FROM reply_contexts WHERE run_id=$1 ORDER BY request_event_id", "if err := rows.Err(); err != nil", "if err := rows.Close(); err != nil"}},
+			{"ReadFirstReplyContextStorageForTest", []string{"FROM reply_contexts WHERE run_id=$1 ORDER BY reply_context_id LIMIT 1"}},
+			{"ReadReplyContextStorageCountsForTest", []string{"SELECT count(*),count(accepted_reply_event_id),count(DISTINCT request_event_id),count(DISTINCT accepted_reply_event_id)"}},
+		} {
+			body := selectedCausalObservationBody(t, "internal/store/internal/backend/replycontext/test_storage_observation.go", read.method, receiver)
+			for _, fragment := range read.fragments {
+				if !strings.Contains(body, fragment) {
+					t.Fatalf("%s.%s reply physical read contract missing %q", receiver, read.method, fragment)
+				}
+			}
 		}
 	}
 }
