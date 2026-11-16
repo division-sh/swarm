@@ -40,6 +40,11 @@ func (m *RuntimeContextManager) SealInboundExecution(ctx context.Context) error 
 	}
 	m.inboundSealDone = make(chan struct{})
 	m.inboundPhaseMu.Unlock()
+	result := m.inboundSelections.Wait(ctx)
+	result = errors.Join(result, m.inboundSelections.Wait(context.Background()))
+	m.inboundPhaseMu.Lock()
+	m.inboundFinalSet = true
+	m.inboundPhaseMu.Unlock()
 	m.CloseFreshDispatch()
 	m.mu.RLock()
 	var runtimes []*Runtime
@@ -49,8 +54,6 @@ func (m *RuntimeContextManager) SealInboundExecution(ctx context.Context) error 
 		}
 	}
 	m.mu.RUnlock()
-	result := m.inboundSelections.Wait(ctx)
-	result = errors.Join(result, m.inboundSelections.Wait(context.Background()))
 	for _, rt := range runtimes {
 		result = errors.Join(result, rt.Bus.SealPipelineRecovery(ctx))
 	}
@@ -131,6 +134,16 @@ func (m *RuntimeContextManager) InboundClaimAdmissionOpen() bool {
 	m.inboundPhaseMu.RLock()
 	defer m.inboundPhaseMu.RUnlock()
 	return !m.inboundStopping
+}
+
+// InboundDraining only selects the checked handler; it grants no native use.
+func (m *RuntimeContextManager) InboundDraining() bool {
+	if m == nil {
+		return false
+	}
+	m.inboundPhaseMu.RLock()
+	defer m.inboundPhaseMu.RUnlock()
+	return m.inboundStopping && !m.inboundRequests.Closed()
 }
 
 // InboundPublicationUse owns publication custody, never fresh execution rights.
