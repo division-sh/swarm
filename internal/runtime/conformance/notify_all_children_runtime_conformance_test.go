@@ -552,7 +552,7 @@ func TestFanOutDeliveryBarrierCompletesThroughRealEventBusAndPublicReadbackOnBot
 				var issuance *notifyAllChildrenIssuanceProbe
 				if cardinality == 100 {
 					issuance = &notifyAllChildrenIssuanceProbe{
-						eventType: source.ResolveFlowEventReference(notifyallchildren.OwnerFlowID, notifyallchildren.Event),
+						eventType: source.ResolveFlowEventReference(notifyallchildren.OwnerFlowID, notifyallchildren.NotifyEvent),
 						expected:  cardinality, ids: make(map[string]struct{}, cardinality), done: make(chan struct{}),
 					}
 					opts.testLifecycleProbe = issuance
