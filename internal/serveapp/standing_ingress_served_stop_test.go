@@ -94,7 +94,7 @@ func TestStoredInboundServedStopRetainsNativePendingBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			instance, found, err := rt.Pipeline.LoadConstructedFlowInstance(t.Context(), owner, identity.NormalizeEntityID(runID))
-			if err != nil || !found || instance.Fields["processed_count"] != float64(1) {
+			if err != nil || !found || instance.Fields["processed_count"] != int64(1) {
 				t.Fatalf("stopping process started stored input: found=%t instance=%+v err=%v", found, instance, err)
 			}
 			if err := accepted.Done(); err != nil {
