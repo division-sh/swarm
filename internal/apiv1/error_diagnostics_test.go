@@ -68,10 +68,18 @@ func proveVerboseInternalFailureDiagnostics(t *testing.T) {
 			t.Run(transport+"/"+tc.name, func(t *testing.T) {
 				var ordinary string
 				for _, verbose := range []bool{false, true} {
+					var calls atomic.Int32
+					fail := func(context.Context, Request) (any, error) {
+						calls.Add(1)
+						return nil, tc.cause
+					}
 					handler := testHandler(t, Options{AuthTokens: []string{testToken}, VerboseErrors: verbose, Handlers: map[string]MethodHandler{
-						"event.publish": func(context.Context, Request) (any, error) { return nil, tc.cause },
+						"event.publish": fail, "health.subscribe": fail,
 					}})
 					raw, output := diagnosticRPC(t, handler, transport)
+					if calls.Load() != 1 {
+						t.Fatalf("handler calls=%d, want one admitted request", calls.Load())
+					}
 					if verbose && string(raw) != ordinary {
 						t.Fatalf("verbose changed caller bytes: %s != %s", raw, ordinary)
 					}
@@ -163,7 +171,7 @@ func diagnosticRPC(t *testing.T, handler *Handler, transport string) (raw []byte
 		if err := conn.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
 			t.Fatal(err)
 		}
-		if err := conn.WriteMessage(websocket.TextMessage, []byte(body)); err != nil {
+		if err := conn.WriteMessage(websocket.TextMessage, []byte(`{"jsonrpc":"2.0","id":"diagnostic","method":"health.subscribe","params":{}}`)); err != nil {
 			t.Fatal(err)
 		}
 		_, raw, err = conn.ReadMessage()

@@ -38,7 +38,8 @@ func proveServeVerboseInternalFailure(t *testing.T) {
 					}
 					t.Cleanup(func() { buildSelectedAPICapabilities = prior })
 					if backend == "postgres" {
-						installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle { return serveRuntimeWorkspaceStub{} })
+						configureCompletion2270PostgresFixture(t)
+						stubServeRuntimeWorkspaceLifecycle(t)
 					}
 					var diagnostics lockedBuffer
 					previousLog := log.Writer()
