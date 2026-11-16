@@ -360,7 +360,7 @@ func proveCrossInstanceNativeBoundary(t *testing.T, backend, name string, shape 
 		t.Helper()
 		storetest.RequireRun(t, runtimecorrelation.WithRunID(ctx, id), selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: id, Artifact: bundle.SourceArtifact, StartedAt: at})
 	}
-	seed := func(id, flow, key string, parent runtimeflowidentity.Instance) runtimeflowidentity.Instance {
+	seed := func(id, flow, key string, parent runtimeflowidentity.Instance, payload map[string]any) runtimeflowidentity.Instance {
 		t.Helper()
 		var identity runtimeflowidentity.Instance
 		var err error
@@ -385,22 +385,20 @@ func proveCrossInstanceNativeBoundary(t *testing.T, backend, name string, shape 
 		}
 		if entity, present := entityruntime.ResolveForFlow(source, flow); present {
 			input := ""
+			var resolvedKey any
 			if !schema.Instance.Empty() {
 				pin, found := source.FlowInputEventPin(flow, "opened")
 				if !found {
 					t.Fatalf("keyed fixture flow %s lacks its declared opened input", flow)
 				}
 				input = string(pin.EventType())
+				resolvedKey = key
 			}
 			constructor, err := runtimepipeline.CompileFlowConstructor(source, flow, input)
 			if err != nil {
 				t.Fatal(err)
 			}
-			payload := map[string]any{}
-			if !schema.Instance.Empty() {
-				payload[schema.Instance.Path()] = key
-			}
-			instance.Fields, err = constructor.InitialFields(payload, key)
+			instance.Fields, err = constructor.InitialFields(payload, resolvedKey)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -410,48 +408,48 @@ func proveCrossInstanceNativeBoundary(t *testing.T, backend, name string, shape 
 		return identity
 	}
 	ensureRun(runID)
-	parent := seed(runID, ".", "", runtimeflowidentity.Instance{})
+	parent := seed(runID, ".", "", runtimeflowidentity.Instance{}, nil)
 	prefix := ""
 	if boundOuter {
 		prefix = "envelope/"
-		parent = seed(runID, "envelope", "left", parent)
+		parent = seed(runID, "envelope", "left", parent, map[string]any{"account_id": "7", "ticket_id": "42"})
 	}
 	accountFlow := prefix + "account"
-	sender := seed(runID, accountFlow, "7", parent)
+	sender := seed(runID, accountFlow, "7", parent, map[string]any{"account_id": "7", "ticket_id": "42"})
 	var alternateReceiver runtimeflowidentity.Instance
 	if name == "nested_interleaved_plans" {
-		bridge := seed(runID, accountFlow+"/bridge", "", sender)
-		alternateReceiver = seed(runID, accountFlow+"/bridge/audit", "", bridge)
+		bridge := seed(runID, accountFlow+"/bridge", "", sender, nil)
+		alternateReceiver = seed(runID, accountFlow+"/bridge/audit", "", bridge, nil)
 	}
 	if shape == canonicalrouting.CrossInstanceNestedKeyless {
-		sender = seed(runID, accountFlow+"/ticket", "42", sender)
+		sender = seed(runID, accountFlow+"/ticket", "42", sender, map[string]any{"account_id": "7", "ticket_id": "42"})
 	}
 	targetParent, targetRun := parent, runID
 	if name == "nested_foreign_run" {
 		targetRun = uuid.NewString()
 		ensureRun(targetRun)
-		targetParent = seed(targetRun, ".", "", runtimeflowidentity.Instance{})
+		targetParent = seed(targetRun, ".", "", runtimeflowidentity.Instance{}, nil)
 	}
 	var target runtimeflowidentity.Instance
 	if name != "nested_account_absent" {
-		target = seed(targetRun, accountFlow, "8", targetParent)
+		target = seed(targetRun, accountFlow, "8", targetParent, map[string]any{"account_id": "8", "ticket_id": "42"})
 		if shape == canonicalrouting.CrossInstanceNestedKeyless {
 			if !boundOuter {
-				target = seed(targetRun, accountFlow+"/bridge", "", target)
+				target = seed(targetRun, accountFlow+"/bridge", "", target, nil)
 			}
 			flow := accountFlow + "/audit"
 			if !boundOuter {
 				flow = accountFlow + "/bridge/audit"
 			}
-			target = seed(targetRun, flow, "", target)
+			target = seed(targetRun, flow, "", target, nil)
 		}
 	}
 	if boundOuter {
 		rootOwner := runtimeflowidentity.Stored(source, ".", runID, runID, runtimeflowidentity.EntityID(runID), "")
-		otherParent := seed(runID, "envelope", "right", rootOwner)
-		other := seed(runID, accountFlow, "8", otherParent)
+		otherParent := seed(runID, "envelope", "right", rootOwner, map[string]any{"account_id": "8", "ticket_id": "42"})
+		other := seed(runID, accountFlow, "8", otherParent, map[string]any{"account_id": "8", "ticket_id": "42"})
 		if shape == canonicalrouting.CrossInstanceNestedKeyless {
-			other = seed(runID, accountFlow+"/audit", "", other)
+			other = seed(runID, accountFlow+"/audit", "", other, nil)
 		}
 		if other.EntityID == target.EntityID || target.ParentEntityID == sender.EntityID {
 			t.Fatal("repeated-key parent proof lost distinct structural owners")
