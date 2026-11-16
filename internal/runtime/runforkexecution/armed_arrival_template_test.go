@@ -138,6 +138,7 @@ func TestIssue642ArmedTemplateArrivalTimeoutContinuesExactDeliveryBothStores(t *
 				TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), TargetRootReference: loaded.RootedSource.Admission().Reference(), ContractSelection: selection}
 			liveRuntime, liveContexts := liveForkRuntimeFixture(t, ctx, selected, owner, loaded, sourceRun, executionposture.MockOnly)
 			preservedSource := joinLiveForkFixtureClock(t, ctx, liveRuntime, selected, sourceRun, source.ID)
+			joinLiveForkFixtureClockCallback(t, ctx, liveRuntime, sourceRun, preservedSource)
 			sourceCount, err := storetest.ReadLifecycleEventCardinality(ctx, selected, sourceRun, "platform.join_timeout")
 			if err != nil {
 				t.Fatal(err)
