@@ -711,6 +711,7 @@ func debtRunFixtureSignatureComparisons(actual, head, base, source map[string]au
 	pairs = append(pairs, channelPreparation[:]...)
 	channelObservation := debtChannelObservationSignatureTransitions()
 	pairs = append(pairs, channelObservation[:]...)
+	pairs = append(pairs, debtBootCheckSignatureTransitions()...)
 	for index, pair := range pairs {
 		old, current := pair[0], pair[1]
 		for _, state := range []map[string]authorityDebtSite{actual, head, base, source} {
@@ -774,6 +775,59 @@ func debtRunFixtureSignatureComparisons(actual, head, base, source map[string]au
 		source = debtForwardQuiescenceUncertainty(source, old, current)
 	}
 	return head, base, source, nil
+}
+
+// #3082/6928601913: only these measured count-one predecessor/successor keys.
+func debtBootCheckSignatureTransitions() [][2]authorityDebtSite {
+	const oldFunction = "func(t testing.TB, dsn string, db *database/sql.DB, cfg *github.com/division-sh/swarm/internal/config.Config) *github.com/division-sh/swarm/internal/serveapp.selectedStoreOwner"
+	const newFunction = "func(t testing.TB, dsn string, db *database/sql.DB, cfg *github.com/division-sh/swarm/internal/config.Config, bootCheck ...*github.com/division-sh/swarm/internal/serveapp.selectedStoreBootCheck) *github.com/division-sh/swarm/internal/serveapp.selectedStoreOwner"
+	const result = "|results=(*github.com/division-sh/swarm/internal/serveapp.selectedStoreOwner)"
+	var pairs [][2]authorityDebtSite
+	for _, call := range []struct {
+		file, declaration, family string
+		forwarded, nilConfig      bool
+	}{
+		{"agent_memory_supported_surface_test.go", "runStandingTelegramMemorySupportedSurface", "unowned-authority", true, false},
+		{"agent_mock_supported_surface_test.go", "runMockAgentSupportedSurface", "unowned-authority", true, false},
+		{"dynamic_topology_startup_context_test.go", "testDynamicTopologyStartupPreflightTwoContexts", "unowned-authority", false, false},
+		{"inbound_admission_runtime_test.go", "TestInboundAdmissionSupportedSurfaceStartupFailuresSQLiteAndPostgres", "lifecycle", true, false},
+		{"inbound_admission_runtime_test.go", "runInboundAdmissionSupportedSurfacePolicyMatrix", "lifecycle", true, false},
+		{"issue2277_audit_probe_test.go", "TestAudit2277StoppedRunReadinessRestart", "unowned-authority", true, false},
+		{"lifecycle_transition_restart_test.go", "lifecycleRestartHarness", "unowned-authority", true, false},
+		{"mailbox_completion_fixture_test.go", "newRetainedMailboxCompletionRuntimeConfigured", "mailbox", true, false},
+		{"mailbox_completion_test.go", "gateCompletionHarness", "mailbox", true, false},
+		{"mailbox_cursor_restart_test.go", "TestServedMailboxCursorRetainedRestartParity", "mailbox", true, false},
+		{"main_runtime_test.go", "installServeRuntimePostgresTestStoresForDatabase", "lifecycle", true, false},
+		{"paused_startup_context_test.go", "TestPausedMixedRunsStartupBothStores", "unowned-authority", false, false},
+		{"receiver_restart_test.go", "TestReceiverCompositionRestartBothStores", "unowned-authority", true, false},
+		{"serve_selected_lifecycle_test.go", "TestTerminalStoreReleaseJoinsDelayedAccessBothStores", "unowned-authority", false, true},
+		{"standing_ingress_supported_surface_test.go", "TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndReplies", "unowned-authority", true, false},
+		{"standing_ingress_supported_surface_test.go", "TestStandingRestartMixedHealthyAndTerminalProcessParity", "unowned-authority", true, false},
+		{"standing_runtime_context_owner_test.go", "openStandingRuntimeContextStore", "lifecycle", false, false},
+		{"store_backend_selection_test.go", "TestSelectedOwnerAPICapabilityMatrixIsExplicitAcrossBackends", "unowned-authority", false, false},
+		{"test_command_runtime_test.go", "runServedDerivedScenarioProof", "lifecycle", true, false},
+	} {
+		args := "|recv=<nil>|arg=*testing.T|arg=string|arg=*database/sql.DB|arg=*github.com/division-sh/swarm/internal/config.Config"
+		if call.nilConfig {
+			args = "|recv=<nil>|arg=*testing.T|arg=string|arg=*database/sql.DB|arg=untyped nil"
+		}
+		replacement := "exact domain owner not identified here; escalate #2542, never invent a SQL escape"
+		if call.family == "lifecycle" {
+			replacement = "selected run lifecycle/candidate/source owner and bounded lifecycle observation"
+		} else if call.family == "mailbox" {
+			replacement = "selected mailbox/completion owner and named mailbox fault/readback"
+		}
+		old := authorityDebtSite{Kind: "raw-operation", File: "internal/serveapp/" + call.file, Declaration: call.declaration,
+			Operation: "call:github.com/division-sh/swarm/internal/serveapp.openSelectedPostgresOwner", Resolved: "func=" + oldFunction + args + result,
+			Family: call.family, Replacement: replacement, Multiplicity: 1}
+		current := old
+		if call.forwarded {
+			args += "|arg=[]*github.com/division-sh/swarm/internal/serveapp.selectedStoreBootCheck"
+		}
+		current.Resolved = "func=" + newFunction + args + result
+		pairs = append(pairs, [2]authorityDebtSite{old, current})
+	}
+	return pairs
 }
 
 // #2409/6671745779: enumerated counted tuples, never prefix normalization.
@@ -2881,6 +2935,11 @@ func debtValidateCollectorIdentity(base, current string, trusted, head authority
 	}
 	if base == current && trusted.Collector == current && head.Collector == current {
 		return nil
+	}
+	if base == debtChannelObservationCollectorTo && trusted.Collector == base &&
+		current == debtBootCheckCollectorTo && reviewedTransition == current && head.Collector == current &&
+		debtSitesEqual(head.Sites, trusted.Sites) {
+		return nil // #3082/6928601913: exact correspondences; unchanged baseline bytes/sites.
 	}
 	if base == debtR241CollectorTo && trusted.Collector == base &&
 		current == debtChannelObservationCollectorTo && reviewedTransition == current && head.Collector == current &&
