@@ -437,6 +437,11 @@ func (c selectedContractForkLocalRuntimeContainer) activateLive(p *PreparedSelec
 	if err := runtime.stopExecutionWork(); err != nil {
 		return out, err
 	}
+	// A stopped producer cannot add another selected publication. Drain any
+	// committed event that reached the pipeline after the earlier quiescence cut.
+	if err := runtime.bus.RecoverSelectedRunPipelineToExhaustion(c.attachment.ctx, c.req.ForkRunID); err != nil {
+		return out, err
+	}
 	return c.activateLiveHandoff(p, req, out)
 }
 
