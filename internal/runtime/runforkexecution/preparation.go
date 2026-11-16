@@ -154,6 +154,20 @@ func (o SelectedContractExecutionOwner) Prepare(ctx context.Context, req Selecte
 }
 
 func (o SelectedContractExecutionOwner) prepareWithOperation(ctx context.Context, req SelectedContractExecutionRequest, operation *selectedContractOperation) (_ *PreparedSelectedFork, finalErr error) {
+	return o.prepareWithOperationForRefresh(ctx, req, operation, nil)
+}
+
+func (o SelectedContractExecutionOwner) refreshPrepared(ctx context.Context, req SelectedContractExecutionRequest, previous *PreparedSelectedFork) (*PreparedSelectedFork, error) {
+	if err := o.requireAcceptedRefresh(previous); err != nil {
+		return nil, err
+	}
+	if err := previous.releaseUnboundResources(); err != nil {
+		return nil, err
+	}
+	return o.prepareWithOperationForRefresh(ctx, req, previous.operation, previous)
+}
+
+func (o SelectedContractExecutionOwner) prepareWithOperationForRefresh(ctx context.Context, req SelectedContractExecutionRequest, operation *selectedContractOperation, previous *PreparedSelectedFork) (_ *PreparedSelectedFork, finalErr error) {
 	if err := validateSelectedForkRecoveryRequest(req); err != nil {
 		return nil, err
 	}
@@ -176,6 +190,10 @@ func (o SelectedContractExecutionOwner) prepareWithOperation(ctx context.Context
 	if operation == nil {
 		operation, err = o.beginPreparation(ctx)
 		if err != nil {
+			return nil, err
+		}
+	} else if previous != nil {
+		if err := o.requireAcceptedRefresh(previous); err != nil {
 			return nil, err
 		}
 	} else {
@@ -373,6 +391,34 @@ func (o SelectedContractExecutionOwner) prepareWithOperation(ctx context.Context
 	return prepared, nil
 }
 
+func (o SelectedContractExecutionOwner) requireAcceptedRefresh(previous *PreparedSelectedFork) error {
+	if previous == nil || previous.operation == nil {
+		return errors.New("selected refresh requires its admitted preparation")
+	}
+	previous.bindMu.Lock()
+	unbound := !previous.closed && !previous.bound && previous.recoveryChildRunID == ""
+	previous.bindMu.Unlock()
+	if !unbound {
+		return errors.New("selected refresh requires an unbound preparation")
+	}
+	contexts := o.ports.contexts
+	contexts.mu.Lock()
+	entry := contexts.entries[previous.operation]
+	valid := !contexts.retired && entry != nil && !entry.closed && !entry.retiring && entry.orchestrating &&
+		entry.binding.BindingID == "" && entry.retained == nil && previous.operation.process == contexts.process
+	contexts.mu.Unlock()
+	if !valid {
+		return errors.New("selected refresh lost its accepted orchestration")
+	}
+	previous.operation.mu.Lock()
+	active := !previous.operation.retired && previous.operation.selected == nil && previous.operation.preparation != nil
+	previous.operation.mu.Unlock()
+	if !active {
+		return errors.New("selected refresh lost its unbound operation")
+	}
+	return nil
+}
+
 // MaterializationRequest projects detached evidence for the named store mutation.
 // It grants no execution permission; that still requires the owner's exact bind.
 func (p *PreparedSelectedFork) MaterializationRequest() (runforkreadiness.MaterializeRequest, error) {
@@ -475,24 +521,10 @@ func (p *PreparedSelectedFork) Close() (finalErr error) {
 		p.closeErr = err
 		return err
 	}
-	if err := p.agentRuntime.releaseWorkspaceProjection(); err != nil {
+	if err := p.releaseUnboundResourcesLocked(); err != nil {
 		p.closeErr = err
 		return err
 	}
-	p.descriptorLease.Release()
-	p.descriptorLease = nil
-	// Clear only successful releases. A failed or panicking resource remains
-	// attached to this exact preparation, with process possession, for retirement.
-	if err := cleanupLoadedSelectedContractSource(p.originalSource); err != nil {
-		p.closeErr = err
-		return err
-	}
-	p.originalSource.Cleanup = nil
-	if err := cleanupLoadedSelectedContractSource(p.loadedSource); err != nil {
-		p.closeErr = err
-		return err
-	}
-	p.loadedSource.Cleanup = nil
 	if p.pendingDiscard != nil {
 		cleanupCtx, err := p.cleanupContext()
 		if err == nil {
@@ -507,6 +539,34 @@ func (p *PreparedSelectedFork) Close() (finalErr error) {
 	p.closeErr = p.operation.Finish()
 	p.cleanupComplete = p.closeErr == nil
 	return p.closeErr
+}
+
+func (p *PreparedSelectedFork) releaseUnboundResources() error {
+	p.bindMu.Lock()
+	defer p.bindMu.Unlock()
+	if p.closed || p.bound || p.retainedRuntime != nil || p.pendingDiscard != nil || p.pendingExecutionFailure != nil {
+		return errors.New("selected refresh requires unconsumed preparation resources")
+	}
+	return p.releaseUnboundResourcesLocked()
+}
+
+func (p *PreparedSelectedFork) releaseUnboundResourcesLocked() error {
+	if err := p.agentRuntime.releaseWorkspaceProjection(); err != nil {
+		return err
+	}
+	p.agentRuntime.workspaceProjection = nil
+	p.descriptorLease.Release()
+	p.descriptorLease = nil
+	// A failed release remains attached to the preparation for retirement.
+	if err := cleanupLoadedSelectedContractSource(p.originalSource); err != nil {
+		return err
+	}
+	p.originalSource.Cleanup = nil
+	if err := cleanupLoadedSelectedContractSource(p.loadedSource); err != nil {
+		return err
+	}
+	p.loadedSource.Cleanup = nil
+	return nil
 }
 
 func prepareSelectedFork(ctx context.Context, operation *selectedContractOperation, ports *selectedContractExecutionPorts, loaded LoadedSelectedContractSource, plan runfork.RunForkPlan, frontier runfork.RunForkContractFrontierAdmission, planning runfork.RunForkSelectedContractRecipientPlanning, agentPlan selectedContractAgentRuntimePlan) (*PreparedSelectedFork, error) {

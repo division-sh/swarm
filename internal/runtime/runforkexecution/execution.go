@@ -114,7 +114,7 @@ func executeSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 		return SelectedContractExecutionResult{Owner: runfork.RunForkSelectedContractExecutionOwner}, errors.Join(err, req.Owner.completePreparation(prepared))
 	}
 	if req.LiveRuntime != nil || req.AcquireLiveRuntime != nil {
-		result, err := executePreparedLiveFork(ctx, req, &prepared, finishOrchestration)
+		result, err := executePreparedLiveFork(ctx, req, &prepared)
 		if replay := isolatedSelectedForkOperationReplay(err); replay != nil {
 			req.ForkOperation = prepared.forkOperation
 			return req.Owner.continueElectedSelectedForkOperation(ctx, req, replay)

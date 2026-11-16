@@ -1880,8 +1880,17 @@ func (am *AgentManager) launchExecutionLoop(parent context.Context, execution *a
 							}
 							defer executionLease.Release()
 							reportCarrierFailure := func(err error) { am.reportDeliveryCarrierFailure(loopCtx, agent.ID(), evt, err) }
+							carrierSettled := false
+							var carrierErr error
+							completeCarrier := func() error {
+								if !carrierSettled {
+									carrierSettled = true
+									_, carrierErr = carrier.Complete(reportCarrierFailure)
+								}
+								return carrierErr
+							}
 							defer func() {
-								if _, completionErr := carrier.Complete(reportCarrierFailure); completionErr != nil {
+								if completeCarrier() != nil {
 									stop = true
 								}
 							}()
@@ -1891,6 +1900,13 @@ func (am *AgentManager) launchExecutionLoop(parent context.Context, execution *a
 							eventWork, err := am.lifecycle.beginDeliveryWork(executionLease.Context, eventWorkOwner)
 							if err != nil {
 								if errors.Is(err, worklifetime.ErrDispatchClosed) {
+									// This delivery never started. Return its durable continuation
+									// and release local custody before waiting for generation exit.
+									completionErr := completeCarrier()
+									executionLease.Release()
+									if completionErr != nil {
+										return true
+									}
 									// Keep lifecycle readiness for the accepted handoff;
 									// ordinary transition fences retain their own exit path.
 									<-executionCtx.Done()
@@ -1991,7 +2007,7 @@ func (am *AgentManager) launchExecutionLoop(parent context.Context, execution *a
 								if releaser == nil || releaser.ReleaseDeliveryContinuation(claimResult.Snapshot.DeliveryID) != nil {
 									return true
 								}
-								if _, completionErr := carrier.Complete(reportCarrierFailure); completionErr != nil {
+								if completeCarrier() != nil {
 									return true
 								}
 								return false

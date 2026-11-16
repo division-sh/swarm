@@ -379,7 +379,7 @@ func TestSelectedForkRuntimeConsumersSettleReturnedOutcomes(t *testing.T) {
 				if err := admitSelectedDeploymentRevisionFrontier(prepared.plan, prepared.frontier); err != nil {
 					t.Fatal(err)
 				}
-				result, returned := executePreparedLiveFork(ctx, request, &prepared, func() {})
+				result, returned := executePreparedLiveFork(ctx, request, &prepared)
 				read := context.WithoutCancel(ctx)
 				snapshot := probe.snapshot()
 				for _, executionID := range snapshot.committedCloses {
