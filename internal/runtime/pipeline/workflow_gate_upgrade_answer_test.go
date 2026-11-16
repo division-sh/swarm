@@ -5,6 +5,7 @@ import (
 	"errors"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -23,7 +24,7 @@ import (
 // component bus is deliberately not autonomous; committed routing remains held.
 func VerifyGateAnswerUpgradeOrdersBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	for _, backend := range []string{"sqlite", "postgres"} {
-		for _, order := range []string{"answer_first_equal", "answer_first_changed", "upgrade_first", "forged_observation"} {
+		for _, order := range []string{"answer_first_equal", "answer_first_changed", "upgrade_first", "forged_observation", "concurrent_changed"} {
 			t.Run(backend+"/"+order, func(t *testing.T) {
 				bundle := gateLifecycleBundle(t)
 				fixture, pc, ctx, mutations := nativeLifecycleComponentForTest(t, backend, bundle, "drafting", open)
@@ -93,6 +94,43 @@ func VerifyGateAnswerUpgradeOrdersBothStoresForTest(t *testing.T, open pipelineD
 					files["schema.yaml"] = strings.Replace(files["schema.yaml"], "advances_to: operating", "advances_to: drafting", 1)
 				}
 				candidate := semanticview.Wrap(loadWorkflowTempBundle(t, files))
+				if order == "concurrent_changed" {
+					upgrade, err := fixture.PrepareUpgradeSource(ctx, candidate)
+					if err != nil {
+						t.Fatal(err)
+					}
+					type answerResult struct {
+						ack bool
+						err error
+					}
+					answerDone, upgradeDone := make(chan answerResult, 1), make(chan error, 1)
+					var joined sync.WaitGroup
+					joined.Add(2)
+					go func() {
+						defer joined.Done()
+						result, err := lease.Commit(ctx, command)
+						answerDone <- answerResult{ack: result.Acknowledged, err: err}
+					}()
+					go func() {
+						defer joined.Done()
+						_, err := upgrade.Commit()
+						upgradeDone <- err
+					}()
+					answer, upgradeErr := <-answerDone, <-upgradeDone
+					joined.Wait()
+					current, err := fixture.Cards.GetDecisionCard(ctx, card.CardID)
+					if err != nil {
+						t.Fatal(err)
+					}
+					var conflict *runbundle.UpgradeConflictError
+					if answer.err == nil && answer.ack && errors.As(upgradeErr, &conflict) && current.Status == decisioncard.StatusDecided {
+						return
+					}
+					if upgradeErr == nil && answer.err != nil && !answer.ack && current.Status == decisioncard.StatusSuperseded && current.DecisionEventID == "" && fixture.EventIDCount(ctx, mutation.decide.DecisionEventID) == 0 {
+						return
+					}
+					t.Fatalf("concurrent answer/source switch lost its linearization: answer=%+v upgrade=%v card=%+v", answer, upgradeErr, current)
+				}
 				if order == "upgrade_first" {
 					if err := fixture.UpgradeSource(ctx, candidate); err != nil {
 						t.Fatal(err)
