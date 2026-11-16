@@ -410,13 +410,26 @@ func joinLiveForkFixtureClock(t *testing.T, ctx context.Context, rt *rootruntime
 	}
 }
 
-func joinLiveForkFixtureClockCallback(t *testing.T, ctx context.Context, rt *rootruntime.Runtime, sourceRunID string, fired genericschedule.Activation) {
+func joinLiveForkFixtureClockCallback(t *testing.T, ctx context.Context, rt *rootruntime.Runtime, selected any, sourceRunID string, fired genericschedule.Activation) {
 	t.Helper()
-	if fired.Command.RunID != sourceRunID || fired.Status != genericschedule.StatusFired || rt == nil || rt.WorkOccurrence() == nil {
+	if fired.Command.RunID != sourceRunID {
 		t.Fatalf("original source clock has no matching runtime callback owner: source=%s activation=%+v", sourceRunID, fired)
 	}
 	wait, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
+	availability, err := selected.(SelectedContractForkLifecycle).LoadRunBundleAvailability(wait, sourceRunID)
+	if err != nil || !availability.Available() || availability.RunID != sourceRunID {
+		t.Fatalf("original source bundle is unavailable for callback join: source=%s availability=%+v err=%v", sourceRunID, availability, err)
+	}
+	if rt == nil || rt.Options.SourceArtifactFact.BundleHash() == "" {
+		t.Fatal("original source clock has no runtime source artifact")
+	}
+	if availability.BundleHash != rt.Options.SourceArtifactFact.BundleHash() {
+		return
+	}
+	if fired.Status != genericschedule.StatusFired || rt.WorkOccurrence() == nil {
+		t.Fatalf("original source clock has no matching runtime callback owner: source=%s activation=%+v", sourceRunID, fired)
+	}
 	release, err := rt.WorkOccurrence().BeginRunTransition(wait, sourceRunID)
 	if err != nil {
 		t.Fatalf("join original source clock callback: %v", err)
