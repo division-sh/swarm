@@ -158,9 +158,8 @@ func captureSQLiteInspectionCoordinate(path string) (os.FileInfo, error) {
 	return info, nil
 }
 
-func prepareSQLiteConstructionDatabase(ctx context.Context, possession sqlitePossession) error {
-	p, ok := possession.(*sqliteFilePossession)
-	if !ok || p == nil {
+func (p *sqliteFilePossession) prepareDatabase(ctx context.Context) error {
+	if p == nil {
 		return errors.New("SQLite construction possession is required")
 	}
 	if err := p.ProveCurrent(ctx); err != nil {

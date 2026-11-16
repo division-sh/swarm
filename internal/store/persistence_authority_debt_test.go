@@ -712,6 +712,7 @@ func debtRunFixtureSignatureComparisons(actual, head, base, source map[string]au
 	channelObservation := debtChannelObservationSignatureTransitions()
 	pairs = append(pairs, channelObservation[:]...)
 	pairs = append(pairs, debtBootCheckSignatureTransitions()...)
+	pairs = append(pairs, debtBootCheckOwnerTransitions()...)
 	for index, pair := range pairs {
 		old, current := pair[0], pair[1]
 		for _, state := range []map[string]authorityDebtSite{actual, head, base, source} {
@@ -825,6 +826,28 @@ func debtBootCheckSignatureTransitions() [][2]authorityDebtSite {
 			args += "|arg=[]*github.com/division-sh/swarm/internal/serveapp.selectedStoreBootCheck"
 		}
 		current.Resolved = "func=" + newFunction + args + result
+		pairs = append(pairs, [2]authorityDebtSite{old, current})
+	}
+	return pairs
+}
+
+func debtBootCheckOwnerTransitions() [][2]authorityDebtSite {
+	const result = "(*github.com/division-sh/swarm/internal/store/internal/runtimepersistence.PostgresStore, error)"
+	old := authorityDebtSite{Kind: "selected-store-construction", File: "internal/store/construction/open.go", Declaration: "OpenPostgres", Operation: "construction:" + result, Resolved: result,
+		Family: "authority-carrier", Replacement: "original selected construction/work-lifetime owner; no getter or transaction-context recovery", Multiplicity: 1}
+	current := old
+	current.Declaration = "openPostgresConfig"
+	pairs := [][2]authorityDebtSite{{old, current}}
+	for _, declaration := range [][2]string{
+		{"acquireSQLiteConstructionPossession", "0d7a38502f6d1b83f15989da3491e811f3d6efb3236944d2074d76dc0b6bfe22"},
+		{"acquireSQLiteFilePossession", "fca2e07d3877b7d5ed0c5af9c327a924d0f795203542381d25c31bec77f2bfea"},
+		{"sameSQLitePossessionResource", "e3acb2ec6f2176b0deb4b08eda8d75da13a5e8eb7a6be8546823688c909ee80c"},
+	} {
+		old = authorityDebtSite{Kind: "unresolved-excluded-source", File: "internal/store/internal/startupownership/sqlite_possession_unsupported.go", Declaration: declaration[0], Operation: "declaration:" + declaration[1],
+			Resolved: "unresolved|source-context:1f7647098d9b134d02ede20c20f4e3331c6e505b5345055f841b8d1f15ef2819", Family: "excluded-source-uncertainty",
+			Replacement: "existing canonical owner or narrow source-evidenced classification; never a file exemption or baseline increase", Multiplicity: 1}
+		current = old
+		current.Resolved = "unresolved|source-context:3c5e606953002e8eabe1439f7b2f9d9e67367ad6dd1de14d9b543a69ffec84c8"
 		pairs = append(pairs, [2]authorityDebtSite{old, current})
 	}
 	return pairs

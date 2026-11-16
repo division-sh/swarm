@@ -13,11 +13,6 @@ func captureSQLiteInspectionCoordinate(string) (os.FileInfo, error) {
 	return nil, err
 }
 
-func prepareSQLiteConstructionDatabase(context.Context, sqlitePossession) error {
-	_, err := acquireSQLiteFilePossession("")
-	return err
-}
-
 func CaptureSQLiteInspectionIdentity(string) (*SQLiteBackendIdentity, error) {
 	_, err := acquireSQLiteFilePossession("")
 	return nil, err
