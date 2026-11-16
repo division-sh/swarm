@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/deliverycontinuation"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -83,43 +84,19 @@ func executePreparedLiveFork(ctx context.Context, req SelectedContractExecutionR
 			*prepared = current
 		}
 	}
-	scope, err := req.LiveRuns.LoadRunLiveScope(ctx, current.plan.SourceRunID)
-	if err != nil {
-		return out, err
-	}
-	if err := scope.Validate(); err != nil {
-		return out, err
-	}
-	live, found, err := req.LiveRuns.LoadLiveRun(ctx, scope)
-	if err != nil {
-		return out, err
-	}
-	if found && paused.predecessor == nil && !req.liveSelectionHeld {
-		releaseSelection := req.LiveContexts.BeginLiveRunSelection()
+	live, found, releaseSelection, err := selectLiveForkSource(ctx, &req, current, paused)
+	if releaseSelection != nil {
 		defer releaseSelection()
-		req.liveSelectionHeld = true
-		live, found, err = req.LiveRuns.LoadLiveRun(ctx, scope)
-		if err != nil {
-			return out, err
-		}
 	}
-	if paused.predecessor != nil {
-		if found {
-			return out, fmt.Errorf("live fork source changed after pause: source=%s live=%s", paused.predecessor.RunID, live.RunID)
-		}
-		live, found = *paused.predecessor, true
-	} else if req.Recovery == nil && found && live.RunID == current.plan.SourceRunID {
-		return out, fmt.Errorf("paused fork source %s became live before materialization", live.RunID)
+	if err != nil {
+		return out, err
 	}
 	if found {
-		use, err := acquireLivePredecessor(ctx, req.LiveContexts, live)
+		use, err := acquireSelectedLivePredecessor(ctx, req.LiveContexts, live, current)
 		if err != nil {
 			return out, err
 		}
 		parked, parkCtx := use.Runtime(), use.WorkContext()
-		if live.Source.Matches(current.loadedSource.SourceArtifactFact) && use.Context.RootAdmission.Reference() != current.loadedSource.RootedSource.Admission().Reference() {
-			return out, errors.Join(errors.New("live predecessor has a different admitted root"), use.Done())
-		}
 		if live.Source.Matches(current.loadedSource.SourceArtifactFact) {
 			releaseUse := sync.OnceValue(use.Done)
 			defer func() { finalErr = errors.Join(finalErr, releaseUse()) }()
@@ -163,6 +140,49 @@ func executePreparedLiveFork(ctx context.Context, req SelectedContractExecutionR
 	return out, finalErr
 }
 
+func acquireSelectedLivePredecessor(ctx context.Context, contexts *runtimepkg.RuntimeContextManager, live runlifecycle.LiveRun, current *PreparedSelectedFork) (*runtimepkg.RuntimeContextUse, error) {
+	use, err := acquireLivePredecessor(ctx, contexts, live)
+	if err != nil {
+		return nil, err
+	}
+	if live.Source.Matches(current.loadedSource.SourceArtifactFact) && use.Context.RootAdmission.Reference() != current.loadedSource.RootedSource.Admission().Reference() {
+		return nil, errors.Join(errors.New("live predecessor has a different admitted root"), use.Done())
+	}
+	return use, nil
+}
+
+func selectLiveForkSource(ctx context.Context, req *SelectedContractExecutionRequest, current *PreparedSelectedFork, paused sourcePause) (runlifecycle.LiveRun, bool, func(), error) {
+	scope, err := req.LiveRuns.LoadRunLiveScope(ctx, current.plan.SourceRunID)
+	if err != nil {
+		return runlifecycle.LiveRun{}, false, nil, err
+	}
+	if err := scope.Validate(); err != nil {
+		return runlifecycle.LiveRun{}, false, nil, err
+	}
+	live, found, err := req.LiveRuns.LoadLiveRun(ctx, scope)
+	if err != nil {
+		return runlifecycle.LiveRun{}, false, nil, err
+	}
+	var releaseSelection func()
+	if found && paused.predecessor == nil && !req.liveSelectionHeld {
+		releaseSelection = req.LiveContexts.BeginLiveRunSelection()
+		req.liveSelectionHeld = true
+		live, found, err = req.LiveRuns.LoadLiveRun(ctx, scope)
+		if err != nil {
+			return runlifecycle.LiveRun{}, false, releaseSelection, err
+		}
+	}
+	if paused.predecessor != nil {
+		if found {
+			return runlifecycle.LiveRun{}, false, releaseSelection, fmt.Errorf("live fork source changed after pause: source=%s live=%s", paused.predecessor.RunID, live.RunID)
+		}
+		live, found = *paused.predecessor, true
+	} else if req.Recovery == nil && found && live.RunID == current.plan.SourceRunID {
+		return runlifecycle.LiveRun{}, false, releaseSelection, fmt.Errorf("paused fork source %s became live before materialization", live.RunID)
+	}
+	return live, found, releaseSelection, nil
+}
+
 func joinSelectedSourceWork(ctx context.Context, req SelectedContractExecutionRequest, runID string, wasLive bool) (func() error, error) {
 	use, lookup, availability, err := req.LiveContexts.AcquireRun(ctx, runID)
 	if err != nil {
@@ -197,7 +217,7 @@ func joinSelectedSourceWork(ctx context.Context, req SelectedContractExecutionRe
 	return func() error { done(); return nil }, nil
 }
 
-func pauseSelectedSourceBeforeLiveFork(ctx context.Context, req SelectedContractExecutionRequest, prepared *PreparedSelectedFork) (result sourcePause, finalErr error) {
+func pauseSelectedSourceBeforeLiveFork(ctx context.Context, req SelectedContractExecutionRequest, prepared *PreparedSelectedFork) (sourcePause, error) {
 	control, ok := req.LiveRuns.(runcontrol.Store)
 	if !ok {
 		return sourcePause{}, errors.New("live fork requires its selected run-control owner")
@@ -242,6 +262,12 @@ func pauseSelectedSourceBeforeLiveFork(ctx context.Context, req SelectedContract
 		// A retained historical source is not the flow's live run to pause.
 		return sourcePause{}, nil
 	}
+	return pauseSelectedSourceControl(ctx, req, prepared, control, live, selectedSource, availability)
+}
+
+func pauseSelectedSourceControl(ctx context.Context, req SelectedContractExecutionRequest, prepared *PreparedSelectedFork, control runcontrol.Store, live runlifecycle.LiveRun, selectedSource bool, availability runbundle.Availability) (result sourcePause, finalErr error) {
+	sourceID := prepared.plan.SourceRunID
+	source := prepared.originalSource.SourceArtifactFact
 	ctx = correlation.WithRunID(correlation.WithSourceArtifactFact(ctx, source), sourceID)
 	if scope, present := authoractivity.ScopeFromContext(ctx); present && scope.Kind == authoractivity.ScopeBundle {
 		ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(scope.RuntimeInstanceID, source.BundleHash()))

@@ -1318,25 +1318,9 @@ func (s *PipelinePostgresOwner) claimPostgresPipelineEventInGroup(ctx context.Co
 	if registry.testBeforeClaimRegistryLock != nil {
 		registry.testBeforeClaimRegistryLock()
 	}
-	registry.mu.Lock()
-	for token, state := range registry.claims {
-		if state != nil && state.claim.EventID() == eventID {
-			if runtimepipelineobligation.StartupRecoveryDiagnosticsEnabled(ctx) {
-				slog.WarnContext(ctx, "startup pipeline claim held", "backend", "postgres", "event_id", eventID, "requested_purpose", purpose, "held_owner", "local_claim", "held_claim", token, "held_purpose", state.claim.Purpose(), "held_scan", state.scanToken)
-			}
-			registry.mu.Unlock()
-			return runtimepipelineobligation.Claim{}, runtimepipelineobligation.ErrBusy
-		}
+	if err := registry.reservePostgresPipelineClaimAcquisition(ctx, eventID, purpose); err != nil {
+		return runtimepipelineobligation.Claim{}, err
 	}
-	if _, reserving := registry.acquiring[eventID]; reserving {
-		if runtimepipelineobligation.StartupRecoveryDiagnosticsEnabled(ctx) {
-			slog.WarnContext(ctx, "startup pipeline claim held", "backend", "postgres", "event_id", eventID, "requested_purpose", purpose, "held_owner", "claim_acquisition")
-		}
-		registry.mu.Unlock()
-		return runtimepipelineobligation.Claim{}, runtimepipelineobligation.ErrBusy
-	}
-	registry.acquiring[eventID] = struct{}{}
-	registry.mu.Unlock()
 	acquisitionReserved := true
 	defer func() {
 		if acquisitionReserved {
@@ -1461,6 +1445,29 @@ func (s *PipelinePostgresOwner) claimPostgresPipelineEventInGroup(ctx context.Co
 		slog.InfoContext(ctx, "startup pipeline claim acquired", "backend", "postgres", "event_id", eventID, "purpose", purpose, "claim_id", token)
 	}
 	return claim, nil
+}
+
+func (r *postgresPipelineClaimRegistry) reservePostgresPipelineClaimAcquisition(ctx context.Context, eventID string, purpose runtimepipelineobligation.Purpose) error {
+	r.mu.Lock()
+	for token, state := range r.claims {
+		if state != nil && state.claim.EventID() == eventID {
+			if runtimepipelineobligation.StartupRecoveryDiagnosticsEnabled(ctx) {
+				slog.WarnContext(ctx, "startup pipeline claim held", "backend", "postgres", "event_id", eventID, "requested_purpose", purpose, "held_owner", "local_claim", "held_claim", token, "held_purpose", state.claim.Purpose(), "held_scan", state.scanToken)
+			}
+			r.mu.Unlock()
+			return runtimepipelineobligation.ErrBusy
+		}
+	}
+	if _, reserving := r.acquiring[eventID]; reserving {
+		if runtimepipelineobligation.StartupRecoveryDiagnosticsEnabled(ctx) {
+			slog.WarnContext(ctx, "startup pipeline claim held", "backend", "postgres", "event_id", eventID, "requested_purpose", purpose, "held_owner", "claim_acquisition")
+		}
+		r.mu.Unlock()
+		return runtimepipelineobligation.ErrBusy
+	}
+	r.acquiring[eventID] = struct{}{}
+	r.mu.Unlock()
+	return nil
 }
 
 func (s *PipelinePostgresOwner) ClaimPostgresPipelineEventForTest(ctx context.Context, eventID string, purpose runtimepipelineobligation.Purpose) (runtimepipelineobligation.Claim, error) {

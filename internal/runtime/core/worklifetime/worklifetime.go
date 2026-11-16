@@ -223,13 +223,9 @@ func (g *gate) beginOwned(parent context.Context, transient bool, ancestor *Leas
 		g.mu.Unlock()
 		return nil, ErrPublicCompletionCapacity
 	}
-	for _, runID := range runIDs {
-		inherited := ancestor != nil && ancestor.ownsRun(runID)
-		inherited = inherited || acceptedRunParent != nil && !acceptedRunParent.settled && acceptedRunParent.ownsRun(runID)
-		if state := g.runs[runID]; state != nil && state.transitions != 0 && !inherited {
-			g.mu.Unlock()
-			return nil, ErrAdmissionFenced
-		}
+	if err := g.checkRunAdmissionLocked(runIDs, ancestor, acceptedRunParent); err != nil {
+		g.mu.Unlock()
+		return nil, err
 	}
 	if publicCompletion {
 		g.publicCompletions++
@@ -238,19 +234,7 @@ func (g *gate) beginOwned(parent context.Context, transient bool, ancestor *Leas
 		g.drained = make(chan struct{})
 	}
 	g.active++
-	for _, runID := range runIDs {
-		if g.runs == nil {
-			g.runs = make(map[string]*runWork)
-		}
-		state := g.runs[runID]
-		if state == nil {
-			state = &runWork{drained: make(chan struct{})}
-			g.runs[runID] = state
-		} else if state.active == 0 {
-			state.drained = make(chan struct{})
-		}
-		state.active++
-	}
+	g.addRunWorkLocked(runIDs)
 	if transient {
 		if g.activeTransient == 0 {
 			g.transientDrained = make(chan struct{})
@@ -270,6 +254,33 @@ func (g *gate) beginOwned(parent context.Context, transient bool, ancestor *Leas
 		cancel(cause)
 	})
 	return lease, nil
+}
+
+func (g *gate) checkRunAdmissionLocked(runIDs []string, ancestor, acceptedRunParent *Lease) error {
+	for _, runID := range runIDs {
+		inherited := ancestor != nil && ancestor.ownsRun(runID)
+		inherited = inherited || acceptedRunParent != nil && !acceptedRunParent.settled && acceptedRunParent.ownsRun(runID)
+		if state := g.runs[runID]; state != nil && state.transitions != 0 && !inherited {
+			return ErrAdmissionFenced
+		}
+	}
+	return nil
+}
+
+func (g *gate) addRunWorkLocked(runIDs []string) {
+	for _, runID := range runIDs {
+		if g.runs == nil {
+			g.runs = make(map[string]*runWork)
+		}
+		state := g.runs[runID]
+		if state == nil {
+			state = &runWork{drained: make(chan struct{})}
+			g.runs[runID] = state
+		} else if state.active == 0 {
+			state.drained = make(chan struct{})
+		}
+		state.active++
+	}
 }
 
 func (g *gate) beginRunTransition(ctx context.Context, runID string) (func(), error) {
