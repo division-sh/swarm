@@ -63,6 +63,7 @@ func TestOwnedMockLifecycleProcessEntry(t *testing.T) {
 		ShutdownGrace        time.Duration
 		PublicWebhookBaseURL string
 		PublicWebhookListen  string
+		PublicWebhookFD      int
 	}
 	if err := json.Unmarshal([]byte(raw), &request); err != nil {
 		t.Fatal(err)
@@ -88,6 +89,20 @@ func TestOwnedMockLifecycleProcessEntry(t *testing.T) {
 	opts.NoColor, opts.SelfCheck = true, true
 	opts.ShutdownGrace = request.ShutdownGrace
 	opts.PublicWebhookBaseURL, opts.PublicWebhookListen = request.PublicWebhookBaseURL, request.PublicWebhookListen
+	if request.PublicWebhookFD != 0 {
+		if request.PublicWebhookFD != 3 || !request.Live || request.PublicWebhookListen == "" {
+			t.Fatal("bound public listener requires the retained live child and exact descriptor")
+		}
+		file := os.NewFile(uintptr(request.PublicWebhookFD), "retained-public-webhook-listener")
+		if file == nil {
+			t.Fatal("retained public webhook descriptor is unavailable")
+		}
+		opts.PublicWebhookListener = channelOnboardingListenerFromFile(t, file)
+		defer opts.PublicWebhookListener.Close()
+		if opts.PublicWebhookListener.Addr().String() != request.PublicWebhookListen {
+			t.Fatal("retained public webhook listener does not match its advertised address")
+		}
+	}
 	posture := executionposture.MockOnly
 	if request.Live {
 		posture = executionposture.Live
