@@ -26,7 +26,7 @@ type sourcePause struct {
 
 // Preparation must refuse before predecessor retirement. Once execution starts,
 // its existing owner handles preparation disposal and transaction revalidation.
-func executePreparedLiveFork(ctx context.Context, req SelectedContractExecutionRequest, prepared **PreparedSelectedFork, finishPreparation func()) (out SelectedContractExecutionResult, finalErr error) {
+func executePreparedLiveFork(ctx context.Context, req SelectedContractExecutionRequest, prepared **PreparedSelectedFork) (out SelectedContractExecutionResult, finalErr error) {
 	current := *prepared
 	executed := false
 	defer func() {
@@ -75,21 +75,12 @@ func executePreparedLiveFork(ctx context.Context, req SelectedContractExecutionR
 			point := current.plan.ForkPoint
 			req.fixedPoint = &point
 			req.ForkOperation = current.forkOperation
-			finishPreparation()
-			if err := req.Owner.completePreparation(current); err != nil {
-				return out, err
-			}
-			current = nil
-			current, finalErr = req.Owner.prepareWithOperation(ctx, req, nil)
-			if finalErr != nil {
-				return out, finalErr
-			}
-			*prepared = current
-			finishRefreshed, err := req.Owner.beginSelectedOrchestration(current)
+			refreshed, err := req.Owner.refreshPrepared(ctx, req, current)
 			if err != nil {
 				return out, err
 			}
-			defer finishRefreshed()
+			current = refreshed
+			*prepared = current
 		}
 	}
 	scope, err := req.LiveRuns.LoadRunLiveScope(ctx, current.plan.SourceRunID)
