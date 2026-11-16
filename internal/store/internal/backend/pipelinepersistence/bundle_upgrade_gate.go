@@ -40,34 +40,38 @@ func replaceUpgradeGateCards(ctx context.Context, tx *sql.Tx, attempt *mutationp
 	if err != nil {
 		return err
 	}
+	var original []decisioncard.ListItem
 	for cursor := ""; ; {
 		cards, next, err := owner.ListDecisionCardsTx(ctx, tx, decisioncard.ListOptions{RunID: runID, Cursor: cursor, Limit: 200})
 		if err != nil {
 			return err
 		}
-		for _, card := range cards {
-			if card.Status != decisioncard.StatusPending || card.Anchor.Kind() != decisioncard.AnchorKindStageGate {
-				continue
-			}
-			anchor, err := card.Anchor.StageGate()
-			if err != nil {
-				return err
-			}
-			index := slices.IndexFunc(instances, func(instance runtimepipeline.WorkflowInstance) bool {
-				return instance.EntityID == anchor.EntityID && instance.StorageRef == anchor.Route.InstancePath
-			})
-			if index < 0 {
-				return fmt.Errorf("pending upgrade card %s lacks its exact instance", card.CardID)
-			}
-			if err := replaceUpgradeGateCard(ctx, attempt, owner.workflowDecisionLifecycleOwner(), !sqlite, current, candidate, cadence, card, instances[index]); err != nil {
-				return err
-			}
-		}
+		original = append(original, cards...)
 		if next == "" {
-			return nil
+			break
 		}
 		cursor = next
 	}
+	// Never discover this attempt's new successors through a later input page.
+	for _, card := range original {
+		if card.Status != decisioncard.StatusPending || card.Anchor.Kind() != decisioncard.AnchorKindStageGate {
+			continue
+		}
+		anchor, err := card.Anchor.StageGate()
+		if err != nil {
+			return err
+		}
+		index := slices.IndexFunc(instances, func(instance runtimepipeline.WorkflowInstance) bool {
+			return instance.EntityID == anchor.EntityID && instance.StorageRef == anchor.Route.InstancePath
+		})
+		if index < 0 {
+			return fmt.Errorf("pending upgrade card %s lacks its exact instance", card.CardID)
+		}
+		if err := replaceUpgradeGateCard(ctx, attempt, owner.workflowDecisionLifecycleOwner(), !sqlite, current, candidate, cadence, card, instances[index]); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func replaceUpgradeGateCard(ctx context.Context, attempt *mutationprotocol.Attempt, decisions workflowDecisionLifecycleTxOwner, postgres bool, current, candidate semanticview.Source, cadence decisioncard.CadencePolicy, listed decisioncard.ListItem, instance runtimepipeline.WorkflowInstance) error {
@@ -85,7 +89,7 @@ func replaceUpgradeGateCard(ctx context.Context, attempt *mutationprotocol.Attem
 	if card.CardID != listed.CardID {
 		return fmt.Errorf("upgrade card changed before its locked read")
 	}
-	now := time.Now().UTC()
+	now := decisioncard.CanonicalTimestamp(time.Now())
 	prepared, err := runtimepipeline.PrepareGateUpgrade(ctx, current, candidate, card, instance, cadence, now)
 	if err != nil || prepared == nil {
 		return err

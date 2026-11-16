@@ -158,31 +158,36 @@ func pipelineDeliveryNativeFixtureFromSelected(t *testing.T, source semanticview
 		return head.Revision, err
 	}
 	retained := map[string]semanticview.Source{fact.BundleHash(): source}
-	fixture.PrepareUpgradeSource = func(ctx context.Context, candidate semanticview.Source) (func() (bool, error), error) {
+	fixture.PrepareUpgradeSource = func(ctx context.Context, candidate semanticview.Source) (pipeline.GateUpgradeAttemptForTest, error) {
 		bundle, found := semanticview.Bundle(candidate)
 		if !found || bundle == nil {
-			return nil, fmt.Errorf("native upgrade fixture requires its compiled candidate")
+			return pipeline.GateUpgradeAttemptForTest{}, fmt.Errorf("native upgrade fixture requires its compiled candidate")
 		}
 		scope, found := authoractivity.ScopeFromContext(ctx)
 		if !found || scope.RuntimeInstanceID == "" {
-			return nil, fmt.Errorf("native upgrade fixture lacks its original author scope")
+			return pipeline.GateUpgradeAttemptForTest{}, fmt.Errorf("native upgrade fixture lacks its original author scope")
 		}
 		process, err := startupownership.WithProcessMutationAuthority(authoractivity.WithScope(t.Context(), authoractivity.RuntimeScope(scope.RuntimeInstanceID)), original)
 		if err != nil {
-			return nil, err
+			return pipeline.GateUpgradeAttemptForTest{}, err
 		}
-		sourceartifactfixture.RequireArtifact(t, process, selected.(sourceartifactfixture.Writer), bundle.SourceArtifact)
+		if !fixture.OmitUpgradeArtifact {
+			sourceartifactfixture.RequireArtifact(t, process, selected.(sourceartifactfixture.Writer), bundle.SourceArtifact)
+		}
 		rooted, err := bundle.RootedSource()
 		if err != nil {
-			return nil, err
+			return pipeline.GateUpgradeAttemptForTest{}, err
 		}
 		coordinate, err := agenttopology.NewSourceCoordinate(rooted.Admission())
 		if err != nil {
-			return nil, err
+			return pipeline.GateUpgradeAttemptForTest{}, err
 		}
 		next, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{coordinate}, nil)
 		if err != nil {
-			return nil, err
+			return pipeline.GateUpgradeAttemptForTest{}, err
+		}
+		if !fixture.OmitUpgradeArtifact {
+			retained[rooted.Admission().BundleHash()] = candidate
 		}
 		reader := selected.(runbundle.UpgradeReader)
 		plan, err := runbundle.AdmitPinnedSources(process, reader, candidate, func(_ context.Context, ref sourceartifact.RootAdmissionReference) (semanticview.Source, error) {
@@ -201,23 +206,21 @@ func pipelineDeliveryNativeFixtureFromSelected(t *testing.T, source semanticview
 			return previous, nil
 		})
 		if err != nil {
-			return nil, err
+			return pipeline.GateUpgradeAttemptForTest{}, err
 		}
 		plan.CardCadence = fixture.UpgradeCardCadence.Normalize()
 		head, exists, err := original.CurrentSourceSet(process)
 		if err != nil {
-			return nil, err
+			return pipeline.GateUpgradeAttemptForTest{}, err
 		}
 		if !exists {
-			return nil, fmt.Errorf("native upgrade fixture lacks its current source set")
+			return pipeline.GateUpgradeAttemptForTest{}, fmt.Errorf("native upgrade fixture lacks its current source set")
 		}
 		request := agenttopology.SourceSetCommitRequest{OperationID: uuid.NewString(), ExpectedRevision: head.Revision, Plan: next, BundleUpgrade: plan}
-		return func() (bool, error) {
-			result, err := original.RestoreSourceSet(process, request)
-			if err == nil {
-				retained[rooted.Admission().BundleHash()] = candidate
-			}
-			return result.Replayed, err
+		return pipeline.GateUpgradeAttemptForTest{OperationID: request.OperationID, PreviousRevision: request.ExpectedRevision, NextRevision: next.Revision,
+			Commit: func() (agenttopology.SourceSetCommitResult, error) {
+				return original.RestoreSourceSet(process, request)
+			},
 		}, nil
 	}
 	fixture.UpgradeSource = func(ctx context.Context, candidate semanticview.Source) error {
@@ -225,7 +228,7 @@ func pipelineDeliveryNativeFixtureFromSelected(t *testing.T, source semanticview
 		if err != nil {
 			return err
 		}
-		_, err = commit()
+		_, err = commit.Commit()
 		return err
 	}
 	fixture.HumanTasks = selected.(decisioncard.HumanTaskStore)

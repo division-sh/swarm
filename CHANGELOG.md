@@ -16,6 +16,11 @@ release approval or a promise of old-store migration.
 
 ### Added
 
+- A changed pending stage-gate offer is withdrawn atomically during an upgrade
+  and replaced by one empty card from the same wait. Equal offers keep their
+  issued card and input. Replacement preserves the stage clock; old controls
+  remain inert, including after restoring an earlier source. (#3084)
+
 - WhatsApp link notices use the configured operator's bound conversation and
   the existing delivery journal. Down and back notices each have a ten-minute
   creation cap; intervening observed drops are counted. Delayed deliveries can

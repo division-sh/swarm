@@ -43,12 +43,8 @@ func PrepareGateUpgrade(ctx context.Context, current, candidate semanticview.Sou
 	if err != nil {
 		return nil, err
 	}
-	prior, err := decisioncard.CompileGateOffer(current, anchor.FlowID, anchor.Stage)
-	if err != nil {
+	if _, err := decisioncard.CompileGateOffer(current, anchor.FlowID, anchor.Stage); err != nil {
 		return nil, err
-	}
-	if !issued.Equal(prior) {
-		return nil, fmt.Errorf("pending gate differs from its admitted current contract")
 	}
 	next, err := decisioncard.CompileGateOffer(candidate, anchor.FlowID, anchor.Stage)
 	if err != nil || issued.Equal(next) {

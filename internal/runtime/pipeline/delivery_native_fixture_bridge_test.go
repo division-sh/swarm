@@ -11,6 +11,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
@@ -66,8 +67,9 @@ type PipelineDeliveryNativeFixtureForTest struct {
 	ReopenExecution                   func() *PipelineDeliveryNativeFixtureForTest
 	UpgradeSource                     func(context.Context, semanticview.Source) error
 	UpgradeCardCadence                decisioncard.CadencePolicy
+	OmitUpgradeArtifact               bool
 	SourceSetRevision                 func(context.Context) (string, error)
-	PrepareUpgradeSource              func(context.Context, semanticview.Source) (func() (bool, error), error)
+	PrepareUpgradeSource              func(context.Context, semanticview.Source) (GateUpgradeAttemptForTest, error)
 	InputDrafts                       interface {
 		BeginInputForTest(context.Context, decisioncard.BeginInputRequest) (decisioncard.InputDraft, error)
 		PreviewInputTextForTest(context.Context, string, string, string, time.Time) (decisioncard.InputFieldProgress, error)
@@ -85,6 +87,11 @@ type PipelineDeliveryNativeFixtureForTest struct {
 	AccumulatorHistory                func(context.Context, string, string) ([]mutationlog.ProjectionMutation, error)
 	FanOutStorage                     func(context.Context, string, string, identity.ExecutableNode, contracts.FanOutElementRef) ([]PipelineFanOutStorageForTest, error)
 	FanOutIntentCount                 func(context.Context, string) (int, error)
+}
+
+type GateUpgradeAttemptForTest struct {
+	Commit                                      func() (agenttopology.SourceSetCommitResult, error)
+	OperationID, PreviousRevision, NextRevision string
 }
 
 type PipelineFanOutStorageForTest struct {
