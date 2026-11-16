@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/tests/support/testutil/sourceartifactfixture"
 )
@@ -80,4 +81,42 @@ func TestPipelineParentTransitionAdmissionHonorsContextWhileSweepIsActive(t *tes
 		t.Fatalf("begin transition after release: %v", err)
 	}
 	next.Done()
+}
+
+func TestPipelineRecoverySealJoinsSelectedPassAndRefusesLaterRecovery(t *testing.T) {
+	rooted, _ := sourceartifactfixture.Rooted(t, "pipeline-stop", sourceartifactfixture.Artifact())
+	owner := &blockingPipelineSweepStore{
+		issuer: runtimepipelineobligation.NewScanIssuer(), entered: make(chan struct{}), release: make(chan struct{}),
+	}
+	eb := &EventBus{pipelineObligations: owner, sourceArtifactFact: sourceartifactfixture.FactFor(rooted.Artifact()), rootAdmission: rooted.Admission()}
+	active := make(chan error, 1)
+	go func() {
+		_, err := eb.sweepPipelineObligations(t.Context(), runtimepipelineobligation.GlobalScanRequest(), 1)
+		active <- err
+	}()
+	<-owner.entered
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if err := eb.SealPipelineRecovery(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("seal bypassed selected pass: %v", err)
+	}
+	close(owner.release)
+	if err := <-active; err != nil {
+		t.Fatalf("accepted pass: %v", err)
+	}
+	if eb.pipelineRecoveryClosed {
+		t.Fatal("canceled seal changed recovery selection")
+	}
+	for range 2 {
+		if err := eb.SealPipelineRecovery(t.Context()); err != nil {
+			t.Fatalf("seal joined recovery: %v", err)
+		}
+	}
+	result, err := eb.sweepPipelineObligations(t.Context(), runtimepipelineobligation.GlobalScanRequest(), 1)
+	if err != nil || !result.Blocked || result.Examined != 0 {
+		t.Fatalf("fresh recovery after seal=%+v err=%v", result, err)
+	}
+	if _, err := eb.RecoverPersistedPipeline(t.Context(), runtimepipelineobligation.ClaimedWork{}, nil); !errors.Is(err, worklifetime.ErrAdmissionFenced) {
+		t.Fatalf("direct recovery bypassed seal: %v", err)
+	}
 }

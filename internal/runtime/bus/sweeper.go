@@ -139,6 +139,24 @@ func (eb *EventBus) OutboxSweeperActive() bool {
 	return eb.outboxSweeperActive
 }
 
+// SealPipelineRecovery joins the selected pass before allowing store-only
+// intake. Foreground accepted publications retain their own claims and joins.
+func (eb *EventBus) SealPipelineRecovery(ctx context.Context) error {
+	if eb == nil {
+		return nil
+	}
+	if err := eb.pipelineSweepMu.acquire(ctx); err != nil {
+		return err
+	}
+	defer eb.pipelineSweepMu.release()
+	eb.pipelineRecoveryClosed = true
+	var result error
+	for request := range eb.pipelineScans {
+		result = errors.Join(result, eb.closePipelineScanLocked(context.WithoutCancel(ctx), request))
+	}
+	return result
+}
+
 func (eb *EventBus) SweepPipelineObligations(ctx context.Context, limit int) (runtimepipelineobligation.SweepResult, error) {
 	if eb == nil || eb.store == nil {
 		return runtimepipelineobligation.SweepResult{}, errors.New("event bus and event store are required")
@@ -217,6 +235,9 @@ func (eb *EventBus) sweepPipelineObligations(ctx context.Context, request runtim
 		return result, err
 	}
 	defer eb.pipelineSweepMu.release()
+	if eb.pipelineRecoveryClosed {
+		return runtimepipelineobligation.SweepResult{Blocked: true}, nil
+	}
 	if eb.pipelineScans == nil {
 		eb.pipelineScans = map[runtimepipelineobligation.ScanRequest]*pipelineSweepScan{}
 	}
@@ -383,7 +404,7 @@ func (eb *EventBus) processClaimedPipelineWork(
 	recipients, dispatchErr := eb.authoritativeRecipientsForEvent(ctx, work.Event.ID())
 	var outcome runtimepipelineobligation.ExecutionOutcome
 	if dispatchErr == nil {
-		outcome, dispatchErr = eb.RecoverPersistedPipeline(ctx, work, recipients)
+		outcome, dispatchErr = eb.recoverPersistedPipeline(ctx, work, recipients)
 	}
 	decision := classifyPipelineDispatch(outcome, dispatchErr, false, work.Claim.Purpose(), pipelineDispatchRecoveryFinal)
 	switch decision.action {

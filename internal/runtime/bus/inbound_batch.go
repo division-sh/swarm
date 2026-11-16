@@ -99,6 +99,7 @@ type InboundDeliveryPlan struct {
 	events    []InboundDeliveryEvent
 	prepared  []PreparedPublish
 	commands  []PublicationCommand
+	storeOnly bool
 }
 
 func (p InboundDeliveryPlan) Admission() providertriggers.PublicationAdmission { return p.admission }
@@ -211,6 +212,27 @@ type ProviderOutputAuthorizationVerifier interface {
 // before the selected-store operation starts. No transaction capability is
 // accepted or returned.
 func (eb *EventBus) PrepareInboundDeliveryBatch(ctx context.Context, batch InboundDeliveryBatch) (InboundDeliveryPlan, error) {
+	return eb.prepareInboundDeliveryBatch(ctx, batch, false)
+}
+
+// PrepareStoredInboundDeliveryBatch keeps ordinary publication facts but cannot
+// attach executable consequences in this process. Recovery must already join.
+func (eb *EventBus) PrepareStoredInboundDeliveryBatch(ctx context.Context, batch InboundDeliveryBatch) (InboundDeliveryPlan, error) {
+	if eb == nil {
+		return InboundDeliveryPlan{}, fmt.Errorf("event bus is required")
+	}
+	if err := eb.pipelineSweepMu.acquire(ctx); err != nil {
+		return InboundDeliveryPlan{}, err
+	}
+	closed := eb.pipelineRecoveryClosed
+	eb.pipelineSweepMu.release()
+	if !closed {
+		return InboundDeliveryPlan{}, fmt.Errorf("store-only intake requires joined pipeline recovery")
+	}
+	return eb.prepareInboundDeliveryBatch(ctx, batch, true)
+}
+
+func (eb *EventBus) prepareInboundDeliveryBatch(ctx context.Context, batch InboundDeliveryBatch, storeOnly bool) (InboundDeliveryPlan, error) {
 	if eb == nil {
 		return InboundDeliveryPlan{}, fmt.Errorf("event bus is required")
 	}
@@ -226,7 +248,7 @@ func (eb *EventBus) PrepareInboundDeliveryBatch(ctx context.Context, batch Inbou
 		}
 		hasRuntimeConsumer = hasRuntimeConsumer || outputConsumers.Classify(string(item.Event.Type()), item.Event.RoutingSource()).HasRuntimeConsumer()
 	}
-	plan := InboundDeliveryPlan{admission: validated.Admission, events: append([]InboundDeliveryEvent(nil), validated.Events...)}
+	plan := InboundDeliveryPlan{admission: validated.Admission, events: append([]InboundDeliveryEvent(nil), validated.Events...), storeOnly: storeOnly}
 	activationOwners := make(map[runtimeflowidentity.Route]int)
 	var runProposal pipeline.FlowInstanceRunProposal
 	release := func(cause error) (InboundDeliveryPlan, error) {
@@ -262,7 +284,7 @@ func (eb *EventBus) PrepareInboundDeliveryBatch(ctx context.Context, batch Inbou
 		rawSettlement := eb.admitProviderRawSettlement(validated, index, admitted.Event(), outputConsumers)
 		prepared, command, err := eb.prepareClosedPublication(preparedCtx, eventBusCommitPublishPlan{
 			bus: eb, event: admitted.Event(), admitted: admitted, providerRawSettlement: rawSettlement, runProposal: runProposal,
-			outputConsumers: outputConsumers,
+			outputConsumers: outputConsumers, storeOnly: storeOnly,
 		})
 		if err != nil {
 			return release(err)
@@ -337,6 +359,9 @@ func (eb *EventBus) AbandonInboundDeliveryPlan(ctx context.Context, plan Inbound
 // ApplyInboundDeliveryCommit binds selected-store evidence to the exact plans
 // that produced it. Dispatch remains a separate post-commit step.
 func (eb *EventBus) ApplyInboundDeliveryCommit(ctx context.Context, plan InboundDeliveryPlan, committed []CommittedPublication) ([]PreparedPublish, error) {
+	if plan.storeOnly {
+		return nil, fmt.Errorf("store-only inbound publication cannot attach execution")
+	}
 	if len(committed) != len(plan.prepared) {
 		return nil, fmt.Errorf("committed inbound publication evidence count differs from prepared batch")
 	}
@@ -351,6 +376,35 @@ func (eb *EventBus) ApplyInboundDeliveryCommit(ctx context.Context, plan Inbound
 		return nil, errors.Join(finalizationErr, eb.AbandonInboundDeliveryPlan(context.WithoutCancel(ctx), plan))
 	}
 	return prepared, nil
+}
+
+// CompleteStoredInboundDeliveryCommit checks acknowledged native evidence and
+// releases preparation custody without activation, readiness or handoff.
+func (eb *EventBus) CompleteStoredInboundDeliveryCommit(ctx context.Context, plan InboundDeliveryPlan, committed []CommittedPublication) (err error) {
+	if !plan.storeOnly {
+		return fmt.Errorf("stored inbound completion requires its store-only plan")
+	}
+	defer func() { err = errors.Join(err, eb.AbandonInboundDeliveryPlan(context.WithoutCancel(ctx), plan)) }()
+	if len(committed) != len(plan.prepared) {
+		return fmt.Errorf("committed inbound publication evidence count differs from prepared batch")
+	}
+	for index, evidence := range committed {
+		if err := evidence.Validate(); err != nil {
+			return err
+		}
+		if !evidence.Acknowledged {
+			return fmt.Errorf("stored inbound publication lacks commit acknowledgement")
+		}
+		if _, err := plan.prepared[index].withAcceptedPublicationStage(evidence.AcceptedStage); err != nil {
+			return err
+		}
+		for _, proof := range evidence.DeliveryHandoffs {
+			if proof.EventID() != plan.prepared[index].Event.ID() {
+				return fmt.Errorf("stored inbound handoff contradicts prepared event")
+			}
+		}
+	}
+	return nil
 }
 
 func preflightInboundDeliveryBatch(verifier ProviderOutputAuthorizationVerifier, batch InboundDeliveryBatch) (InboundDeliveryBatch, error) {
