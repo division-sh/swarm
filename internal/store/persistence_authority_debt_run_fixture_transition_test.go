@@ -132,7 +132,8 @@ func TestPersistenceAuthorityDebtRunFixtureSignatureTransitionIsExact(t *testing
 									inputs[slot][changed.identity()] = changed
 								}
 								removedActual := slot == 0 && (mutation == "missing" || (mutation == "count-down" && present.Multiplicity == 1))
-								check(t, inputs, removedActual)
+								headRetainsOld := head[row[0].identity()] == row[0] && head[row[2].identity()].Multiplicity == 0
+								check(t, inputs, removedActual && headRetainsOld)
 							})
 						}
 					}
