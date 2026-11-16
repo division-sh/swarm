@@ -28,6 +28,7 @@ import (
 	"github.com/division-sh/swarm/internal/sessionprovider"
 	"github.com/division-sh/swarm/internal/sessionprovider/authority"
 	"github.com/division-sh/swarm/internal/store/internal/backend/channeldelivery"
+	"github.com/division-sh/swarm/tests/support/channelfixture"
 	"github.com/division-sh/swarm/tests/support/testutil/packfixture"
 	"github.com/google/uuid"
 )
@@ -73,6 +74,7 @@ type deploymentLockFixture struct {
 func newDeploymentLockFixture(t *testing.T) deploymentLockFixture {
 	t.Helper()
 	f := deploymentLockFixture{callbackLockFixture: newCallbackLockFixture(t, "postgres")}
+	facts := channelfixture.For("telegram")
 	work := worklifetime.NewProcess()
 	original, err := startupownership.CaptureMutationAuthority(f.ctx)
 	if err != nil {
@@ -116,6 +118,7 @@ func newDeploymentLockFixture(t *testing.T) deploymentLockFixture {
 			}
 		}
 	}
+	f.plan = f.plan.WithProviderFacts(facts)
 	identity, err := f.plan.InterfaceIdentity()
 	if err != nil {
 		t.Fatal(err)
@@ -127,6 +130,7 @@ func newDeploymentLockFixture(t *testing.T) deploymentLockFixture {
 	f.candidate = domain.Candidate{DeploymentRegistration: true, Provider: "telegram", Interface: identity, Plan: f.plan,
 		Posture: domain.ActivationWebhookRegistration, Ceremony: domain.CeremonyAccountLink,
 		ProviderCredentialRole: profile.ProviderCredential(), SigningCredentialRole: profile.SigningCredential()}
+	f.candidate = f.candidate.WithProviderFacts(facts)
 	f.trigger, err = triggers.CompileAdmission(providertriggers.CompileAdmissionRequest{Alias: "telegram", Provider: "telegram", SigningSecret: profile.SigningCredential()})
 	if err != nil {
 		t.Fatal(err)
@@ -175,7 +179,7 @@ func newDeploymentLockFixture(t *testing.T) deploymentLockFixture {
 	if _, err := identities.PreparePrincipal(f.ctx, time.Now().UTC()); err != nil {
 		t.Fatal(err)
 	}
-	f.service, err = domain.NewService(domain.ServiceOptions{Deployment: true, Store: f.selected, Operations: f.deployment,
+	f.service, err = domain.NewService(domain.ServiceOptions{ProviderFacts: facts, Deployment: true, Store: f.selected, Operations: f.deployment,
 		Identities: identities, Credentials: f.writer, Sessions: native, Catalog: func() (*domain.CandidateCatalog, error) {
 			return domain.NewCandidateCatalog([]domain.Candidate{f.candidate})
 		}})
