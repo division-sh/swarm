@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -10,7 +11,79 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 )
+
+type heldInboundLandingRuns struct {
+	runlifecycle.LandingRunReader
+	entered chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (r *heldInboundLandingRuns) LoadLandingRun(ctx context.Context, scope runlifecycle.LiveRunScope) (runlifecycle.LandingRun, bool, error) {
+	r.once.Do(func() { close(r.entered) })
+	select {
+	case <-ctx.Done():
+		return runlifecycle.LandingRun{}, false, ctx.Err()
+	case <-r.release:
+		return r.LandingRunReader.LoadLandingRun(ctx, scope)
+	}
+}
+
+func TestStoredInboundSelectionRechecksStopAfterNativeLandingRead(t *testing.T) {
+	catalog, source := runtimeAdmissionTestCatalog(t, "stop-read", "inbound")
+	definition := runtimeAdmissionTestContext(t, source, catalog, eventtest.UUID(t.Name()))
+	manager, err := newTestRuntimeContextManager(t, nil, definition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader := &heldInboundLandingRuns{LandingRunReader: manager.landingRuns, entered: make(chan struct{}), release: make(chan struct{})}
+	manager.landingRuns = reader
+	requestCtx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	result := make(chan *InboundPublicationUse, 1)
+	publicationErr := make(chan error, 1)
+	go func() {
+		target := definition.StandingTargets[0]
+		use, _, err := manager.AcquireInboundPublication(requestCtx, target.Alias, target.Provider)
+		publicationErr <- err
+		result <- use
+	}()
+	defer func() {
+		if t.Failed() {
+			cancel()
+		}
+		close(reader.release)
+		if err := <-publicationErr; err != nil {
+			t.Errorf("complete held publication: %v", err)
+		}
+		use := <-result
+		if use == nil || use.executed != nil {
+			t.Errorf("held read did not switch to publication-only custody: %v", use)
+		}
+		if use != nil {
+			if err := use.Done(); err != nil {
+				t.Error(err)
+			}
+		}
+	}()
+	<-reader.entered
+	prepared := make(chan struct{})
+	go func() { manager.PrepareInboundStop(); close(prepared) }()
+	select {
+	case <-prepared:
+	case <-time.After(5 * time.Second):
+		t.Fatal("stop preparation waited for a native landing read")
+	}
+	if err := manager.SealInboundExecution(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	definition.Runtime.CloseAdmission()
+	if err := manager.OpenStoredInbound(); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestStoredInboundPreparationWaitCancelsBeforeRecoveryJoin(t *testing.T) {
 	catalog, source := runtimeAdmissionTestCatalog(t, "stop-wait", "inbound")

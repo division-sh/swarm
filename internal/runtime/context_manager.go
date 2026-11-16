@@ -347,6 +347,7 @@ type RuntimeContextManager struct {
 	inboundStopping            bool
 	inboundStoreOnly           bool
 	inboundReady               chan struct{}
+	inboundSealDone            chan struct{}
 	inboundSealErr             error
 	inboundRequests            shutdownAdmission
 	availability               RunBundleAvailabilityReader
