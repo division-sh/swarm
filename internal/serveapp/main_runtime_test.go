@@ -7490,6 +7490,7 @@ func TestRunServeRuntimeVerboseEmitsCompleteBootSequence(t *testing.T) {
 	if strings.Contains(serve.outputString(), "health=127.") {
 		t.Fatalf("serve verbose output still labels the unified listener as health-only:\n%s", serve.outputString())
 	}
+	t.Run("unclassified_error", proveServeVerboseInternalFailure)
 }
 
 func TestRunServeRuntimeListenerBindFailuresExitBeforeReadiness(t *testing.T) {
