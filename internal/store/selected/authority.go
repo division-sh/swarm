@@ -3,6 +3,7 @@ package selected
 import (
 	"context"
 	"errors"
+	"github.com/division-sh/swarm/internal/runtime/bootverify"
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/effects"
@@ -13,6 +14,7 @@ import (
 type AuthorityRequest struct {
 	Selection   storebackend.Selection
 	PostgresDSN string
+	CheckTarget *bootverify.ConstructionTarget
 }
 
 type authorityInspectionPort interface {

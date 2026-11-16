@@ -20,6 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/startuprecovery"
 	"github.com/division-sh/swarm/internal/runtime/timerobligation"
 	"github.com/division-sh/swarm/internal/sourceartifact"
@@ -144,6 +145,10 @@ func TestAdmissionInspectionRealReadScopeBothStores(t *testing.T) {
 				t.Fatal("native bootstrap fixture does not retain its rooted source owner")
 			}
 			original, err := agentfixture.ProcessContext(t, ctx, bootstrap.(agentfixture.Store))
+			if err != nil {
+				t.Fatal(err)
+			}
+			fixtureCapability, err := agentfixture.ProcessCapability(t, ctx, bootstrap.(agentfixture.Store))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -350,6 +355,38 @@ func TestAdmissionInspectionRealReadScopeBothStores(t *testing.T) {
 				stamp, err := generationauthority.ReadProcessGeneration(ctx, db, backend == storebackend.BackendSQLite)
 				if err != nil || stamp != beforeInspection {
 					t.Fatalf("retained source inspection changed process authority: %+v err=%v", stamp, err)
+				}
+			})
+			t.Run("generation_currentness_without_schema_change", func(t *testing.T) {
+				var input *BootCheckInput
+				_, err := inspection.Inspect(ctx, request, func(snapshot *AdmissionSnapshot) error {
+					var err error
+					input, err = snapshot.CaptureBootInput(ctx)
+					return err
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				reader := bootstrap.(bootCheckReader)
+				if err := input.revalidate(ctx, reader); err != nil {
+					t.Fatalf("unchanged generation refused: %v", err)
+				}
+				if err := fixtureCapability.Release(ctx); err != nil {
+					t.Fatal(err)
+				}
+				next, err := bootstrap.(startupownership.Store).AcquireProcessCapability(ctx, startupownership.AcquireRequest{
+					OwnerID: "inspection-successor", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString(),
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer func() {
+					if err := next.Release(ctx); err != nil {
+						t.Error(err)
+					}
+				}()
+				if err := input.revalidate(ctx, reader); err == nil {
+					t.Fatal("a new process generation reused a same-schema inspection")
 				}
 			})
 		})

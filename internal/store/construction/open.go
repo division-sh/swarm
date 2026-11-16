@@ -6,10 +6,10 @@ package construction
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/netip"
-	"strconv"
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/bootverify"
@@ -25,6 +25,10 @@ func OpenPostgres(dsn string) (*private.PostgresStore, *sql.DB, error) {
 	if err != nil {
 		return nil, nil, fmt.Errorf("open postgres: %w", err)
 	}
+	return openPostgresConfig(cfg)
+}
+
+func openPostgresConfig(cfg pq.Config) (*private.PostgresStore, *sql.DB, error) {
 	connector, err := pq.NewConnectorConfig(cfg)
 	if err != nil {
 		return nil, nil, fmt.Errorf("open postgres: %w", err)
@@ -48,7 +52,15 @@ func OpenPostgres(dsn string) (*private.PostgresStore, *sql.DB, error) {
 }
 
 func OpenPostgresRuntime(ctx context.Context, dsn string, checks ...bootverify.ConstructionChecks) (*private.PostgresStore, *sql.DB, error) {
-	selected, handle, err := OpenPostgres(dsn)
+	cfg, err := pq.NewConfig(dsn)
+	if err != nil {
+		return nil, nil, err
+	}
+	target, err := postgresCheckTarget(cfg)
+	if err != nil {
+		return nil, nil, err
+	}
+	selected, handle, err := openPostgresConfig(cfg)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -56,32 +68,34 @@ func OpenPostgresRuntime(ctx context.Context, dsn string, checks ...bootverify.C
 		return nil, nil, errors.Join(err, selected.Close())
 	}
 	if len(checks) != 0 && checks[0] != nil {
-		target, err := PostgresCheckTarget(dsn)
-		if err == nil {
-			_, err = checks[0].InspectConstruction(ctx, target)
-		}
-		if err != nil {
+		if _, err := checks[0].InspectConstruction(ctx, target); err != nil {
 			return nil, nil, errors.Join(err, selected.Close())
 		}
 	}
 	return selected, handle, nil
 }
 
-// PostgresCheckTarget seals the native connection identity, not DSN spelling.
-// Pool/runtime parameters do not identify the application database or login.
+// PostgresCheckTarget seals parsed inputs, not DSN spelling. Construction uses
+// its original frozen config; a later parser cannot retarget retained exclusion.
 func PostgresCheckTarget(dsn string) (bootverify.ConstructionTarget, error) {
 	cfg, err := pq.NewConfig(dsn)
 	if err != nil {
 		return bootverify.ConstructionTarget{}, err
 	}
-	address := cfg.Hostaddr.String()
+	return postgresCheckTarget(cfg)
+}
+
+func postgresCheckTarget(cfg pq.Config) (bootverify.ConstructionTarget, error) {
+	cfg = cfg.Clone()
 	hostAddress, _ := netip.ParseAddr(cfg.Host)
-	if !cfg.Hostaddr.IsValid() || hostAddress.IsValid() && hostAddress == cfg.Hostaddr {
-		address = ""
+	if hostAddress.IsValid() && hostAddress == cfg.Hostaddr {
+		cfg.Hostaddr = netip.Addr{}
 	}
-	return bootverify.PostgresConstructionTarget(fmt.Sprintf("%q", []string{
-		cfg.Host, address, strconv.Itoa(int(cfg.Port)), cfg.Database, cfg.User, cfg.Password, string(cfg.SSLMode),
-	})), nil
+	raw, err := json.Marshal(cfg)
+	if err != nil {
+		return bootverify.ConstructionTarget{}, err
+	}
+	return bootverify.PostgresConstructionTarget(string(raw)), nil
 }
 
 func OpenSQLiteRuntime(path string) (*private.SQLiteRuntimeStore, *sql.DB, error) {
@@ -164,10 +178,16 @@ func ObserveSQLiteInspectionAbsence(ctx context.Context, path string) (bool, err
 	return storestartupownership.ObserveSQLiteInspectionAbsence(ctx, path)
 }
 
-func OpenPostgresReadOnly(dsn string) (*private.PostgresStore, error) {
+func OpenPostgresReadOnly(dsn string, expected ...*bootverify.ConstructionTarget) (*private.PostgresStore, error) {
 	cfg, err := pq.NewConfig(dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open PostgreSQL inspection: %w", err)
+	}
+	if len(expected) != 0 && expected[0] != nil {
+		actual, err := postgresCheckTarget(cfg)
+		if err != nil || actual != *expected[0] {
+			return nil, errors.Join(errors.New("PostgreSQL inspection inputs changed after native acquisition"), err)
+		}
 	}
 	backend, err := postgresbackend.OpenForInspection(cfg)
 	if err != nil {

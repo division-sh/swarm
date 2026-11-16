@@ -58,6 +58,10 @@ func fakeAdmissionDocker(root string, args []string) (bool, int) {
 		return false, 0
 	}
 	switch {
+	case equalStrings(args, []string{"inspect", "--format", "{{.Id}}", name}):
+		fmt.Fprintln(os.Stdout, probe.ID)
+		recordFakeDocker(root, fakeDockerRecord{Class: "container_inspect", Args: args, ContainerID: probe.ID})
+		return true, 0
 	case equalStrings(args, []string{"start", "--attach", name}) && probe.AdmissionKind == "version":
 		withFakeDockerState(root, func(state *fakeDockerState) {
 			probe.AdmissionExited = true

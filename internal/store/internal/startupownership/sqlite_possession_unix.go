@@ -77,6 +77,7 @@ func sqlitePossessionForConstruction(ctx context.Context, selectedPath string, c
 
 	coordinatePath := databasePath + sqlitePossessionSuffix
 	var observed *SQLiteInspectionInput
+	explicit := len(input) != 0 && input[0] != nil
 	if len(input) != 0 {
 		observed = input[0]
 	}
@@ -85,7 +86,7 @@ func sqlitePossessionForConstruction(ctx context.Context, selectedPath string, c
 		if err != nil {
 			return nil, err
 		}
-		if !current.Absent() {
+		if !current.Absent() || current.coordinate != nil {
 			observed = current
 		}
 	}
@@ -98,6 +99,15 @@ func sqlitePossessionForConstruction(ctx context.Context, selectedPath string, c
 		expected := *observed
 		if expected.coordinate == nil {
 			expected.coordinate = coordinateInfo // Only our first coordinate creation is allowed.
+		}
+		if !explicit && observed.Absent() {
+			// A predecessor may lawfully create its first database before joining.
+			// Its observed coordinate, not a speculative absence, is retained.
+			current, err := CaptureSQLiteInspectionInput(ctx, databasePath)
+			if err != nil {
+				return nil, errors.Join(err, releaseSQLitePossessionCoordinate(coordinate))
+			}
+			expected.file = current.file
 		}
 		if err := expected.Revalidate(ctx, databasePath); err != nil {
 			return nil, errors.Join(err, releaseSQLitePossessionCoordinate(coordinate))
@@ -161,7 +171,7 @@ func prepareSQLiteConstructionDatabase(ctx context.Context, possession sqlitePos
 	if !p.deferredDatabase {
 		return nil
 	}
-	database, info, err := openSQLiteDatabaseIdentity(p.databasePath, true)
+	database, info, err := openSQLiteDatabaseIdentity(p.databasePath, true, p.databaseInfo == nil)
 	if err != nil {
 		return err
 	}
@@ -287,10 +297,13 @@ func lockSQLitePossessionCoordinate(ctx context.Context, path string, create, wa
 	return coordinate, info, nil
 }
 
-func openSQLiteDatabaseIdentity(path string, create bool) (*os.File, os.FileInfo, error) {
+func openSQLiteDatabaseIdentity(path string, create bool, exclusive ...bool) (*os.File, os.FileInfo, error) {
 	flags := unix.O_RDWR | unix.O_CLOEXEC | unix.O_NOFOLLOW | unix.O_NONBLOCK
 	if create {
 		flags |= unix.O_CREAT
+	}
+	if len(exclusive) != 0 && exclusive[0] {
+		flags |= unix.O_EXCL
 	}
 	fd, err := unix.Open(path, flags, 0o600)
 	if err != nil {
