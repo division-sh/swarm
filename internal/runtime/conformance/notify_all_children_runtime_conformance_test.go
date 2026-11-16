@@ -414,10 +414,10 @@ func (p *notifyAllChildrenIssuanceProbe) NotifyLifecycle(_ context.Context, sign
 	}
 }
 
-func (p *notifyAllChildrenIssuanceProbe) count() int {
+func (p *notifyAllChildrenIssuanceProbe) snapshot() (int, time.Time) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return len(p.ids)
+	return len(p.ids), p.hundredthAt
 }
 
 type gatedNotifyAllChildrenAgent struct {
@@ -611,9 +611,14 @@ func TestFanOutDeliveryBarrierCompletesThroughRealEventBusAndPublicReadbackOnBot
 					gate.waitStarted(t, held)
 					select {
 					case <-issuance.done:
-						t.Logf("fan_out_issuance_span start=before_publication committed_items=%d elapsed=%s", cardinality, issuance.hundredthAt.Sub(issuanceStarted))
 					case <-issuanceTimer.C:
-						t.Fatalf("issuance wait exceeded 300s: observed_items=%d (held_account=%q held_instance=%q expected=%d)", issuance.count(), heldKey, held, cardinality)
+					}
+					observed, hundredthAt := issuance.snapshot()
+					if !hundredthAt.IsZero() {
+						t.Logf("fan_out_issuance_span start=before_publication committed_items=%d elapsed=%s", observed, hundredthAt.Sub(issuanceStarted))
+					}
+					if observed != cardinality || hundredthAt.IsZero() || hundredthAt.After(issuanceStarted.Add(300*time.Second)) {
+						t.Fatalf("issuance wait exceeded 300s: observed_items=%d (held_account=%q held_instance=%q expected=%d)", observed, heldKey, held, cardinality)
 					}
 					issued := loadNotifyAllChildrenItemEvents(t, ctx, selected, runID, notifyID)
 					if len(issued) != cardinality {
