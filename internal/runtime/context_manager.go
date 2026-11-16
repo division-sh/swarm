@@ -349,6 +349,7 @@ type RuntimeContextManager struct {
 	liveSelectionWriters       uint64
 	inboundPhaseMu             sync.RWMutex
 	inboundStopping            bool
+	inboundFinalSet            bool
 	inboundStoreOnly           bool
 	inboundReady               chan struct{}
 	inboundSealDone            chan struct{}
@@ -485,6 +486,11 @@ func (m *RuntimeContextManager) register(contextDef BundleContext, activateOccur
 	contextDef, err := validateRuntimeContextDefinition(contextDef, activateOccurrences)
 	if err != nil {
 		return err
+	}
+	m.inboundPhaseMu.RLock()
+	defer m.inboundPhaseMu.RUnlock()
+	if m.inboundFinalSet {
+		return worklifetime.ErrAdmissionFenced
 	}
 
 	m.mu.Lock()

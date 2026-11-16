@@ -1046,7 +1046,7 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 	standbyReadout := func(ctx context.Context) (string, error) {
 		return readStandbyStoreStatus(ctx, storeSelection, cfg)
 	}
-	apiProbe, err := startServeProcessProbe(ctx, processWorkOwner, opts.APIListenAddr, func(subject string, failure error) {
+	apiProbe, err := startServeProcessProbe(context.WithoutCancel(ctx), processWorkOwner, opts.APIListenAddr, func(subject string, failure error) {
 		cancelServe()
 		presenter.runtimeFailure(subject, failure)
 	}, standbyReadout)
@@ -1146,10 +1146,20 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 	var publicExposure *runtimepublicingress.Controller
 	var storyFollower *serveAuthorActivityFollower
 	var channelWorker *serveChannelDeliveryWorker
+	ready := runtimepublicingress.NewReadinessOwner(publicIngressEnabled)
+	var closeChannels func() error
+	unregisterContext := func() {}
 	defer func() {
+		var shutdownCtx context.Context
+		cancelShutdown := func() {}
+		if supervisor != nil && runtimeContextManager != nil {
+			shutdownCtx = supervisor.prepareInboundStop()
+		} else {
+			shutdownCtx, cancelShutdown = context.WithTimeout(context.Background(), opts.ShutdownGrace)
+		}
+		ready.Store(false)
 		cancelServe()
 		stopBootCancellation()
-		shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), opts.ShutdownGrace)
 		defer cancelShutdown()
 		deadline, _ := shutdownCtx.Deadline()
 		storyFollower.StopAndWait()
@@ -1163,7 +1173,11 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 			}
 		}
 		shutdownErr = errors.Join(shutdownErr, resetRecovery.Close(shutdownCtx))
-		if supervisor != nil {
+		var retained *serveInboundStop
+		if supervisor != nil && runtimeContextManager != nil {
+			retained = supervisor.beginInboundStop()
+			retained.contexts.Drain()
+		} else if supervisor != nil {
 			shutdownErr = errors.Join(shutdownErr, supervisor.ShutdownProcessWithOptions(context.Background(), runtime.ShutdownOptions{Grace: remainingServeShutdownGrace(opts.ShutdownGrace, deadline)}))
 		} else {
 			shutdownErr = errors.Join(shutdownErr, closeAdditionalServeRuntimeContexts(context.Background(), runtimeContexts[min(1, len(runtimeContexts)):], runtimeContextManager, opts, deadline))
@@ -1175,9 +1189,17 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 				}
 			}
 		}
-		cancelRuntime()
 		shutdownErr = errors.Join(shutdownErr, shutdownHTTPServer(shutdownCtx, "mcp", mcpServer))
 		shutdownErr = errors.Join(shutdownErr, apiProbe.Close(shutdownCtx))
+		if retained != nil {
+			shutdownErr = errors.Join(shutdownErr, runtimeContextManager.CloseInboundRequests(shutdownCtx))
+			shutdownErr = errors.Join(shutdownErr, retained.Finish())
+		}
+		cancelRuntime()
+		if closeChannels != nil {
+			shutdownErr = errors.Join(shutdownErr, closeChannels())
+		}
+		unregisterContext()
 		if shutdownErr == nil {
 			shutdownErr = cleanupLoadedSourceArtifacts()
 		}
@@ -1228,7 +1250,6 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 		presenter.fail(5, "runtime_context", err)
 		return 1
 	}
-	ready := runtimepublicingress.NewReadinessOwner(publicIngressEnabled)
 	supervisor = newProcessLifecycleSupervisor(ready, nil)
 	supervisor.SetProcessCapability(processCapability)
 	supervisor.runtimeContexts = runtimeContextManager
@@ -1706,11 +1727,7 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 	deploymentChannels, deploymentClaims, restoreDeploymentChannels, closeDeploymentChannels := deploymentChannelHandlers(repo, cfgResult.Path, swarmDir.Path, stores, processWorkOwner, processCapability, func(ctx context.Context, callback, account string) bool {
 		return deploymentRegistration != nil && deploymentRegistration.OwnsAccountCallback(ctx, callback, account)
 	}, deploymentRuntimeOptions{output: presenter.out, manager: runtimeContextManager, sessions: sessionBootstrap, refresh: channelActivationRefresher.refreshRegisteredAccount, ingress: ready, deployment: deploymentTransport})
-	defer func() {
-		if err := closeDeploymentChannels(); err != nil {
-			log.Printf("deployment channel shutdown failed: %T", err)
-		}
-	}()
+	closeChannels = closeDeploymentChannels
 	if err := restoreDeploymentChannels(ctx); err != nil {
 		presenter.fail(5, "channel_registration", err)
 		return 1
@@ -1755,7 +1772,7 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 		presenter.fail(20, "context_registry", err)
 		return 3
 	}
-	defer projectContextRegistration.Unregister()
+	unregisterContext = projectContextRegistration.Unregister
 	runtimeFailure := func(subject string, err error) {
 		cancelServe()
 		presenter.runtimeFailure(subject, err)
@@ -2166,7 +2183,6 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 func finishRuntimeHost(ctx context.Context, privateSession bool, runPrivateSession func() error, ready *runtimepublicingress.ReadinessOwner, presenter *serveLifecyclePresenter, ownershipLoss <-chan runtimestartupownership.TerminalResult) int {
 	if privateSession {
 		err := runPrivateSession()
-		ready.Store(false)
 		if err != nil {
 			presenter.runtimeFailure("test_execution", err)
 			return 1
@@ -2174,7 +2190,6 @@ func finishRuntimeHost(ctx context.Context, privateSession bool, runPrivateSessi
 		return 0
 	}
 	<-ctx.Done()
-	ready.Store(false)
 	return serveCancellationExitCode(ownershipLoss)
 }
 
@@ -2785,6 +2800,9 @@ func newAPIServer(ready serveReadiness, apiV1Handler http.Handler, inboundHandle
 				r = r.WithContext(scenarioexecution.CarryPrivateHostScope(baseContexts[0], r.Context()))
 			}
 			available := ready == nil || runtimeAdmissionReady(ready)
+			if inbound, ok := next.(runtimeProcessInboundHandler); !control && ok && inbound.contexts.InboundDraining() {
+				available = true // The handler still performs every native/currentness check.
+			}
 			if control {
 				if controlReady, ok := ready.(interface{ ControlReady() bool }); ok {
 					available = controlReady.ControlReady()
