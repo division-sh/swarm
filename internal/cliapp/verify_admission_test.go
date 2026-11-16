@@ -8,7 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/division-sh/swarm/internal/runtime"
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
@@ -150,6 +152,50 @@ func TestVerifyHumanAdmissionSubjectsPreserveExactMachineEvidence(t *testing.T) 
 			t.Fatalf("human projection changed machine evidence: %s", data)
 		}
 	}
+	t.Run("retained_source_refusal_and_unchecked", func(t *testing.T) {
+		at := time.Unix(1, 0).UTC()
+		var report runtime.WorkflowContractValidationResult
+		report.BootReport.Purpose = runtimebootverify.ExecutionValidation
+		report.BootReport.Observations = []runtimebootverify.AdmissionObservation{
+			{CheckID: "retained_source_integrity", Owner: "compiler", Subject: "run:refused/source:" + hash,
+				Class: runtimebootverify.AdmissionDeploymentObservation, Status: runtimebootverify.AdmissionFailed,
+				Reason: "ERROR: remove the quotes\n  Location: state.yaml:x", FailureClass: failures.ClassSchemaInvalid,
+				StartedAt: at, FinishedAt: at},
+			{CheckID: "retained_source_integrity", Owner: "reader", Subject: "run:unread/source:" + foreign,
+				Class: runtimebootverify.AdmissionDeploymentObservation, Status: runtimebootverify.AdmissionNotRun,
+				Reason: "source artifact not found", FailureClass: failures.ClassDependencyUnavailable,
+				StartedAt: at, FinishedAt: at},
+		}
+		output.Observations = report.BootReport.Observations
+		text := strings.Join(verifyAdmissionTextLines(output), "\n")
+		for _, want := range []string{"run:refused/source:Reception@1.2.3", "run:unread/source:" + foreign, "Location: state.yaml:x", "remove the quotes", "not_run: retained_source_integrity"} {
+			if !strings.Contains(text, want) {
+				t.Fatalf("retained source evidence %q disappeared from text: %s", want, text)
+			}
+		}
+		data, err := json.Marshal(output)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var machine verifyCommandResult
+		if err := json.Unmarshal(data, &machine); err != nil {
+			t.Fatal(err)
+		}
+		for i, observation := range report.BootReport.Observations {
+			if machine.Observations[i].Subject != observation.Subject || machine.Observations[i].Reason != observation.Reason || machine.Observations[i].NotRunCause != nil {
+				t.Fatalf("machine output changed exact retained source evidence: %s", data)
+			}
+		}
+		decision := report.BootReport.AdmissionDecision(runtimebootverify.AdmissionFindingPolicy{})
+		if decision.Complete || decision.FailureClass != failures.ClassSchemaInvalid {
+			t.Fatalf("compiler refusal did not block admission: %+v", decision)
+		}
+		report.BootReport.Observations = report.BootReport.Observations[1:]
+		decision = report.BootReport.AdmissionDecision(runtimebootverify.AdmissionFindingPolicy{})
+		if decision.Complete || decision.FailureClass != failures.ClassDependencyUnavailable {
+			t.Fatalf("unreadable retained source alone did not block admission: %+v", decision)
+		}
+	})
 }
 
 func TestVerifyEarlyRefusalPreservesIncompleteLedgerOnPublicOutputs(t *testing.T) {

@@ -299,6 +299,13 @@ type RuntimeContextLookup struct {
 	Found   bool
 }
 
+// AllowsCompletionReplay classifies a successful exact-run availability read;
+// the native completion owner still admits every request and retained result.
+func (l RuntimeContextLookup) AllowsCompletionReplay(ctx context.Context, runID string, availability runbundle.Availability) bool {
+	return ctx != nil && ctx.Err() == nil && runID != "" && availability.RunID == runID && availability.Available() &&
+		l.State == RuntimeContextStateUnloaded && (l.Cause == RuntimeContextCauseNotLoaded || l.Cause == RuntimeContextCauseUnloaded)
+}
+
 type RuntimeIngressContextLookup struct {
 	Context       *BundleContext
 	Target        StandingTarget

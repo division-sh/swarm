@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/division-sh/swarm/internal/apiidempotency"
 	runtimeactivityresult "github.com/division-sh/swarm/internal/runtime/activityresult"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -737,6 +738,13 @@ func (p WorkflowPersistence) Valid() bool {
 		p.store.timerOccurrences != nil && p.store.timerActivations != nil && p.store.readiness != nil &&
 		p.store.runPosture != nil && p.store.decisionRoutes != nil && p.store.instanceReader != nil &&
 		p.store.entityCollectionReader != nil && p.store.targetReader != nil && p.store.instanceIndex != nil
+}
+
+func (p WorkflowPersistence) ReplayDecisionCardMutation(ctx context.Context, request apiidempotency.Request, mutation DecisionCardMutation) (json.RawMessage, bool, error) {
+	if !p.Valid() {
+		return nil, false, fmt.Errorf("decision-card replay requires selected workflow persistence")
+	}
+	return p.store.cardMutations.ReplayDecisionCardMutation(ctx, request, mutation)
 }
 
 func (p WorkflowPersistence) LookupFlowInstance(ctx context.Context, request FlowInstanceLookupRequest) (FlowInstanceObservation, bool, error) {

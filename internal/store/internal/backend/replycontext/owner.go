@@ -22,11 +22,13 @@ type replyContextSQL interface {
 }
 
 type ReplyPostgresOwner struct {
-	backend *postgresbackend.Backend
+	backend         *postgresbackend.Backend
+	completionAwait completionAwaitOwner
 }
 
 type ReplySQLiteOwner struct {
-	backend *sqlitebackend.Backend
+	backend         *sqlitebackend.Backend
+	completionAwait completionAwaitOwner
 }
 
 type ReplyContextStorageCounts struct {
@@ -169,6 +171,9 @@ func createPostgresReplyContext(ctx context.Context, db *sql.Tx, attempt *mutati
 }
 
 func (s *ReplyPostgresOwner) CreateWithinTransaction(ctx context.Context, attempt *mutationprotocol.Attempt, record runtimereplycontext.Record) error {
+	if record.Await != nil {
+		return fmt.Errorf("await creation requires its native completion binding")
+	}
 	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		return createPostgresReplyContext(ctx, tx, attempt, record)
 	})
@@ -229,6 +234,9 @@ func createSQLiteReplyContextTx(ctx context.Context, db *sql.Tx, attempt *mutati
 }
 
 func (s *ReplySQLiteOwner) CreateWithinTransaction(ctx context.Context, attempt *mutationprotocol.Attempt, record runtimereplycontext.Record) error {
+	if record.Await != nil {
+		return fmt.Errorf("await creation requires its native completion binding")
+	}
 	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		return createSQLiteReplyContextTx(ctx, tx, attempt, record)
 	})
@@ -539,7 +547,7 @@ const postgresReplyContextSelect = `
 	       state, COALESCE(accepted_reply_event_id::text, ''),
 	       created_at, updated_at, terminal_at,
 	       COALESCE(source_run_id::text, ''), source_request_event_id::text,
-	       COALESCE(enclosing_reply_context_id, '')
+	       COALESCE(enclosing_reply_context_id, ''), await_binding
 	FROM reply_contexts`
 
 const sqliteReplyContextSelect = `
@@ -550,7 +558,7 @@ const sqliteReplyContextSelect = `
 	       state, COALESCE(accepted_reply_event_id, ''),
 	       created_at, updated_at, terminal_at,
 	       COALESCE(source_run_id, ''), source_request_event_id,
-	       COALESCE(enclosing_reply_context_id, '')
+	       COALESCE(enclosing_reply_context_id, ''), await_binding
 	FROM reply_contexts`
 
 type replyContextRowScanner interface {
@@ -560,6 +568,7 @@ type replyContextRowScanner interface {
 func scanReplyContext(row replyContextRowScanner) (runtimereplycontext.Record, error) {
 	var record runtimereplycontext.Record
 	var originJSON []byte
+	var awaitJSON []byte
 	var createdAtRaw, updatedAtRaw, terminalAtRaw any
 	if err := row.Scan(
 		&record.ID, &record.RunID, &record.RequestEventID,
@@ -568,7 +577,7 @@ func scanReplyContext(row replyContextRowScanner) (runtimereplycontext.Record, e
 		&originJSON, &record.RequestCorrelationID, &record.CorrelationKey,
 		&record.State, &record.AcceptedReplyEventID,
 		&createdAtRaw, &updatedAtRaw, &terminalAtRaw,
-		&record.SourceRunID, &record.SourceRequestEventID, &record.EnclosingReplyContextID,
+		&record.SourceRunID, &record.SourceRequestEventID, &record.EnclosingReplyContextID, &awaitJSON,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return runtimereplycontext.Record{}, runtimereplycontext.ErrNotFound
@@ -577,6 +586,9 @@ func scanReplyContext(row replyContextRowScanner) (runtimereplycontext.Record, e
 	}
 	if err := record.DecodeOrigin(originJSON); err != nil {
 		return runtimereplycontext.Record{}, fmt.Errorf("decode reply context origin: %w", err)
+	}
+	if err := record.DecodeAwaitBinding(awaitJSON); err != nil {
+		return runtimereplycontext.Record{}, fmt.Errorf("decode reply await binding: %w", err)
 	}
 	createdAt, ok, err := sqliteTimeValue(createdAtRaw)
 	if err != nil {

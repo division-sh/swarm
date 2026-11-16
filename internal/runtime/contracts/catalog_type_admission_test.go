@@ -81,6 +81,7 @@ func TestCatalogAdmissionScopedSourcesRejectInvalidPresence(t *testing.T) {
 		{"unused_self", "types.yaml", "Cycle:\n  child: Cycle\n"},
 		{"unused_mutual", "child/types.yaml", "Left:\n  right: [Right]\nRight:\n  left: map[text]Left\n"},
 		{"unused_missing", "types.yaml", "Unused:\n  child: Missing\n"},
+		{"literal_record_member", "types.yaml", "Profile:\n  name: 'a literal initial'\n"},
 		{"unused_entity", "child/state.yaml", "child: Missing\n"},
 		{"unused_event", "child/events.yaml", "test.ready:\n  child: Missing\n"},
 		{"suffix", "types.yaml", "Unused:\n  child: text[]\n"},

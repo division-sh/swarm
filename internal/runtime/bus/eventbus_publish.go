@@ -531,6 +531,13 @@ func (eb *EventBus) preparePublishCommand(ctx context.Context, plan eventBusComm
 		return preparedCtx, PreparedPublish{}, PublicationCommand{}, err
 	}
 	prepared, command, err := eb.prepareClosedPublication(preparedCtx, plan)
+	if err == nil {
+		if await, ok := runtimeeffects.CompletionAwaitPublicationForEvent(preparedCtx, prepared.Event.ID()); ok {
+			retained := await.Clone()
+			prepared.completionAwait = &retained
+			command.Commit.CompletionAwait = &await
+		}
+	}
 	if err == nil && plan.stageFeedback != nil {
 		request := *plan.stageFeedback
 		if err := request.ValidateEvent(prepared.Event); err != nil {
@@ -969,6 +976,7 @@ func publicationAuthorDescriptor(ctx context.Context, evt events.Event) (runtime
 // Its route plan remains EventBus-owned; callers may persist the exported
 // delivery-route manifest but cannot reinterpret or replace the plan.
 type PreparedPublish struct {
+	completionAwait           *runtimeeffects.CompletionAwaitPublication
 	Event                     events.Event
 	admitted                  events.AdmittedEvent
 	plan                      RoutePlan
@@ -1052,6 +1060,10 @@ func (p PreparedPublish) CommitRequest() CommitPublishRequest {
 		ReplyReturns:        append([]runtimepinrouting.ReplyReturnContinuation(nil), p.plan.ReplyReturns...),
 		ReplyClaims:         append([]runtimereplycontext.ClaimCommand(nil), p.plan.ReplyClaims...),
 		JoinAdmissionFences: append([]runtimepipeline.WorkflowJoinAdmissionFence(nil), p.plan.JoinAdmissionFences...),
+	}
+	if p.completionAwait != nil {
+		await := p.completionAwait.Clone()
+		request.CompletionAwait = &await
 	}
 	if failure := p.plan.TargetFailure; !failure.Empty() && !p.providerRawSettlement.authorizes(p.Event, p.targetFailureInput, p.plan) {
 		disposition := runtimepipelineobligation.DeadLetter(failure.Code(), targetDeliveryFailureEnvelope(failure))

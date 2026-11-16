@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -270,6 +272,178 @@ func TestA9NestedConnectionSelectionUsesEveryEdgeKeyAndConstructedParent(t *test
 	if _, _, _, err := owner.Materialize(withConnectRoutePlanPreview(constructionIndexContext(t, source)), event, leafPlan, map[string]string{"payload.parent_key": "left", "payload.leaf_key": "same"}); err == nil {
 		t.Fatal("sole existing receiver bypassed the missing ancestor edge")
 	}
+	proveLexicalAddressGeometries(t)
+}
+
+func lexicalAddressFixture(t *testing.T, crossAccount bool) string {
+	t.Helper()
+	return canonicalrouting.CopyLexicalAddressing(t, crossAccount)
+}
+
+func proveLexicalAddressGeometries(t *testing.T) {
+	t.Helper()
+	root := lexicalAddressFixture(t, false)
+	source := loadConnectRoutePlanCanonicalSource(t, root)
+	graph := pinrouting.CompileConnectGraph(source)
+	if issues := graph.Issues(); len(issues) != 0 {
+		t.Fatal(issues)
+	}
+	rootInstance := flowidentity.Stored(source, ".", busInternalTestRunID, busInternalTestRunID, busInternalTestRunID, "")
+	index := constructionIndexTestReader{observations: []pipeline.FlowInstanceObservation{constructionIndexObservation(t, source, busInternalTestRunID, rootInstance, "")}}
+	accounts, audits, tickets := map[string]flowidentity.Instance{}, map[string]flowidentity.Instance{}, map[string]flowidentity.Instance{}
+	for _, key := range []string{"7", "8"} {
+		account, err := flowidentity.KeyedChild(source, rootInstance, "account", key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		audit, err := flowidentity.KeylessChild(source, account, "account/audit")
+		if err != nil {
+			t.Fatal(err)
+		}
+		ticket, err := flowidentity.KeyedChild(source, account, "account/ticket", "42")
+		if err != nil {
+			t.Fatal(err)
+		}
+		accounts[key], audits[key], tickets[key] = account, audit, ticket
+		index.observations = append(index.observations, constructionIndexObservation(t, source, busInternalTestRunID, account, key), constructionIndexObservation(t, source, busInternalTestRunID, audit, ""), constructionIndexObservation(t, source, busInternalTestRunID, ticket, "42"))
+	}
+	for _, test := range []struct {
+		name, event, receiver string
+		source, want          flowidentity.Instance
+		selectParent          bool
+	}{
+		{"C51_lexical_account", "ticket.done", "account/audit", tickets["7"], audits["7"], false},
+		{"C52_root_selected_account", "root.audit", "account/audit", rootInstance, audits["7"], true},
+		{"C53_explicit_other_account", "ticket.cross", "account", tickets["7"], accounts["8"], false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			testSource, testGraph := source, graph
+			testIndex := index
+			if test.name == "C53_explicit_other_account" {
+				testSource = loadConnectRoutePlanCanonicalSource(t, lexicalAddressFixture(t, true))
+				testGraph = pinrouting.CompileConnectGraph(testSource)
+				if issues := testGraph.Issues(); len(issues) != 0 {
+					t.Fatalf("frozen C53 root edge was not admitted: %+v", issues)
+				}
+				testIndex.observations = nil
+				for _, observed := range index.observations {
+					testIndex.observations = append(testIndex.observations, constructionIndexObservation(t, testSource, busInternalTestRunID, observed.Identity(), observed.InstanceKey()))
+				}
+			}
+			owner := connectInstanceSelector{source: testSource, index: testIndex}
+			resolver := connectRoutePlanResolver{lifecycle: owner}
+			ctx := withConnectRoutePlanPreview(constructionIndexContext(t, testSource))
+			routing := eventtest.ConcreteTemplateRoutingSource(test.source.TemplateID, test.source.InstancePath, test.source.EntityID)
+			eventType := test.source.InstancePath + "/" + test.event
+			if test.source.TemplateID == "." {
+				routing = eventtest.RootRoutingSource(busInternalTestRunID)
+				eventType = test.event
+			}
+			event := eventtest.ExistingRunRootIngressWithRoutingSource(eventtest.UUID(test.name), events.EventType(eventType), "test", "", []byte(`{"account_id":"7","target_account_id":"8"}`), 0, busInternalTestRunID, events.EventEnvelope{}, routing, time.Now().UTC())
+			values := map[string]string{"payload.account_id": "7", "payload.target_account_id": "8"}
+			var target pinrouting.ConnectRoutePlan
+			for _, plan := range testGraph.Plans() {
+				if plan.SourceEndpoint().Readback().LocalEvent != test.event {
+					continue
+				}
+				if test.selectParent && plan.ReceiverEndpoint().Readback().FlowID == "account" {
+					_, parent, _, err := owner.Materialize(ctx, event, plan, values)
+					if err != nil || parent.Identity() != accounts["7"] {
+						t.Fatalf("root ancestor selection: %+v %v", parent, err)
+					}
+					if err := selectConnectionConstruction(ctx, parent.Identity()); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if plan.ReceiverEndpoint().Readback().FlowID == test.receiver {
+					target = plan
+				}
+			}
+			materialized, selected, err := resolver.materializeConnectRoutePlan(ctx, event, target, values)
+			if err != nil || !materialized.Failure.Empty() || selected.Identity() != test.want {
+				t.Fatalf("exact edge selected another account: selected=%+v materialized=%+v want=%+v err=%v", selected, materialized, test.want, err)
+			}
+		})
+	}
+	t.Run("C08_missing_ancestor_key_teaching", func(t *testing.T) {
+		path := filepath.Join(root, "events.yaml")
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(strings.Replace(string(raw), "root.audit:\n  account_id: text\n", "root.audit:\n", 1)), 0600); err != nil {
+			t.Fatal(err)
+		}
+		repo := canonicalrouting.RepoRoot(t)
+		missingKey, err := contracts.LoadWorkflowContractBundleWithOverrides(repo, root, contracts.DefaultPlatformSpecFile(repo))
+		if err == nil {
+			err = missingKey.ConnectionInputs().ValidateBindings()
+		}
+		if err == nil || !strings.Contains(err.Error(), "account_id") || !strings.Contains(err.Error(), "schema.yaml") {
+			t.Fatalf("missing ancestor key lost located teaching: %v", err)
+		}
+
+		lexicalRoot := canonicalrouting.CopyLexicallyBoundAccountConnection(t)
+		_, err = contracts.LoadWorkflowContractBundleWithOverrides(repo, lexicalRoot, contracts.DefaultPlatformSpecFile(repo))
+		if err != nil {
+			t.Fatalf("lexical-key negative needs an admitted control: %v", err)
+		}
+		for label, body := range map[string]string{
+			"account/ticket/events.yaml": "ticket.done:\n  account_id: text\n",
+			"account/ticket/nodes.yaml":  "reporter:\n  opened:\n    emit: {event: ticket.done, fields: {account_id: payload.account_id}}\n",
+		} {
+			if err := os.WriteFile(filepath.Join(lexicalRoot, label), []byte(body), 0600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		control, err := contracts.LoadWorkflowContractBundleWithOverrides(repo, lexicalRoot, contracts.DefaultPlatformSpecFile(repo))
+		if err != nil {
+			t.Fatalf("typed lexical-key evidence needs an admitted control: %v", err)
+		}
+		pin, present := control.FlowInputEventPin("account", "ticket.done")
+		schema, bound := pin.ProducerEventSchema()
+		field, declared := schema.StructuralField("account_id")
+		if !present || !bound || !declared || field.IsOptional || field.TypeRef != "text" {
+			t.Fatalf("lexical key lacks required compatible producer evidence: %+v", field)
+		}
+		if err := os.WriteFile(filepath.Join(lexicalRoot, "account", "nodes.yaml"), []byte("receiver:\n  root.audit: {}\n  ticket.done: {}\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		path = filepath.Join(lexicalRoot, "account", "schema.yaml")
+		raw, err = os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// The edge is account-local: its account is already the sender's
+		// lexical owner, so payload cannot select a different account.
+		row := "  - {event: ticket.done, from: ticket, to: ., resolution: select, key_from: payload.account_id}\n"
+		if err := os.WriteFile(path, []byte(strings.Replace(string(raw), "  - {event: ticket.done, from: ticket, to: .}\n", row, 1)), 0600); err != nil {
+			t.Fatal(err)
+		}
+		_, err = contracts.LoadWorkflowContractBundleWithOverrides(repo, lexicalRoot, contracts.DefaultPlatformSpecFile(repo))
+		if err == nil || !strings.Contains(err.Error(), "bound by context") || !strings.Contains(err.Error(), "account/schema.yaml") {
+			t.Fatalf("supplied key for lexical account lost located refusal: %v", err)
+		}
+	})
+	t.Run("C08_different_name_for_lexical_account", func(t *testing.T) {
+		root := canonicalrouting.CopyLexicallyBoundAccountConnection(t)
+		repo := canonicalrouting.RepoRoot(t)
+		control, err := contracts.LoadWorkflowContractBundleWithOverrides(repo, root, contracts.DefaultPlatformSpecFile(repo))
+		if err != nil {
+			t.Fatalf("different-name lexical control: %v", err)
+		}
+		pin, present := control.FlowInputEventPin("account", "ticket.done")
+		schema, bound := pin.ProducerEventSchema()
+		field, declared := schema.StructuralField("target_account_id")
+		if !present || !bound || !declared || field.IsOptional || field.TypeRef != "text" {
+			t.Fatalf("different-name key lacks required compatible producer evidence: %+v", field)
+		}
+		canonicalrouting.SetLexicalAccountKeySource(t, root, "payload.target_account_id")
+		_, err = contracts.LoadWorkflowContractBundleWithOverrides(repo, root, contracts.DefaultPlatformSpecFile(repo))
+		if err == nil || !strings.Contains(err.Error(), "`account` is bound by context") || !strings.Contains(err.Error(), "account/schema.yaml") {
+			t.Fatalf("different-name source reselected the lexical account: %v", err)
+		}
+	})
 }
 
 func TestA9ConnectionAncestorCandidatesAreResolvedOnlyByDependentPaths(t *testing.T) {

@@ -13,10 +13,13 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
+	"github.com/division-sh/swarm/internal/runtime/gateruntime"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/store/internal/backend/decisionpersistence"
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres"
 	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/sqlite"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle/sourceadmission"
@@ -66,12 +69,20 @@ func readBundleUpgradeStateTx(ctx context.Context, tx *sql.Tx, owner bundleUpgra
 	if err != nil {
 		return runbundle.UpgradeState{}, err
 	}
+	committedGates := map[string]bool{}
 	for _, instance := range instances {
+		persisted, err := flowidentity.StoredPersisted(source, instance.WorkflowName, instance.StorageRef, instance.StorageRef, instance.InstanceID, instance.EntityID, instance.ParentEntityID)
+		if err != nil {
+			return runbundle.UpgradeState{}, err
+		}
 		state.Instances = append(state.Instances, runbundle.UpgradeInstance{
-			Route:    flowidentity.RouteForInstancePath(instance.StorageRef),
+			Route:    persisted.Route(),
 			EntityID: instance.EntityID, FlowID: entityruntime.ResolveFlowIDForRuntimeInstance(source, runID, instance.StorageRef),
 			Status: instance.Status, Stage: instance.CurrentState, Fields: instance.Fields, StateBuckets: instance.StateBuckets,
 		})
+		if err := collectUpgradeCommittedGateCards(instance.StateBuckets, committedGates); err != nil {
+			return runbundle.UpgradeState{}, err
+		}
 	}
 	state.Deliveries, err = owner.ReadActiveRunDeliverySnapshotsTx(ctx, tx, runID)
 	if err != nil {
@@ -85,6 +96,9 @@ func readBundleUpgradeStateTx(ctx context.Context, tx *sql.Tx, owner bundleUpgra
 		for _, card := range cards {
 			if card.Status == "pending" {
 				state.Cards = append(state.Cards, card)
+			}
+			if err := appendCommittedUpgradeGateCard(ctx, tx, sqlite, &state, card, committedGates); err != nil {
+				return runbundle.UpgradeState{}, err
 			}
 		}
 		if next == "" {
@@ -107,6 +121,34 @@ func readBundleUpgradeStateTx(ctx context.Context, tx *sql.Tx, owner bundleUpgra
 		return runbundle.UpgradeState{}, err
 	}
 	return state, nil
+}
+
+func appendCommittedUpgradeGateCard(ctx context.Context, tx *sql.Tx, sqlite bool, state *runbundle.UpgradeState, card decisioncard.ListItem, committed map[string]bool) error {
+	if committed[card.CardID] && card.Status == decisioncard.StatusDecided && card.Anchor.Kind() == decisioncard.AnchorKindStageGate {
+		full, err := decisionpersistence.ReadDecisionCardInTx(ctx, tx, card.CardID, !sqlite)
+		if err != nil {
+			return err
+		}
+		state.CommittedGateCards = append(state.CommittedGateCards, full)
+	}
+	return nil
+}
+
+func collectUpgradeCommittedGateCards(buckets map[string]any, committed map[string]bool) error {
+	carrier, err := runtimeengine.StateCarrierFromPersisted(nil, nil, buckets)
+	if err != nil {
+		return err
+	}
+	activations, err := gateruntime.List(carrier.StateBuckets)
+	if err != nil {
+		return err
+	}
+	for _, activation := range activations {
+		if activation.Status == gateruntime.StatusDecisionCommitted {
+			committed[activation.CardID] = true
+		}
+	}
+	return nil
 }
 
 func requireUpgradeSourceTx(ctx context.Context, tx *sql.Tx, sqlite bool, runID string, source semanticview.Source) error {

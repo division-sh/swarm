@@ -67,6 +67,49 @@ func TestPersistenceAuthorityDebtFixtureRoleDoesNotAuthorizeProductionConsumptio
 	}
 }
 
+func TestPersistenceAuthorityDebtMailboxGateFixtureConsumerBoundaries(t *testing.T) {
+	for _, target := range []struct{ path, name string }{
+		{"github.com/division-sh/swarm/internal/store/selected/selectedtest", "BindMailboxGateFixtureForTest"},
+		{"github.com/division-sh/swarm/internal/store/internal/runtimepersistence", "BindMailboxGateObservationForTest"},
+	} {
+		file, err := parser.ParseFile(token.NewFileSet(), "probe.go", `package probe; func use() { port.call() }`, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		object := types.NewFunc(token.NoPos, types.NewPackage(target.path, "port"), target.name, types.NewSignatureType(nil, nil, nil, nil, nil, false))
+		info := &types.Info{Uses: map[*ast.Ident]types.Object{}}
+		ast.Inspect(file, func(node ast.Node) bool {
+			if selector, ok := node.(*ast.SelectorExpr); ok {
+				info.Uses[selector.Sel] = object
+			}
+			return true
+		})
+		for _, candidate := range []struct {
+			path   string
+			refuse bool
+		}{
+			{"internal/store/selected/mailbox.go", true},
+			{"internal/serveapp/mailbox.go", true},
+			{"internal/serveapp/mailbox_gate_epoch_test.go", false},
+			{"internal/store/selected/selectedtest/mailbox_gate.go", false},
+		} {
+			findings := debtCollectTestAuthorityConsumptionFindings(candidate.path, file, info)
+			if (len(findings) != 0) != candidate.refuse {
+				t.Fatalf("%s -> %s: findings=%+v", candidate.path, target.name, findings)
+			}
+		}
+	}
+	sqlPackage := types.NewPackage("database/sql", "sql")
+	raw := types.NewPointer(types.NewNamed(types.NewTypeName(token.NoPos, sqlPackage, "DB", nil), types.NewStruct(nil, nil), nil))
+	for _, result := range []types.Type{types.Typ[types.String], raw} {
+		port := types.NewSignatureType(nil, nil, nil, nil, types.NewTuple(types.NewVar(token.NoPos, nil, "", result)), false)
+		carrier := types.NewStruct([]*types.Var{types.NewField(token.NoPos, nil, "Observe", port, false)}, nil)
+		if got := debtNewAuthorityTypeScan().debtContainsRawSQLType(carrier); got != (result == raw) {
+			t.Fatalf("function port result %s: raw=%t", result, got)
+		}
+	}
+}
+
 func TestPersistenceAuthorityDebtRatchetRejectsPaymentDuplicationReseedAndResurrection(t *testing.T) {
 	t.Run("reviewed deployment stub metadata is exact and one way", func(t *testing.T) {
 		trusted := authorityDebtBaseline{BootstrapSource: debtBootstrapSource, Collector: debtDeploymentRegistrationCollectorFrom, Sites: debtControlSet(debtControlSite("call:QueryRow", 1))}

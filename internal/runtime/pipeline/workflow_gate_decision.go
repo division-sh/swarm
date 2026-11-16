@@ -19,6 +19,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 	runtimeworkflowlifecycle "github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 	"github.com/google/uuid"
@@ -359,7 +360,9 @@ func humanTaskRequesterOutcomeEnvelope(continuation decisioncard.HumanTaskContin
 }
 
 func (pc *PipelineCoordinator) handleStageGateDecisionCard(ctx context.Context, evt events.Event, card decisioncard.Card) ([]events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
-	if current := workflowGateBundleHash(ctx, pc); current == "" || current != card.BundleHash {
+	current := workflowGateBundleHash(ctx, pc)
+	bundle, compiled := semanticview.Bundle(pc.SemanticSource())
+	if current == "" || !compiled || bundle == nil || bundle.SourceArtifact == nil || bundle.SourceArtifact.BundleHash() != current {
 		failure := runtimefailures.Normalize(runtimefailures.New(
 			runtimefailures.ClassDependencyUnavailable,
 			"decision_card_bundle_unavailable",
@@ -414,7 +417,19 @@ func (pc *PipelineCoordinator) loadStageGateRoute(ctx context.Context, card deci
 	if activation.ActivationID != anchor.StageActivationID || activation.CardID != card.CardID {
 		return gateruntime.Route{}, fmt.Errorf("decision card activation is no longer authoritative")
 	}
-	return gateruntime.RouteFor(activation.RoutesJSON, card.Verdict)
+	if activation.Status == gateruntime.StatusRouted && activation.DecisionEventID == card.DecisionEventID {
+		// Exact settled evidence is readback, not a fresh current-source execution.
+		return gateruntime.RouteFor(activation.RoutesJSON, card.Verdict)
+	}
+	prepared, err := pc.prepareGateOffer(ctx, card, instance, activation)
+	if err != nil {
+		return gateruntime.Route{}, err
+	}
+	routes, err := prepared.offer.RoutesJSON()
+	if err != nil {
+		return gateruntime.Route{}, err
+	}
+	return gateruntime.RouteFor(routes, card.Verdict)
 }
 
 func validateStageGateInstanceOwner(anchor decisioncard.StageGateAnchor, instance WorkflowInstance, activation gateruntime.Activation) error {

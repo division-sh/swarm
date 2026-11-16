@@ -15,6 +15,7 @@ import (
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
@@ -337,8 +338,15 @@ func executeIdempotentDecisionCardMutation(ctx context.Context, req Request, opt
 	bundleSource := opts.SourceArtifact
 	if err == nil && runtimeContextManager(opts.RuntimeContexts) != nil {
 		var selected selectedRuntimeContext
-		ctx, selected, err = runtimeBundleContextByHash(ctx, opts.RuntimeContexts, card.BundleHash, card.RunID)
+		if card.Anchor.Kind() == decisioncard.AnchorKindStageGate {
+			ctx, selected, _, err = runtimeBundleContextByRun(ctx, opts.RuntimeContexts, card.RunID)
+		} else {
+			ctx, selected, err = runtimeBundleContextByHash(ctx, opts.RuntimeContexts, card.BundleHash, card.RunID)
+		}
 		if err != nil {
+			if result, complete, replayErr := replayCompletedDecisionCardMutation(ctx, selected.completionReplayAvailable, opts, card, request, mutation); complete {
+				return result, replayErr
+			}
 			return nil, pausedDecisionCardSourceError(ctx, opts, card, err)
 		}
 		if selected.Runtime == nil || selected.Runtime.Pipeline == nil || selected.Runtime.Bus == nil {
@@ -364,13 +372,28 @@ func executeIdempotentDecisionCardMutation(ctx context.Context, req Request, opt
 	return decisionCardMutationResponse(cardID, response, replayed)
 }
 
+func replayCompletedDecisionCardMutation(ctx context.Context, available bool, opts DecisionCardHandlerOptions, card decisioncard.Card, request apiidempotency.Request, mutation runtimepipeline.DecisionCardMutation) (any, bool, error) {
+	if !available || card.Anchor.Kind() != decisioncard.AnchorKindStageGate || opts.CompletionReplay == nil {
+		return nil, false, nil
+	}
+	response, replayed, err := opts.CompletionReplay.ReplayDecisionCardMutation(ctx, request, mutation)
+	if err != nil {
+		return nil, true, decisionCardAPIError(request.ResourceID, err)
+	}
+	if !replayed {
+		return nil, false, nil
+	}
+	result, err := decisionCardMutationResponse(request.ResourceID, response, true)
+	return result, true, err
+}
+
 func pausedDecisionCardSourceError(ctx context.Context, opts DecisionCardHandlerOptions, card decisioncard.Card, err error) error {
 	var unavailable *ApplicationError
 	if !errors.As(err, &unavailable) || unavailable.Code != BundleUnavailableCode {
 		return err
 	}
 	lookup, availability, readErr := opts.RuntimeContexts.LookupRunStatus(ctx, card.RunID)
-	if readErr != nil || availability.RunID != card.RunID || availability.BundleHash != card.BundleHash ||
+	if readErr != nil || availability.RunID != card.RunID || card.Anchor.Kind() != decisioncard.AnchorKindStageGate && availability.BundleHash != card.BundleHash ||
 		availability.Status != "paused" || !availability.Available() || lookup.State != runtimepkg.RuntimeContextStateUnloaded {
 		return err
 	}
@@ -434,6 +457,12 @@ func executeIdempotentMailboxNoticeAcknowledgment(
 }
 
 func decisionCardAPIError(cardID string, err error) error {
+	if errors.Is(err, runtimepipeline.ErrGateOfferChanged) {
+		if !failures.OnlyBranches(err, func(branch error) bool { return branch == runtimepipeline.ErrGateOfferChanged }) {
+			return err
+		}
+		return NewApplicationError(BundleUnavailableCode, false, map[string]any{})
+	}
 	switch {
 	case errors.Is(err, mailbox.ErrNotNotice):
 		return NewInvalidParamsError(map[string]any{"field": "mailbox_id", "reason": err.Error(), "remediation": "use mailbox.decide for a decision card"})

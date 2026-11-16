@@ -96,6 +96,13 @@ release approval or a promise of old-store migration.
 
 ### Changed
 
+- Stage-gate cards with unchanged offers remain answerable after a compatible
+  workflow upgrade. Answers and continuations use the run's current source;
+  the issued card stays immutable. Exact API completion replay remains available
+  after the completed run is unloaded, within existing completion retention.
+  Changed offers still refuse; automatic card replacement is not included.
+  (#3010)
+
 - The registered acknowledgement uses a new closed nullable-bundle journal
   schema. Incompatible upgrade and downgrade stores refuse boot; there is no
   migration. Preserve the existing database, SDK state, proofs and credentials;

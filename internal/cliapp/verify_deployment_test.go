@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/bootverify"
@@ -24,17 +25,30 @@ import (
 )
 
 func TestVerifyNativePublicIngressUsesAdmittedConfiguration(t *testing.T) {
-	for _, settings := range []*config.PublicWebhookConfig{nil, {Hostname: "hooks.example.test"}, {}} {
-		cfg := RuntimeConfigLoadResult{Config: &config.Config{Serve: config.ServeConfig{PublicWebhook: settings}}}
+	for _, row := range []struct {
+		settings *config.PublicWebhookConfig
+		status   bootverify.AdmissionObservationStatus
+		telegram bool
+	}{
+		{nil, bootverify.AdmissionNotApplicable, true},
+		{&config.PublicWebhookConfig{Hostname: "hooks.example.test"}, bootverify.AdmissionPassed, false},
+		{&config.PublicWebhookConfig{Hostname: "hooks.example.test", Port: new(8443)}, bootverify.AdmissionPassed, true},
+		{&config.PublicWebhookConfig{Hostname: "hooks.example.test", Port: new(9443)}, bootverify.AdmissionPassed, false},
+		{&config.PublicWebhookConfig{Hostname: "hooks.example.test", Port: new(9443)}, bootverify.AdmissionFailed, true},
+		{&config.PublicWebhookConfig{Hostname: "hooks.example.test", Port: new(0)}, bootverify.AdmissionFailed, false},
+		{&config.PublicWebhookConfig{}, bootverify.AdmissionFailed, false},
+	} {
+		cfg := RuntimeConfigLoadResult{Config: &config.Config{Serve: config.ServeConfig{PublicWebhook: row.settings}}}
+		if row.telegram {
+			cfg.Config.Channels.HITL = &channelonboarding.AccountReference{Provider: "telegram", Account: "12345"}
+		}
 		var result runtime.WorkflowContractValidationResult
 		inspectVerifyPublicIngress(context.Background(), cfg, &result, "test")
 		if len(result.BootReport.Observations) != 1 {
 			t.Fatalf("public ingress admission was not observed: %#v", result.BootReport)
 		}
 		status := result.BootReport.Observations[0].Status
-		if settings == nil && status != bootverify.AdmissionNotApplicable ||
-			settings != nil && settings.Hostname != "" && status != bootverify.AdmissionPassed ||
-			settings != nil && settings.Hostname == "" && status != bootverify.AdmissionFailed {
+		if status != row.status {
 			t.Fatalf("wrong ingress observation: %s", status)
 		}
 	}

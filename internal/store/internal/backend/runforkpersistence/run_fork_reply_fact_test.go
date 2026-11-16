@@ -61,6 +61,21 @@ func historicalReplyBody(t *testing.T, record replycontext.Record) map[string]an
 		"origin_route": json.RawMessage(origin), "request_correlation_id": record.RequestCorrelationID, "correlation_key": record.CorrelationKey,
 		"state": string(record.State), "accepted_reply_event_id": record.AcceptedReplyEventID,
 		"created_at": record.CreatedAt, "updated_at": record.UpdatedAt, "terminal_at": record.TerminalAt,
+		"await_binding": record.Await,
+	}
+}
+
+func TestHistoricalReplyFactRetainsAwaitWithoutForkAuthority(t *testing.T) {
+	record := historicalReplyRecord(t)
+	record.Await = &replycontext.AwaitBinding{Version: "reply-await.v1", ReplyContextID: record.ID, RequestEventID: record.RequestEventID, RunID: record.RunID, OriginLife: record.OriginLife,
+		DeliveryID: "delivery", ClaimVersion: 1, ExecutionOwner: "original", OperationID: "operation", AttemptID: "attempt", BundleHash: "source", PlanFingerprint: "plan", FrameID: "frame", ResponseFingerprint: "response", CallID: "call", CompletedResults: "[]"}
+	snapshot, context := historicalReplyContext(record)
+	got, err := decodeRunForkHistoricalReplyFact(snapshot, context, historicalReplyJSON(t, historicalReplyBody(t, record)))
+	if err != nil || !reflect.DeepEqual(got.Record, record) {
+		t.Fatalf("read-only historical await attribution lost: got=%+v err=%v", got, err)
+	}
+	if snapshot.admittedFacts != nil || len(snapshot.ReplyContexts) != 0 {
+		t.Fatal("historical reading installed execution authority")
 	}
 }
 

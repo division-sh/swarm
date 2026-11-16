@@ -104,7 +104,7 @@ func TestListSpellingRetirementPublicAdmission(t *testing.T) {
 			{"long", "{type: list, of: T}", false},
 		} {
 			if field.file == "state.yaml" && (form.name == "quoted_bracket" || form.name == "quoted_singleton") {
-				// Quoted state values are literals, covered by state declaration admission.
+				// State admission separately covers quoted-type refusals and quoted-item list literals.
 				continue
 			}
 			t.Run(field.file+"/"+form.name, func(t *testing.T) {

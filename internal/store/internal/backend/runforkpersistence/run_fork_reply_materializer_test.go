@@ -277,6 +277,21 @@ func TestRunForkReplyProjectionRejectsUncapturedAndCorruptBindings(t *testing.T)
 }
 
 func TestRunForkReplyProjectionRequiresCompleteCapturedRecord(t *testing.T) {
+	t.Run("original_invocation_await", func(t *testing.T) {
+		plan, childRun, source := runForkReplyPlanFixture(t, replycontext.StateTerminal, false, true)
+		if _, err := projectRunForkReplyContext(plan, childRun, source); err != nil {
+			t.Fatalf("ordinary complete captured projection precondition: %v", err)
+		}
+		source.Await = &replycontext.AwaitBinding{Version: "reply-await.v1", ReplyContextID: source.ID, RequestEventID: source.RequestEventID, RunID: source.RunID, OriginLife: source.OriginLife,
+			DeliveryID: "delivery", ClaimVersion: 1, ExecutionOwner: "original", OperationID: "operation", AttemptID: "attempt", BundleHash: "source", PlanFingerprint: "plan", FrameID: "frame", ResponseFingerprint: "response", CallID: "call", CompletedResults: "[]"}
+		plan.ReplyContexts[0] = source.Normalized()
+		if err := source.Validate(); err != nil {
+			t.Fatalf("valid captured await attribution precondition: %v", err)
+		}
+		if _, err := projectRunForkReplyContext(plan, childRun, source); err == nil || err.Error() != "fork execution cannot transfer an original invocation's await binding" {
+			t.Fatalf("executable projection did not refuse original-invocation binding: %v", err)
+		}
+	})
 	for _, test := range []struct {
 		name  string
 		alter func(replycontext.Record) replycontext.Record

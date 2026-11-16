@@ -64,6 +64,7 @@ type PipelineDeliveryNativeFixtureForTest struct {
 	ConstructInitial                  func(context.Context, WorkflowInstance, WorkflowLifecycleMutationPlan) (CommittedWorkflowLifecycleMutation, error)
 	ReopenProjection                  func() WorkflowPersistence
 	ReopenExecution                   func() *PipelineDeliveryNativeFixtureForTest
+	UpgradeSource                     func(context.Context, semanticview.Source) error
 	TransitionWire                    func(context.Context, string, string) (json.RawMessage, error)
 	SetTransitionWire                 func(context.Context, string, string, json.RawMessage) (int64, error)
 	JoinExecution                     func(context.Context) error

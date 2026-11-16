@@ -22,7 +22,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
-	"github.com/division-sh/swarm/internal/runtime/startuprecovery"
 	"github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store"
@@ -203,10 +202,7 @@ func inspectVerifyRecoverySnapshot(ctx context.Context, snapshot *storeselected.
 		_, err := PrepareBundleUpgrade(ctx, snapshot, snapshot, repo, source, packBases)
 		return err
 	})
-	verifyDeploymentObservation(ctx, result, "retained_source_integrity", "internal/runtime/startuprecovery.Inspect", subject, failures.ClassLifecycleConflict, func(ctx context.Context) error {
-		_, err := startuprecovery.Inspect(ctx, startuprecovery.Request{AvailabilityReader: snapshot, ArtifactReader: snapshot})
-		return err
-	})
+	inspectVerifyRetainedSources(ctx, snapshot, repo, subject, packBases, result)
 	verifyDeploymentObservation(ctx, result, "startup_recovery_admission", "internal/runtime.InspectStartupRecoveryAdmission", subject, failures.ClassDependencyUnavailable, func(ctx context.Context) error {
 		fact, err := correlation.NewSourceArtifactFact(hash)
 		if err != nil {

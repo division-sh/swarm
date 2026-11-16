@@ -389,6 +389,37 @@ type notifyAllChildrenAgentGateEntry struct {
 	once    sync.Once
 }
 
+type notifyAllChildrenIssuanceProbe struct {
+	mu          sync.Mutex
+	eventType   string
+	expected    int
+	ids         map[string]struct{}
+	done        chan struct{}
+	hundredthAt time.Time
+}
+
+func (p *notifyAllChildrenIssuanceProbe) NotifyLifecycle(_ context.Context, signal runtimelifecycleprobe.Signal) {
+	if signal.Kind != runtimelifecycleprobe.EventPersisted || signal.EventType != p.eventType || signal.EventID == "" {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if len(p.ids) == p.expected {
+		return
+	}
+	p.ids[signal.EventID] = struct{}{}
+	if len(p.ids) == p.expected {
+		p.hundredthAt = time.Now()
+		close(p.done)
+	}
+}
+
+func (p *notifyAllChildrenIssuanceProbe) snapshot() (int, time.Time) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return len(p.ids), p.hundredthAt
+}
+
 type gatedNotifyAllChildrenAgent struct {
 	runtimemanager.Agent
 	flowInstance string
@@ -479,111 +510,190 @@ func (g *notifyAllChildrenAgentGate) release(flowInstance string) {
 }
 
 func TestFanOutDeliveryBarrierCompletesThroughRealEventBusAndPublicReadbackOnBothBackends(t *testing.T) {
-	for _, tc := range []struct {
-		name  string
-		setup func(*testing.T) (notifyAllChildrenStore, *sql.DB)
-	}{
-		{
-			name: "postgres",
-			setup: func(t *testing.T) (notifyAllChildrenStore, *sql.DB) {
-				_, db, cleanup := testutil.StartPostgres(t)
-				t.Cleanup(cleanup)
-				return storetest.AdmitPostgresRuntimeStore(t, db), db
+	for _, cardinality := range []int{3, 100} {
+		for _, tc := range []struct {
+			name  string
+			setup func(*testing.T) (notifyAllChildrenStore, *sql.DB)
+		}{
+			{
+				name: "postgres",
+				setup: func(t *testing.T) (notifyAllChildrenStore, *sql.DB) {
+					_, db, cleanup := testutil.StartPostgres(t)
+					t.Cleanup(cleanup)
+					return storetest.AdmitPostgresRuntimeStore(t, db), db
+				},
 			},
-		},
-		{
-			name: "sqlite",
-			setup: func(t *testing.T) (notifyAllChildrenStore, *sql.DB) {
-				selected := storetest.StartSQLiteRuntimeStore(t)
-				return selected, storetest.DatabaseForTest(selected)
+			{
+				name: "sqlite",
+				setup: func(t *testing.T) (notifyAllChildrenStore, *sql.DB) {
+					selected := storetest.StartSQLiteRuntimeStore(t)
+					return selected, storetest.DatabaseForTest(selected)
+				},
 			},
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			selected, db := tc.setup(t)
-			runID := uuid.NewString()
-			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
-			accountIDs := []string{"acct-c", "acct-a", "acct-b"}
-			source := notifyallchildren.LoadSource(t, notifyallchildren.Options{FanOutDeliveryBarrier: true, InitialMembership: &accountIDs})
-			runtime := newNotifyAllChildrenRuntime(
-				t,
-				selected,
-				db,
-				source,
-				time.Now,
-				notifyAllChildrenRuntimeOptions{enableGenericSchedules: true},
-			)
-
-			if err := runNotifyAllChildrenManager(managedConformanceExecutionContextForBundle(t, ctx, "fan-out-delivery-barrier", runtime.sourceArtifactFact), runtime.bus, runtime.manager); err != nil {
-				t.Fatalf("run manager: %v", err)
+		} {
+			name := tc.name
+			if cardinality == 100 {
+				name += "/hundred_settled_outcomes"
 			}
+			t.Run(name, func(t *testing.T) {
+				selected, db := tc.setup(t)
+				runID := uuid.NewString()
+				ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
+				accountIDs := []string{"acct-c", "acct-a", "acct-b"}
+				if cardinality == 100 {
+					accountIDs = make([]string, cardinality)
+					for i := range accountIDs {
+						accountIDs[i] = fmt.Sprintf("acct-%03d", i)
+					}
+				}
+				source := notifyallchildren.LoadSource(t, notifyallchildren.Options{FanOutDeliveryBarrier: true, InitialMembership: &accountIDs})
+				gate := newNotifyAllChildrenAgentGate()
+				opts := notifyAllChildrenRuntimeOptions{enableGenericSchedules: true, realMockAgents: cardinality == 100, agentGate: gate}
+				var issuance *notifyAllChildrenIssuanceProbe
+				if cardinality == 100 {
+					issuance = &notifyAllChildrenIssuanceProbe{
+						eventType: source.ResolveFlowEventReference(notifyallchildren.OwnerFlowID, notifyallchildren.NotifyEvent),
+						expected:  cardinality, ids: make(map[string]struct{}, cardinality), done: make(chan struct{}),
+					}
+					opts.testLifecycleProbe = issuance
+				}
+				runtime := newNotifyAllChildrenRuntime(
+					t,
+					selected,
+					db,
+					source,
+					time.Now,
+					opts,
+				)
 
-			publishNotifyAllChildrenRunCreatingEvent(t, ctx, runtime, source, runID, "portfolio.opened", map[string]any{
-				"portfolio_id": "portfolio-main",
-			})
-			publishNotifyAllChildrenEvent(t, ctx, runtime, source, runID, "portfolio.accounts.register.requested", map[string]any{
-				"portfolio_id": "portfolio-main",
-				"account_ids":  accountIDs,
-			})
-			notifyID := publishNotifyAllChildrenEventAsync(t, ctx, runtime, source, runID, "portfolio.notify.requested", map[string]any{
-				"portfolio_id": "portfolio-main",
-				"command":      "barrier-proof",
-			})
-			waitNotifyAllChildrenRuntime(t, runtime, runID)
+				if err := runNotifyAllChildrenManager(managedConformanceExecutionContextForBundle(t, ctx, "fan-out-delivery-barrier", runtime.sourceArtifactFact), runtime.bus, runtime.manager); err != nil {
+					t.Fatalf("run manager: %v", err)
+				}
 
-			items := loadNotifyAllChildrenItemEvents(t, ctx, selected, runID, notifyID)
-			if len(items) != len(accountIDs) {
-				t.Fatalf("fan-out item events = %#v, want %d", items, len(accountIDs))
-			}
-			operatorStore, ok := selected.(interface {
-				LoadOperatorEvent(context.Context, string) (operatorread.OperatorEventFull, error)
-			})
-			if !ok {
-				t.Fatalf("notify-all-children store %T lacks operator event readback", selected)
-			}
-			for _, item := range items {
-				view, err := operatorStore.LoadOperatorEvent(ctx, item.ID)
+				publishNotifyAllChildrenRunCreatingEvent(t, ctx, runtime, source, runID, "portfolio.opened", map[string]any{
+					"portfolio_id": "portfolio-main",
+				})
+				publishNotifyAllChildrenEvent(t, ctx, runtime, source, runID, "portfolio.accounts.register.requested", map[string]any{
+					"portfolio_id": "portfolio-main",
+					"account_ids":  accountIDs,
+				})
+				var held, heldKey string
+				t.Cleanup(func() { gate.release(held) })
+				if cardinality == 100 {
+					instances, err := runtime.pipeline.ListWorkflowInstances(ctx, runID)
+					if err != nil {
+						t.Fatal(err)
+					}
+					for _, instance := range instances {
+						if instance.WorkflowName == "account" {
+							held = instance.StorageRef
+							heldKey = instance.InstanceKey
+							break
+						}
+					}
+					if held == "" {
+						t.Fatal("hundred-item proof has no constructed account to hold")
+					}
+					gate.block(held)
+				}
+				var issuanceStarted time.Time
+				var issuanceTimer *time.Timer
+				if issuance != nil {
+					issuanceStarted = time.Now()
+					issuanceTimer = time.NewTimer(300 * time.Second)
+					defer issuanceTimer.Stop()
+				}
+				notifyID := publishNotifyAllChildrenEventAsync(t, ctx, runtime, source, runID, "portfolio.notify.requested", map[string]any{
+					"portfolio_id": "portfolio-main",
+					"command":      "barrier-proof",
+				})
+				if held != "" {
+					gate.waitStarted(t, held)
+					select {
+					case <-issuance.done:
+					case <-issuanceTimer.C:
+					}
+					observed, hundredthAt := issuance.snapshot()
+					if !hundredthAt.IsZero() {
+						t.Logf("fan_out_issuance_span start=before_publication committed_items=%d elapsed=%s", observed, hundredthAt.Sub(issuanceStarted))
+					}
+					if observed != cardinality || hundredthAt.IsZero() || hundredthAt.After(issuanceStarted.Add(300*time.Second)) {
+						t.Fatalf("issuance wait exceeded 300s: observed_items=%d (held_account=%q held_instance=%q expected=%d)", observed, heldKey, held, cardinality)
+					}
+					issued := loadNotifyAllChildrenItemEvents(t, ctx, selected, runID, notifyID)
+					if len(issued) != cardinality {
+						t.Fatalf("issuance did not reach hundred-item cut: %d (held_account=%q held_instance=%q expected=%d)", len(issued), heldKey, held, cardinality)
+					}
+					settlement, err := selected.ReadFanOutSettlement(ctx, runID, time.Now().UTC())
+					if err != nil || settlement.Unsettled == 0 || settlement.BarrierArmed == 0 {
+						t.Fatalf("issuance/header census closed a held delivery: %+v %v", settlement, err)
+					}
+					completions, err := storetest.CountRunEventNameStorage(ctx, selected, runID, source.ResolveFlowEventReference(notifyallchildren.OwnerFlowID, "portfolio.notify.completed"))
+					if err != nil || completions != 0 {
+						t.Fatalf("held hundred-item outcome published early: %d %v", completions, err)
+					}
+					gate.release(held)
+				}
+				waitNotifyAllChildrenRuntime(t, runtime, runID)
+
+				items := loadNotifyAllChildrenItemEvents(t, ctx, selected, runID, notifyID)
+				if len(items) != len(accountIDs) {
+					t.Fatalf("fan-out item events = %#v, want %d", items, len(accountIDs))
+				}
+				if cardinality == 100 {
+					assertNotifyAllChildrenItemSequence(t, items, accountIDs)
+					assertNotifyAllChildrenContiguousItemOrdinals(t, items)
+				}
+				operatorStore, ok := selected.(interface {
+					LoadOperatorEvent(context.Context, string) (operatorread.OperatorEventFull, error)
+				})
+				if !ok {
+					t.Fatalf("notify-all-children store %T lacks operator event readback", selected)
+				}
+				for _, item := range items {
+					view, err := operatorStore.LoadOperatorEvent(ctx, item.ID)
+					if err != nil {
+						t.Fatalf("load fan-out item %s: %v", item.ID, err)
+					}
+					allDelivered := len(view.Deliveries) == 2
+					for _, delivery := range view.Deliveries {
+						allDelivered = allDelivered && delivery.Status == string(runtimedelivery.StatusDelivered) && delivery.Terminal
+					}
+					if view.NoDelivery != nil || !allDelivered {
+						t.Fatalf("fan-out item %s public settlement = deliveries:%#v no_delivery:%#v", item.ID, view.Deliveries, view.NoDelivery)
+					}
+				}
+
+				completionID := loadNotifyAllChildrenSingleEventID(t, ctx, selected, db, runID, source.ResolveFlowEventReference(notifyallchildren.OwnerFlowID, "portfolio.notify.completed"))
+				completion, err := operatorStore.LoadOperatorEvent(ctx, completionID)
 				if err != nil {
-					t.Fatalf("load fan-out item %s: %v", item.ID, err)
+					t.Fatalf("load fan-out barrier output: %v", err)
 				}
-				allDelivered := len(view.Deliveries) == 2
-				for _, delivery := range view.Deliveries {
-					allDelivered = allDelivered && delivery.Status == string(runtimedelivery.StatusDelivered) && delivery.Terminal
+				wantPayload := map[string]int{
+					"total": len(accountIDs), "succeeded": len(accountIDs), "dead_lettered": 0,
+					"no_route": 0, "semantic_rejected": 0, "canceled": 0,
 				}
-				if view.NoDelivery != nil || !allDelivered {
-					t.Fatalf("fan-out item %s public settlement = deliveries:%#v no_delivery:%#v", item.ID, view.Deliveries, view.NoDelivery)
+				for field, want := range wantPayload {
+					if got, ok := completion.Payload[field].(float64); !ok || int(got) != want {
+						t.Fatalf("barrier output %s = %#v, want %d; payload=%#v", field, completion.Payload[field], want, completion.Payload)
+					}
 				}
-			}
-
-			completionID := loadNotifyAllChildrenSingleEventID(t, ctx, selected, db, runID, source.ResolveFlowEventReference(notifyallchildren.OwnerFlowID, "portfolio.notify.completed"))
-			completion, err := operatorStore.LoadOperatorEvent(ctx, completionID)
-			if err != nil {
-				t.Fatalf("load fan-out barrier output: %v", err)
-			}
-			wantPayload := map[string]int{
-				"total": len(accountIDs), "succeeded": len(accountIDs), "dead_lettered": 0,
-				"no_route": 0, "semantic_rejected": 0, "canceled": 0,
-			}
-			for field, want := range wantPayload {
-				if got, ok := completion.Payload[field].(float64); !ok || int(got) != want {
-					t.Fatalf("barrier output %s = %#v, want %d; payload=%#v", field, completion.Payload[field], want, completion.Payload)
+				if completion.NoDelivery != nil || len(completion.Deliveries) != 1 || completion.Deliveries[0].SubscriberID != conformanceNode(t, "portfolio", "portfolio-coordinator").Key() || completion.Deliveries[0].Status != string(runtimedelivery.StatusDelivered) || !completion.Deliveries[0].Terminal {
+					t.Fatalf("barrier business output settlement = deliveries:%#v no_delivery:%#v", completion.Deliveries, completion.NoDelivery)
 				}
-			}
-			if completion.NoDelivery != nil || len(completion.Deliveries) != 1 || completion.Deliveries[0].SubscriberID != conformanceNode(t, "portfolio", "portfolio-coordinator").Key() || completion.Deliveries[0].Status != string(runtimedelivery.StatusDelivered) || !completion.Deliveries[0].Terminal {
-				t.Fatalf("barrier business output settlement = deliveries:%#v no_delivery:%#v", completion.Deliveries, completion.NoDelivery)
-			}
-			var status string
-			if err := db.QueryRowContext(ctx, `SELECT status FROM fan_out_obligation_barriers WHERE run_id=$1`, runID).Scan(&status); err != nil {
-				t.Fatal(err)
-			}
-			if status != "fired" {
-				t.Fatalf("fan-out barrier status = %s, want fired", status)
-			}
-			summary, err := selected.FanOutRunSummary(ctx, runID, time.Now().UTC())
-			if err != nil || summary.BarrierArmed != 0 || summary.BarrierPending != 0 || summary.BarrierTerminal != 1 || summary.BlocksCompletion() {
-				t.Fatalf("public fan-out barrier summary = %#v err=%v", summary, err)
-			}
-		})
+				var status string
+				if err := db.QueryRowContext(ctx, `SELECT status FROM fan_out_obligation_barriers WHERE run_id=$1`, runID).Scan(&status); err != nil {
+					t.Fatal(err)
+				}
+				if status != "fired" {
+					t.Fatalf("fan-out barrier status = %s, want fired", status)
+				}
+				summary, err := selected.FanOutRunSummary(ctx, runID, time.Now().UTC())
+				if err != nil || summary.BarrierArmed != 0 || summary.BarrierPending != 0 || summary.BarrierTerminal != 1 || summary.BlocksCompletion() {
+					t.Fatalf("public fan-out barrier summary = %#v err=%v", summary, err)
+				}
+			})
+		}
 	}
 }
 

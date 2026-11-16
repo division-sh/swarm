@@ -41,9 +41,14 @@ type Record struct {
 	CreatedAt               time.Time
 	UpdatedAt               time.Time
 	TerminalAt              *time.Time
+	Await                   *AwaitBinding
 }
 
 func (r Record) Normalized() Record {
+	if r.Await != nil {
+		binding := *r.Await
+		r.Await = &binding
+	}
 	r.ID = strings.TrimSpace(r.ID)
 	r.RunID = strings.TrimSpace(r.RunID)
 	r.RequestEventID = strings.TrimSpace(r.RequestEventID)
@@ -79,6 +84,9 @@ func (r Record) Normalized() Record {
 
 func (r Record) Validate() error {
 	r = r.Normalized()
+	if err := r.validateAwaitBinding(); err != nil {
+		return err
+	}
 	if r.ID == "" || r.RequestEventID == "" || r.SourceRequestEventID == "" || r.RequesterFlowID == "" || r.RequestOutputPin == "" || r.ReplyInputPin == "" || r.ProviderFlowID == "" || r.ProviderInputPin == "" || r.ProviderOutputPin == "" || r.RequestCorrelationID == "" {
 		return fmt.Errorf("reply context requires stable id, request identity, paired topology, and correlation")
 	}
@@ -114,6 +122,18 @@ func (r Record) Validate() error {
 	return nil
 }
 
+func (r Record) validateAwaitBinding() error {
+	if r.Await != nil {
+		if err := r.Await.Validate(); err != nil {
+			return err
+		}
+		if r.Await.ReplyContextID != r.ID || r.Await.RequestEventID != r.RequestEventID || r.Await.RunID != r.RunID || r.Await.OriginLife != r.OriginLife {
+			return fmt.Errorf("reply await binding contradicts its obligation")
+		}
+	}
+	return nil
+}
+
 // SameIdentity reports whether two records describe the same immutable
 // request/reply authority. Lifecycle fields and timestamps may change after
 // creation and therefore are intentionally excluded.
@@ -121,6 +141,7 @@ func (r Record) SameIdentity(other Record) bool {
 	r = r.Normalized()
 	other = other.Normalized()
 	return r.ID == other.ID &&
+		((r.Await == nil && other.Await == nil) || (r.Await != nil && other.Await != nil && *r.Await == *other.Await)) &&
 		r.RunID == other.RunID &&
 		r.RequestEventID == other.RequestEventID &&
 		r.SourceRunID == other.SourceRunID &&

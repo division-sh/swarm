@@ -2,12 +2,17 @@ package serveapp
 
 import (
 	"context"
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
+	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/http/httputil"
 	"net/url"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -22,14 +27,15 @@ import (
 )
 
 func TestQAPublicRawWebhookReadyRouteBothStores(t *testing.T) {
-	runPublicRawWebhookProof(t, false)
+	runPublicRawWebhookProof(t, false, false)
+	t.Run("native_tls", func(t *testing.T) { runPublicRawWebhookProof(t, false, true) })
 }
 
 func TestPublicRawWebhookWithdrawalRefusesBeforePublicationBothStores(t *testing.T) {
-	runPublicRawWebhookProof(t, true)
+	runPublicRawWebhookProof(t, true, false)
 }
 
-func runPublicRawWebhookProof(t *testing.T, withdrawAfterAcquisition bool) {
+func runPublicRawWebhookProof(t *testing.T, withdrawAfterAcquisition, nativeTLS bool) {
 	t.Helper()
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
@@ -56,15 +62,56 @@ func runPublicRawWebhookProof(t *testing.T, withdrawAfterAcquisition bool) {
 			proxy.Transport = http.DefaultTransport
 			origin := httptest.NewTLSServer(proxy)
 			t.Cleanup(origin.Close)
-			priorTransport := http.DefaultTransport
-			http.DefaultTransport = origin.Client().Transport
-			t.Cleanup(func() { http.DefaultTransport = priorTransport })
+			publicOrigin, publicURL := origin.URL, "http://"+publicAddress
 			opts, start := clockDeploymentHarness(t, backend, root)
+			opts.PublicWebhookBaseURL = publicOrigin
+			opts.PublicWebhookListen, opts.PublicWebhookListener = publicAddress, publicListener
+			priorTransport := http.DefaultTransport
+			transport := origin.Client().Transport.(*http.Transport).Clone()
+			if nativeTLS {
+				port := origin.Listener.Addr().(*net.TCPAddr).Port
+				publicAddress = origin.Listener.Addr().String()
+				publicOrigin = fmt.Sprintf("https://example.com:%d", port)
+				publicURL = publicOrigin
+				pair := origin.TLS.Certificates[0]
+				key, err := x509.MarshalPKCS8PrivateKey(pair.PrivateKey)
+				if err != nil {
+					t.Fatal(err)
+				}
+				certPath, keyPath := filepath.Join(t.TempDir(), "cert.pem"), filepath.Join(t.TempDir(), "key.pem")
+				for path, block := range map[string]*pem.Block{
+					certPath: {Type: "CERTIFICATE", Bytes: pair.Certificate[0]},
+					keyPath:  {Type: "PRIVATE KEY", Bytes: key},
+				} {
+					if err := os.WriteFile(path, pem.EncodeToMemory(block), 0600); err != nil {
+						t.Fatal(err)
+					}
+				}
+				body, err := os.ReadFile(opts.ConfigPath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				body = append(body, fmt.Appendf(nil, "\nserve:\n  public_webhook:\n    hostname: example.com\n    port: %d\n    certificate_file: %q\n    private_key_file: %q\n", port, certPath, keyPath)...)
+				if err := os.WriteFile(opts.ConfigPath, body, 0600); err != nil {
+					t.Fatal(err)
+				}
+				origin.Close()
+				if err := publicListener.Close(); err != nil {
+					t.Fatal(err)
+				}
+				opts.PublicWebhookBaseURL, opts.PublicWebhookListen, opts.PublicWebhookListener = "", "", nil
+				transport.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
+					if address == fmt.Sprintf("example.com:%d", port) {
+						address = publicAddress
+					}
+					return (&net.Dialer{}).DialContext(ctx, network, address)
+				}
+			}
+			http.DefaultTransport = transport
+			t.Cleanup(func() { http.DefaultTransport = priorTransport })
+			t.Cleanup(transport.CloseIdleConnections)
 			var inbound inboundpublication.Runner
 			captureSelectedRuntimePersistence(t, func(persistence serveRuntimePersistence) { inbound = persistence.deps.InboundStore })
-			opts.PublicWebhookBaseURL = origin.URL
-			opts.PublicWebhookListen = publicAddress
-			opts.PublicWebhookListener = publicListener
 			runtimes := make(chan *runtimepkg.Runtime, 1)
 			managers := make(chan *runtimepkg.RuntimeContextManager, 1)
 			opts.TestRuntimeReadyHook = func(rt *runtimepkg.Runtime) { runtimes <- rt }
@@ -74,12 +121,20 @@ func runPublicRawWebhookProof(t *testing.T, withdrawAfterAcquisition bool) {
 				if code := process.stop(); code != 0 {
 					t.Errorf("serve cleanup=%d\n%s", code, process.outputString())
 				}
+				if nativeTLS {
+					listener, err := net.Listen("tcp", publicAddress)
+					if err != nil {
+						t.Errorf("native webhook cleanup retained its socket: %v", err)
+					} else {
+						_ = listener.Close()
+					}
+				}
 			})
 			const route = "/webhooks/keyed-shop/partner"
 			foundReady := false
 			lines := strings.Split(process.outputString(), "\n")
 			for index, line := range lines {
-				if strings.Contains(line, origin.URL+route) {
+				if strings.Contains(line, publicOrigin+route) {
 					t.Logf("advertised route: %s", line)
 					if index+1 < len(lines) {
 						capability := strings.TrimSpace(lines[index+1])
@@ -93,12 +148,21 @@ func runPublicRawWebhookProof(t *testing.T, withdrawAfterAcquisition bool) {
 			}
 			api := strings.TrimSuffix(served.Endpoint, "/v1/rpc") + route
 			const body = `{"delivery_id":"public-route-proof","account_id":"account-7"}`
+			if nativeTLS {
+				response, err := http.Post("http://"+publicAddress+route, "application/json", strings.NewReader(body))
+				if err == nil {
+					_ = response.Body.Close()
+					if response.StatusCode != http.StatusBadRequest {
+						t.Fatalf("native webhook accepted plaintext: HTTP %d", response.StatusCode)
+					}
+				}
+			}
 			publicClient := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 			for _, path := range []string{
 				"/v1/rpc", "/healthz", "/readyz", "/mcp", "/tools/", "/webhooks/foreign/partner", "/webhooks/keyed-shop/foreign",
 				"/webhooks/keyed-shop%2fpartner", route + "/", "/" + route, "/webhooks/../v1/rpc",
 			} {
-				response, err := publicClient.Post("http://"+publicAddress+path, "application/json", strings.NewReader(body))
+				response, err := publicClient.Post(publicURL+path, "application/json", strings.NewReader(body))
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -108,7 +172,7 @@ func runPublicRawWebhookProof(t *testing.T, withdrawAfterAcquisition bool) {
 					t.Errorf("public listener exposed foreign route %s: %d", path, response.StatusCode)
 				}
 			}
-			unsigned, err := http.Post("http://"+publicAddress+route, "application/json", strings.NewReader(body))
+			unsigned, err := http.Post(publicURL+route, "application/json", strings.NewReader(body))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -117,7 +181,7 @@ func runPublicRawWebhookProof(t *testing.T, withdrawAfterAcquisition bool) {
 			if unsigned.StatusCode != http.StatusUnauthorized {
 				t.Errorf("public route accepted missing HMAC: %d", unsigned.StatusCode)
 			}
-			for name, endpoint := range map[string]string{"api": api, "public": "http://" + publicAddress + route} {
+			for name, endpoint := range map[string]string{"api": api, "public": publicURL + route} {
 				code, response := a9PostSignedRawIngress(t, endpoint, "wrong-secret", body)
 				t.Logf("%s invalid-signature status=%d body=%s", name, code, response)
 				if code != http.StatusUnauthorized {
@@ -165,7 +229,7 @@ func runPublicRawWebhookProof(t *testing.T, withdrawAfterAcquisition bool) {
 					return binding, validate, err
 				})
 			}
-			tlsCode, tlsReceipt := a9PostSignedRawIngress(t, origin.URL+route, secret, body)
+			tlsCode, tlsReceipt := a9PostSignedRawIngress(t, publicOrigin+route, secret, body)
 			t.Logf("advertised TLS origin signed status=%d body=%s", tlsCode, tlsReceipt)
 			if withdrawAfterAcquisition {
 				if tlsCode != http.StatusServiceUnavailable {
@@ -183,7 +247,7 @@ func runPublicRawWebhookProof(t *testing.T, withdrawAfterAcquisition bool) {
 				if !lookup.Found || lookup.Loaded() || lookup.Cause != runtimepkg.RuntimeContextCauseUnloaded {
 					t.Fatalf("interleaving did not withdraw the actual ingress publication: %+v", lookup)
 				}
-				code, _ := a9PostSignedRawIngress(t, "http://"+publicAddress+route, secret, body)
+				code, _ := a9PostSignedRawIngress(t, publicURL+route, secret, body)
 				if code != http.StatusNotFound {
 					t.Fatalf("unloaded publication still exposed its route: %d", code)
 				}
@@ -205,7 +269,7 @@ func runPublicRawWebhookProof(t *testing.T, withdrawAfterAcquisition bool) {
 			if tlsCode != http.StatusAccepted {
 				t.Errorf("READY public route refused a valid signed request: status=%d, want 202", tlsCode)
 			}
-			publicCode, publicReceipt := a9PostSignedRawIngress(t, "http://"+publicAddress+route, secret, body)
+			publicCode, publicReceipt := a9PostSignedRawIngress(t, publicURL+route, secret, body)
 			wantPublic := http.StatusAccepted
 			if tlsCode == http.StatusAccepted {
 				wantPublic = http.StatusOK

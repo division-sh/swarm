@@ -74,11 +74,16 @@ func TestMailboxSourceAdmissionBeforeReplayAndAtCommitBothStores(t *testing.T) {
 						if kind == "notice" {
 							foreignCause = "source"
 						}
+						missingCause := "source"
+						if kind == decisioncard.AnchorKindStageGate {
+							missingCause = "runtime mutation requires its original generation owner"
+							foreignCause = "runtime mutation context differs from its original grant source"
+						}
 						for _, rejected := range []struct {
 							ctx   context.Context
 							cause string
 						}{
-							{context.Background(), "source"},
+							{context.Background(), missingCause},
 							{correlation.WithSourceArtifactFact(f.ctx, mustServeTestPersistedSourceArtifactFact(unavailable)), foreignCause},
 						} {
 							_, replayed, err := mailboxTokenlessMutation(rejected.ctx, rt, owner, req, params)

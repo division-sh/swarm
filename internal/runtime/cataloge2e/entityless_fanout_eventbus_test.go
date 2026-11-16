@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 	"github.com/google/uuid"
 )
@@ -76,7 +77,87 @@ func TestEntitylessFanOutExecutesThroughDurableEventBusBothStores(t *testing.T) 
 			if got := scatterGatherCounts(t, h, ctx); got["domain_events"] != len(items)+1 || got["entity_state"] != len(items) {
 				t.Fatalf("duplicate changed committed facts: %v", got)
 			}
+			t.Run("fieldless_agent_three_outcomes", func(t *testing.T) {
+				proveFieldlessAgentJoin(t, backend)
+			})
 		})
+	}
+}
+
+func proveFieldlessAgentJoin(t *testing.T, backend catalogRuntimeBackend) {
+	t.Helper()
+	root := t.TempDir()
+	for name, body := range map[string]string{
+		"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":   "stages:\n  awaiting: {}\n  ready: {final: true}\n  failed: {final: true}\ninputs: [work.one, work.two, work.three]\n",
+		"events.yaml":   "work.one:\nwork.two:\nwork.three:\nitem.completed:\n  member_id: text\n  value: text\n",
+		"agents.yaml":   "reporter:\n  model: regular\n  intent: {inline: Report the admitted item.}\n  subscriptions: [work.one, work.two, work.three]\n  emit_events: [item.completed]\n",
+		"nodes.yaml": `collector:
+  item.completed:
+    join:
+      stage: awaiting
+      members: {count: 3, by: payload.member_id}
+      output: payload.value
+      deadline: {after: 1h, from: stage_entry}
+      on_complete: {advances_to: ready}
+      on_deadline: {advances_to: failed}
+`,
+		"tests/fixtures.yaml": `agent_fixtures:
+  reporter:
+    - on: work.one
+      emits: [{event: item.completed, payload: {member_id: a, value: first}}]
+    - on: work.two
+      emits: [{event: item.completed, payload: {member_id: b, value: second}}]
+    - on: work.three
+      emits: [{event: item.completed, payload: {member_id: c, value: third}}]
+`,
+	} {
+		path := filepath.Join(root, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h := newRuntimeHarnessForBackend(t, root, backend, true)
+	ctx := catalogRunContext(h, catalogRuntimeRunID)
+	for i, event := range []string{"work.one", "work.two", "work.three"} {
+		if err := h.publishRuntimeEventResultForStep(catalogTriggerStep{Event: event, Payload: map[string]any{}}, 20*time.Second, true); err != nil {
+			t.Fatal(err)
+		}
+		deadline := time.Now().Add(20 * time.Second)
+		for {
+			instance, found, err := h.workflow.Load(ctx, catalogRootWorkflowRoute())
+			if err != nil || !found || len(instance.Fields) != 0 || instance.EntityType != "" {
+				t.Fatalf("fieldless agent owner: %+v found=%t err=%v", instance, found, err)
+			}
+			buckets, err := joinruntime.PersistedBuckets(instance.StateBuckets)
+			if err != nil {
+				t.Fatal(err)
+			}
+			arms, err := joinruntime.List(buckets)
+			if err != nil || len(arms) != 1 {
+				t.Fatalf("fieldless join arms: %+v %v", arms, err)
+			}
+			arm := arms[0]
+			if arm.Completed() == i+1 && (i != 2 || instance.CurrentState == "ready") {
+				if arm.Expected() != 3 || i < 2 && (arm.Status != joinruntime.StatusOpen || instance.CurrentState != "awaiting") || i == 2 && (arm.Status != joinruntime.StatusClosed || !arm.OutcomeFired || arm.OutcomePending) {
+					t.Fatalf("fieldless settled outcome %d: owner=%+v arm=%+v", i+1, instance, arm)
+				}
+				break
+			}
+			if !time.Now().Before(deadline) {
+				t.Fatalf("agent outcome %d did not settle: owner=%+v arm=%+v", i+1, instance, arm)
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	h.llm.mu.Lock()
+	calls := append([]scriptedDeliveryCall(nil), h.llm.deliveryCalls...)
+	h.llm.mu.Unlock()
+	if len(calls) != 3 {
+		t.Fatalf("fieldless agent executions=%d want=3: %+v", len(calls), calls)
 	}
 }
 

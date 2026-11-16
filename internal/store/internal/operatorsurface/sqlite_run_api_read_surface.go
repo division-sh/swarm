@@ -179,7 +179,8 @@ func (s *RunSQLite) loadRunDebugReport(ctx context.Context, runID string, opts o
 		return operatorread.RunDebugReport{}, err
 	}
 	report.FailedDeliveries = failedDeliveries
-	testQuiescence, err := s.LoadRunTestQuiescence(ctx, header.RunID, s.now())
+	observedAt := s.now()
+	testQuiescence, err := s.LoadRunTestQuiescence(ctx, header.RunID, observedAt)
 	if err != nil {
 		return operatorread.RunDebugReport{}, err
 	}
@@ -200,7 +201,7 @@ func (s *RunSQLite) loadRunDebugReport(ctx context.Context, runID string, opts o
 	}
 	report.RuntimeLogSummary = logSummary
 	report.WarnErrorLogCount = warnErrorCount
-	report.FanOut, err = s.pipeline.FanOutRunSummary(ctx, report.RunID, s.now())
+	report.FanOut, err = s.pipeline.FanOutRunSummary(ctx, report.RunID, observedAt)
 	if err != nil {
 		return operatorread.RunDebugReport{}, fmt.Errorf("load sqlite run fan-out diagnostics: %w", err)
 	}
@@ -208,7 +209,7 @@ func (s *RunSQLite) loadRunDebugReport(ctx context.Context, runID string, opts o
 	report.TestQuiescence.FanOutUnsettled = report.FanOut.Unsettled
 	report.TestQuiescence.FanOutBarriers = report.FanOut.BarrierArmed + report.FanOut.BarrierPending
 	report.TestQuiescence.Ready = runTestQuiescenceReady(report.TestQuiescence)
-	report.OperationalFacts, err = loadRunOperationalEvidence(ctx, s.backend, operatorSQLiteDelivery, s.sources, s.sourceMemo, s.pipeline, s.timers, header, root, report.TestQuiescence, s.now())
+	report.OperationalFacts, err = loadRunOperationalEvidence(ctx, s.backend, operatorSQLiteDelivery, s.sources, s.sourceMemo, s.pipeline, s.timers, header, root, report.TestQuiescence, observedAt)
 	if err != nil {
 		return operatorread.RunDebugReport{}, err
 	}
@@ -250,7 +251,7 @@ func (s *RunSQLite) LoadRunTestQuiescence(ctx context.Context, runID string, obs
 		return operatorread.RunTestQuiescence{}, fmt.Errorf("load sqlite run test quiescence timer obligations: snapshot omitted requested run")
 	}
 	out.DueTimers = runTimers.Totals().DueCount
-	activeSessionLeases, err := s.sqliteRunActiveSessionLeaseCount(ctx, runID)
+	activeSessionLeases, err := s.sqliteRunActiveSessionLeaseCount(ctx, runID, observedAt)
 	if err != nil {
 		return operatorread.RunTestQuiescence{}, err
 	}
@@ -259,7 +260,7 @@ func (s *RunSQLite) LoadRunTestQuiescence(ctx context.Context, runID string, obs
 	return out, nil
 }
 
-func (s *RunSQLite) sqliteRunActiveSessionLeaseCount(ctx context.Context, runID string) (int, error) {
+func (s *RunSQLite) sqliteRunActiveSessionLeaseCount(ctx context.Context, runID string, observedAt time.Time) (int, error) {
 	rows, err := s.backend.QueryContext(ctx, `
 		SELECT lease_expires_at
 		FROM agent_sessions
@@ -273,7 +274,6 @@ func (s *RunSQLite) sqliteRunActiveSessionLeaseCount(ctx context.Context, runID 
 	}
 	defer rows.Close()
 	count := 0
-	now := s.now()
 	for rows.Next() {
 		var raw any
 		if err := rows.Scan(&raw); err != nil {
@@ -283,7 +283,7 @@ func (s *RunSQLite) sqliteRunActiveSessionLeaseCount(ctx context.Context, runID 
 		if err != nil {
 			return 0, err
 		}
-		if ok && expiresAt.After(now) {
+		if ok && expiresAt.After(observedAt) {
 			count++
 		}
 	}

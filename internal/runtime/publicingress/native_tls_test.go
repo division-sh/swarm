@@ -9,6 +9,8 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/pem"
+	"errors"
+	"fmt"
 	"math/big"
 	"net"
 	"net/http"
@@ -16,6 +18,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -60,10 +63,66 @@ func webhookCertificateFixture(t *testing.T, root, hostname string, expiry time.
 func TestNativeTLSSuppliedCertificateUsesOperatorPathsAndRestartOwned(t *testing.T) {
 	root := t.TempDir()
 	settings, _, _, _ := webhookCertificateFixture(t, root, "hooks.example.test", time.Now().Add(90*24*time.Hour))
+	for _, port := range []*int{nil, new(443), new(8443), new(80), new(88), new(65535), new(0), new(-1), new(65536)} {
+		cfg := *settings
+		cfg.Port = port
+		origin, listen, err := NativeTLSAddresses(&cfg)
+		if port != nil && (*port < 1 || *port > 65535) {
+			if err == nil || origin != "" || listen != "" {
+				t.Fatalf("invalid programmatic port admitted: origin=%q listen=%q err=%v", origin, listen, err)
+			}
+			continue
+		}
+		wantOrigin, wantListen := "https://hooks.example.test", ":443"
+		if port != nil && *port != 443 {
+			wantListen = fmt.Sprintf(":%d", *port)
+			wantOrigin += wantListen
+		}
+		if err != nil || origin != wantOrigin || listen != wantListen {
+			t.Fatalf("native projection=%q %q err=%v, want %q %q", origin, listen, err, wantOrigin, wantListen)
+		}
+		callback, err := CallbackURL(Generation{PublicOrigin: origin}, "support", "telegram", "generation")
+		if err != nil || callback != wantOrigin+"/webhooks/support/telegram?swarm_callback_generation=generation" {
+			t.Fatalf("callback lost the exact native origin: %q err=%v", callback, err)
+		}
+	}
 	first, err := NativeTLSConfig(settings, root, root)
 	if err != nil || first.GetCertificate != nil || len(first.Certificates) != 1 {
 		t.Fatalf("supplied TLS must load once without an issuer: config=%v error=%v", first, err)
 	}
+	t.Run("occupied_native_port_preserves_bind_error", func(t *testing.T) {
+		occupied := reserveTestListener(t)
+		cfg := *settings
+		cfg.Port = new(occupied.Addr().(*net.TCPAddr).Port)
+		origin, listen, err := NativeTLSAddresses(&cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		readiness := NewReadinessOwner(true)
+		controller, err := NewController(Options{Mode: ModeNativeTLS, PublicOrigin: origin, ListenAddress: listen,
+			TLSConfig: first, Readiness: readiness, Handler: http.NotFoundHandler(),
+			OnGeneration: func(context.Context, Generation) error { t.Error("failed bind reached registration"); return nil }})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			if err := controller.Stop(ctx); err != nil {
+				t.Error(err)
+			}
+		})
+		err = controller.Start(t.Context())
+		var operation *net.OpError
+		if !errors.Is(err, syscall.EADDRINUSE) || !errors.As(err, &operation) ||
+			readiness.Snapshot(time.Now()).Exposure != nil {
+			t.Fatalf("failed bind lost its native cause or published exposure: %v", err)
+		}
+		want := fmt.Sprintf("Cannot listen for public webhooks on port %d: %s. Choose another port accepted by your webhook provider in serve.public_webhook.port, or ask your administrator to make this port available.", cfg.PortNumber(), operation.Error())
+		if err.Error() != want {
+			t.Fatalf("native bind wording=%q, want %q", err.Error(), want)
+		}
+	})
 	webhookCertificateFixture(t, root, settings.Hostname, time.Now().Add(90*24*time.Hour))
 	second, err := NativeTLSConfig(settings, root, root)
 	if err != nil || bytes.Equal(first.Certificates[0].Certificate[0], second.Certificates[0].Certificate[0]) {

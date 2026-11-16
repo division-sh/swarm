@@ -2317,12 +2317,47 @@ func resolveAuthoredCompositionConnect(source semanticview.Source, connect runti
 		return resolvedCompositionConnect{}, issue
 	}
 	if owner, lca := connectOwnerFlowPath(connect), lowestCommonFlowPath(connectPinFlowPath(from), connectPinFlowPath(to)); owner != lca {
-		return resolvedCompositionConnect{}, ConnectRoutePlanIssue{
-			Connect: connect, Failure: ConnectFailureDeliveryTopologyInvalid,
-			Detail: fmt.Sprintf("connect belongs in %s/schema.yaml, the exact lowest common ancestor of %q and %q", flowSchemaPrefix(lca), connect.From, connect.To),
+		requiredOwner, reselecting := keyedAncestorConnectOwner(source, connect, from, to)
+		if !reselecting {
+			requiredOwner = lca
+		}
+		if owner != requiredOwner {
+			detail := fmt.Sprintf("connect belongs in %s/schema.yaml, the exact lowest common ancestor of %q and %q", flowSchemaPrefix(lca), connect.From, connect.To)
+			if reselecting {
+				detail = fmt.Sprintf("connect belongs in %s/schema.yaml, the lowest owner that can select keyed receiver %q", flowSchemaPrefix(requiredOwner), to.FlowID)
+			}
+			return resolvedCompositionConnect{}, ConnectRoutePlanIssue{
+				Connect: connect, Failure: ConnectFailureDeliveryTopologyInvalid,
+				Detail: detail,
+			}
 		}
 	}
 	return resolvedCompositionConnect{connect: connect, from: from, to: to}, ConnectRoutePlanIssue{}
+}
+
+func keyedAncestorConnectOwner(source semanticview.Source, connect runtimecontracts.FlowConnect, from, to compositionConnectPinRef) (string, bool) {
+	if to.Root || to.Local || !strings.HasPrefix(from.FlowID, to.FlowID+"/") {
+		return "", false
+	}
+	schema, found := source.FlowSchemaByID(to.FlowID)
+	if !found || schema.Instance.Empty() {
+		return "", false
+	}
+	input, found, err := source.ConnectionInputs().Input(connect)
+	if err != nil || !found || input.SourceEvidence().Field.Path() != schema.Instance.Path() {
+		return "", false
+	}
+	bundle, found := semanticview.Bundle(source)
+	if !found || bundle == nil {
+		return "", false
+	}
+	receiver, found := bundle.FlowViewByID(to.FlowID)
+	if !found || receiver.Parent == nil {
+		return "", false
+	}
+	// Reselecting this keyed ancestor crosses exactly its own row. Its
+	// immediate parent is the lowest owner; keyless ancestors add no waiver.
+	return receiver.Parent.Paths.FlowPath, true
 }
 
 func resolveCompositionConnectSource(source semanticview.Source, connect runtimecontracts.FlowConnect) (compositionConnectPinRef, ConnectRoutePlanIssue) {

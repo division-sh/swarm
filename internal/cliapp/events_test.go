@@ -87,6 +87,29 @@ func TestEventsListUsesEventListV1RPC(t *testing.T) {
 	}
 }
 
+func TestEventsListDeadLettersWithoutRunUsesExistingAPI(t *testing.T) {
+	setCLIAPITestToken(t, "test-token")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req jsonRPCRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || r.URL.Path != "/v1/rpc" || r.Header.Get("Authorization") != "Bearer test-token" {
+			t.Errorf("existing API request changed: req=%+v err=%v", req, err)
+			return
+		}
+		want := map[string]any{"filter": map[string]any{"has_dead_letter": true}, "limit": float64(2), "cursor": "position"}
+		if req.Method != eventObservationMethodList || !reflect.DeepEqual(req.Params, want) {
+			t.Errorf("runless list request=%+v want=%+v", req, want)
+			return
+		}
+		writeJSONRPCResult(t, w, req.ID, map[string]any{"events": []any{validEventObservationEvent("event-dead")}})
+	}))
+	defer server.Close()
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(t.Context(), t.TempDir(), []string{"event", "list", "--has-dead-letter", "--limit", "2", "--cursor", "position"}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != 0 || stderr.Len() != 0 || !strings.Contains(stdout.String(), "event-dead") || !strings.Contains(stdout.String(), "EVENT AT") {
+		t.Fatalf("existing list rendering changed: code=%d stdout=%s stderr=%s", code, &stdout, &stderr)
+	}
+}
+
 func TestEventReadbackConsumesCanonicalProducerKinds(t *testing.T) {
 	for _, producer := range []string{"node", "agent", "platform", "external", "instance", "unknown", "instance-extra", " instance "} {
 		t.Run(producer, func(t *testing.T) {

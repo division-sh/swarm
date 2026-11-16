@@ -9,24 +9,28 @@ import (
 )
 
 func insertReplyContextRow(ctx context.Context, tx *sql.Tx, record replycontext.Record, origin []byte, postgres bool) (sql.Result, error) {
+	binding, err := record.EncodeAwaitBinding()
+	if err != nil {
+		return nil, err
+	}
 	query := `INSERT INTO reply_contexts (
 		reply_context_id, run_id, request_event_id, requester_flow_id,
 		request_output_pin, reply_input_pin, provider_flow_id,
 		provider_input_pin, provider_output_pin, origin_route,
 		request_correlation_id, correlation_key, state,
 		accepted_reply_event_id, created_at, updated_at, terminal_at,
-		source_run_id, source_request_event_id, enclosing_reply_context_id, source_run_owner_key
+		source_run_id, source_request_event_id, enclosing_reply_context_id, await_binding, source_run_owner_key
 	) VALUES (
 		$1, NULLIF($2, '')::uuid, $3::uuid, $4, $5, $6, $7, $8, $9, $10::jsonb,
 		$11, NULLIF($12, ''), $13, NULLIF($14, '')::uuid, $15, $16, $17,
-		NULLIF($18, '')::uuid, $19::uuid, NULLIF($20, ''), COALESCE('run:' || CAST(NULLIF($18, '')::uuid AS TEXT), '')
+		NULLIF($18, '')::uuid, $19::uuid, NULLIF($20, ''), $21::jsonb, COALESCE('run:' || CAST(NULLIF($18, '')::uuid AS TEXT), '')
 	) ON CONFLICT DO NOTHING`
 	args := []any{record.ID, record.RunID, record.RequestEventID, record.RequesterFlowID,
 		record.RequestOutputPin, record.ReplyInputPin, record.ProviderFlowID,
 		record.ProviderInputPin, record.ProviderOutputPin, string(origin),
 		record.RequestCorrelationID, record.CorrelationKey, string(record.State),
 		record.AcceptedReplyEventID, record.CreatedAt, record.UpdatedAt, record.TerminalAt,
-		record.SourceRunID, record.SourceRequestEventID, record.EnclosingReplyContextID}
+		record.SourceRunID, record.SourceRequestEventID, record.EnclosingReplyContextID, binding}
 	if !postgres {
 		query = `INSERT INTO reply_contexts (
 			reply_context_id, run_id, request_event_id, requester_flow_id,
@@ -34,9 +38,9 @@ func insertReplyContextRow(ctx context.Context, tx *sql.Tx, record replycontext.
 			provider_input_pin, provider_output_pin, origin_route,
 			request_correlation_id, correlation_key, state,
 			accepted_reply_event_id, created_at, updated_at, terminal_at,
-			source_run_id, source_request_event_id, enclosing_reply_context_id, source_run_owner_key
+			source_run_id, source_request_event_id, enclosing_reply_context_id, await_binding, source_run_owner_key
 		) VALUES (?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, NULLIF(?, ''), ?, ?, ?,
-		NULLIF(?, ''), ?, NULLIF(?, ''), COALESCE('run:' || NULLIF(?, ''), '')) ON CONFLICT DO NOTHING`
+		NULLIF(?, ''), ?, NULLIF(?, ''), ?, COALESCE('run:' || NULLIF(?, ''), '')) ON CONFLICT DO NOTHING`
 		args = append(args, record.SourceRunID)
 	}
 	return tx.ExecContext(ctx, query, args...)

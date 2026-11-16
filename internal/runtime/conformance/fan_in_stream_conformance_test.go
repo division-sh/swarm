@@ -134,6 +134,46 @@ func TestKeyedPortfolioStreamRoutesAndRetainsIndependentPeriodsOnBothStores(t *t
 					t.Fatalf("public source projection %s: view=%#v err=%v", id, view, err)
 				}
 			}
+			t.Run("three_whole_reports", func(t *testing.T) {
+				third, fourth := request("2026-Q1", 200), request("2026-Q1", 400)
+				before := load("2026-Q1")
+				carrier, err := runtimeengine.StateCarrierFromPersisted(before.Fields, before.Bookkeeping, before.StateBuckets)
+				if err != nil {
+					t.Fatal(err)
+				}
+				reports, ok := carrier.Fields["reports"].(map[string]any)
+				if !ok || len(reports) != 3 {
+					t.Fatalf("three whole reports = %#v", carrier.Fields)
+				}
+				accumulated, ok := carrier.Fields["operating_reports"].([]any)
+				if !ok || len(accumulated) != 3 {
+					t.Fatalf("whole-report accumulation = %#v", carrier.Fields["operating_reports"])
+				}
+				seen := map[string]bool{}
+				for _, value := range accumulated {
+					row, ok := value.(map[string]any)
+					id, _ := row["operating_id"].(string)
+					if !ok || id == "" || seen[id] || !reflect.DeepEqual(row, reports[id]) {
+						t.Fatalf("whole-report accumulation differs from retained report: %#v", value)
+					}
+					seen[id] = true
+				}
+				for id, revenue := range map[string]int64{first: 100, third: 200, fourth: 400} {
+					row, ok := reports[id].(map[string]any)
+					if !ok || !reflect.DeepEqual(row, map[string]any{"operating_id": id, "period_id": "2026-Q1", "revenue": revenue}) {
+						t.Fatalf("whole report %s = %#v", id, reports[id])
+					}
+				}
+				if err := runtime.bus.PublishAcknowledged(ctx, original); err != nil {
+					t.Fatal(err)
+				}
+				if after := load("2026-Q1"); !reflect.DeepEqual(before, after) {
+					t.Fatal("publication duplicate changed three retained business reports")
+				}
+				if after := load("2026-Q2"); !reflect.DeepEqual(q2, after) {
+					t.Fatal("three-report period mutated the sibling period")
+				}
+			})
 		})
 	}
 }

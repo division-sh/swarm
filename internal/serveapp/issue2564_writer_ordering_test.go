@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -196,6 +197,83 @@ func TestIssue2564ServedM33NonterminalDeadlineLateResultBothStores(t *testing.T)
 				t.Log("D4 target: working -> review, both NONTERMINAL. Terminal implicit retirement remains #2269; no terminate/timeout/canceled semantics tested or changed.")
 			})
 		}
+		t.Run(backend+"/final_late_no_route", func(t *testing.T) {
+			root := writeIssue2564Fixture(t, true)
+			path := filepath.Join(root, "hub", "schema.yaml")
+			raw, err := os.ReadFile(path)
+			if err != nil || strings.Count(string(raw), "  review: {}") != 1 {
+				t.Fatalf("final-stage late-result fixture: %s %v", raw, err)
+			}
+			body := strings.Replace(string(raw), "  review: {}", "  review: {final: true}", 1)
+			if err := os.WriteFile(path, []byte(body), 0600); err != nil {
+				t.Fatal(err)
+			}
+			p := newIssue2564Provider(t, "a")
+			p.scripts["a"] = []*issue2564ProviderStep{
+				newIssue2564Step(issue2564Call{"emit_hub_result", map[string]any{"hub_id": "late", "value": "late"}}),
+				newIssue2564Step(),
+			}
+			timer := make(chan struct{})
+			var once sync.Once
+			release := func() { once.Do(func() { close(timer) }) }
+			defer release()
+			_, rt := startIssue2564Served(t, backend, root, p, nil, issue2564StageTimerPublicationGate{release: timer})
+			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "hub.start", "bundle_hash": rt.BundleHash, "payload": map[string]any{"hub_id": "late"}, "idempotency_key": "late-start"})
+			entityID := rt.waitEntityStage(t, seed.RunID, "", "idle")
+			requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "hub.begin", "run_id": seed.RunID, "payload": map[string]any{"hub_id": "late"}, "idempotency_key": "late-begin"})
+			p.wait(t, "a", 0)
+			release()
+			rt.waitEntityStage(t, seed.RunID, entityID, "review")
+			before := issue2564Entity(t, rt, seed.RunID, entityID)
+			beforeRows, err := storetest.ReadReceiverDeliveryStorage(t.Context(), rt.selected, seed.RunID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			beforeDeliveries := make(map[string][2]string, len(beforeRows))
+			for _, row := range beforeRows {
+				beforeDeliveries[row.DeliveryID] = [2]string{row.EventID, row.Target}
+			}
+			if len(beforeDeliveries) == 0 {
+				t.Fatal("late-result fixture has no accepted deliveries")
+			}
+			p.release("a", 0)
+			p.release("a", 1)
+			rt.waitDeliveries(t, seed.RunID)
+			afterRows, err := storetest.ReadReceiverDeliveryStorage(t.Context(), rt.selected, seed.RunID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			afterDeliveries := make(map[string][2]string, len(afterRows))
+			for _, row := range afterRows {
+				afterDeliveries[row.DeliveryID] = [2]string{row.EventID, row.Target}
+			}
+			if !reflect.DeepEqual(beforeDeliveries, afterDeliveries) {
+				t.Fatalf("late no-route changed run deliveries: before=%+v after=%+v", beforeDeliveries, afterDeliveries)
+			}
+			var diagnosis struct {
+				Instances []operatorread.RunInstanceOperationalStatus `json:"instances"`
+			}
+			requireServedJSONRPCResult(t, rt.Endpoint, "run.diagnose", map[string]any{"run_id": seed.RunID}, &diagnosis)
+			var refused operatorread.RunInstanceOperationalStatus
+			matches := 0
+			for _, instance := range diagnosis.Instances {
+				if instance.FlowInstance == before.Entity.FlowInstance {
+					refused = instance
+					matches++
+				}
+			}
+			if matches != 1 || refused.RefusedEmits != 1 {
+				t.Fatalf("late no-route public instance count: matches=%d instance=%+v\n%s", matches, refused, rt.debug(t, seed.RunID))
+			}
+			after := issue2564Entity(t, rt, seed.RunID, entityID)
+			if !reflect.DeepEqual(before, after) {
+				t.Fatalf("late no-route changed final receiver: before=%+v after=%+v", before, after)
+			}
+			status, err := storetest.ReadRuntimeLogRunSnapshot(t.Context(), rt.selected, seed.RunID)
+			if err != nil || status.Failure != nil {
+				t.Fatalf("ordinary late no-route failed the run: %+v err=%v", status, err)
+			}
+		})
 	}
 }
 

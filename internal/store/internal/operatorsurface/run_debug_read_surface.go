@@ -284,7 +284,12 @@ func (s *RunPostgres) loadRunDebugReport(ctx context.Context, runID string, opts
 		return operatorread.RunDebugReport{}, err
 	}
 	report.FailedDeliveries = failedDeliveries
-	testQuiescence, err := s.LoadRunTestQuiescence(ctx, report.RunID, time.Now().UTC())
+	var observedAt time.Time
+	if err := s.backend.QueryRowContext(ctx, `SELECT CURRENT_TIMESTAMP`).Scan(&observedAt); err != nil {
+		return operatorread.RunDebugReport{}, fmt.Errorf("load selected-store observation time: %w", err)
+	}
+	observedAt = observedAt.UTC()
+	testQuiescence, err := s.LoadRunTestQuiescence(ctx, report.RunID, observedAt)
 	if err != nil {
 		return operatorread.RunDebugReport{}, err
 	}
@@ -431,7 +436,7 @@ func (s *RunPostgres) loadRunDebugReport(ctx context.Context, runID string, opts
 	if err := s.loadRunDebugRuntimeLogs(ctx, report.RunID, opts, &report); err != nil {
 		return operatorread.RunDebugReport{}, err
 	}
-	report.FanOut, err = s.pipeline.FanOutRunSummary(ctx, report.RunID, time.Now().UTC())
+	report.FanOut, err = s.pipeline.FanOutRunSummary(ctx, report.RunID, observedAt)
 	if err != nil {
 		return operatorread.RunDebugReport{}, fmt.Errorf("load run fan-out diagnostics: %w", err)
 	}
@@ -440,7 +445,7 @@ func (s *RunPostgres) loadRunDebugReport(ctx context.Context, runID string, opts
 	report.TestQuiescence.FanOutBarriers = report.FanOut.BarrierArmed + report.FanOut.BarrierPending
 	report.TestQuiescence.Ready = runTestQuiescenceReady(report.TestQuiescence)
 
-	report.OperationalFacts, err = loadRunOperationalEvidence(ctx, s.backend, operatorPostgresDelivery, s.sources, s.sourceMemo, s.pipeline, s.timers, header, root, report.TestQuiescence, time.Now().UTC())
+	report.OperationalFacts, err = loadRunOperationalEvidence(ctx, s.backend, operatorPostgresDelivery, s.sources, s.sourceMemo, s.pipeline, s.timers, header, root, report.TestQuiescence, observedAt)
 	if err != nil {
 		return operatorread.RunDebugReport{}, err
 	}

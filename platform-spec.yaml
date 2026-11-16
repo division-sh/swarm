@@ -656,16 +656,11 @@ contract_formats:
         Ordinary handlers are eligible in every non-final stage; independent
         loop/join/guard/gate/timer carrier restrictions remain in force.
       services: >
-        A flow without final stages is a valid service and never completes.
-        Finite run.start refuses a service in its canonical construction/routing
-        closure before creating a run, event, data, feed or receipt. Include the
-        selected root, eagerly constructed keyless descendants and reachable
-        instance-bearing receivers/templates with their constructor children.
-        Stateless does not imply an exempt container. Unknown or contradictory
-        catalog evidence fails closed. The diagnostic names the offending flow
-        and says: this flow never completes; use `serve`, or mark its end stages
-        `final`. Standing/schedule/serve owners and existing-run event.publish
-        are separate; idempotent committed receipt replay remains authoritative.
+        A flow without final stages keeps its instances alive until they are
+        explicitly ended. Serve owns the deployment's live flows; run.start
+        publishes events or rows into them, without a finite-start refusal for
+        a flow without final stages. Idempotent committed receipt replay remains
+        authoritative.
       stateless_form: >
         `stages: []` is the explicit stateless form for staged bundles.
       retired_legacy_authoring: >
@@ -1816,7 +1811,7 @@ contract_formats:
       typed_pubsub: 'Typed pub/sub routing derives from subscriptions — agents.yaml subscriptions,
         direct nodes.yaml handler keys. The platform matches canonical event identity
         only within one exact flow identity. Canonical name equality and filesystem ancestry never authorize cross-flow delivery.'
-      inter_flow_connect: Between flows, authored topology derives only from exact least-common-ancestor schema connect entries over output and input pins. Output pins declare event identity and producer interface evidence, keyed receivers declare one scalar instance identity field, and each LCA connect owns its explicit ordinary resolution mode and key_from exception. Omission derives the same-named typed payload source; explicitly spelling that source is redundant and refused. The immutable compiled connection lowers these facts into route plans. See flow_model.composition_routing and engine.cross_flow_routing. Qualified exact subscriptions and slash-qualified wildcard subscriptions cannot cross a flow boundary; authors must declare output/input pins and connect in the nearest common ancestor schema.yaml.
+      inter_flow_connect: Between flows, authored topology derives from least-common-ancestor schema connect entries over output and input pins, with the proper-descendant keyed-ancestor selection exception defined under parent_connect. Output pins declare event identity and producer interface evidence, keyed receivers declare one scalar instance identity field, and each LCA connect owns its explicit ordinary resolution mode and key_from exception. Omission derives the same-named typed payload source; explicitly spelling that source is redundant and refused. The immutable compiled connection lowers these facts into route plans. See flow_model.composition_routing and engine.cross_flow_routing. Qualified exact subscriptions and slash-qualified wildcard subscriptions cannot cross a flow boundary; authors must declare output/input pins and connect in the nearest common ancestor schema.yaml.
       input_source_resolution:
         canonical_owner: internal/runtime/core/pinrouting.ResolveFlowInputProducer
         rule: |
@@ -3660,9 +3655,9 @@ state_machine_authority:
       outcomes advance, emit, or write data and whether it owns a deadline;
       stage-free fan-out delivery joins retain their separate semantics. Final entry alone
       cancels no accepted work, revokes no acknowledged writes, and creates no
-      resource-cleanup authority. No-final flows are valid services that never
-      complete; finite run.start rejects their selected constructor/route
-      closure before creation, including independently selected feed receivers.
+      resource-cleanup authority. A flow without final stages keeps its instances
+      alive until explicitly ended; run.start publishes into the served live flow
+      without a finite-start refusal for that flow or its selected receivers.
     not_field_presence_authority: |
       A lifecycle state name alone does not assign a field or synthesize
       its value. Definite-assignment analysis consumes the existing compiled
@@ -12970,7 +12965,7 @@ tool_model:
       modes:
         managed_quick_tunnel: '`swarm serve --dev --expose`; requires parseable cloudflared semver >= 2021.7.0, a Swarm-owned empty temporary config, exact `/ready` and `/quicktunnel` endpoint admission, and one `*.trycloudflare.com` hostname'
         external_origin: '`swarm serve --public-webhook-base-url <https-origin> --public-webhook-listen <explicit-loopback-host:port>` under either retained plain serve or development serve; it uses the invocation''s selected-store posture without changing its lifetime'
-        native_tls: 'Optional deployment configuration serve.public_webhook selects serve-owned HTTPS on public port 443 for one configured hostname; conflicts with --expose and --public-webhook-*; absence preserves existing modes.'
+        native_tls: 'Optional deployment configuration serve.public_webhook selects serve-owned HTTPS for one configured hostname; port is an optional integer from 1 to 65535, defaults to 443 only when omitted, and requires a restart to change. Every port uses HTTPS. Default and explicit 443 are omitted from the advertised origin; other ports are included. Conflicts with --expose and --public-webhook-*; absence preserves existing modes.'
       native_tls_certificates: >
         A complete supplied certificate_file/private_key_file pair is read once from operator-named paths,
         relative to the captured CLI invocation directory or absolute anywhere readable by serve, following ordinary
@@ -12978,6 +12973,12 @@ tool_model:
         supplied material never falls back to automatic issuance. Without the pair, unchanged autocert uses one
         hostname, its state-directory public-webhook-certs cache, Let's Encrypt defaults and accepted terms, with
         contact only when email is configured. No certificate upload to Telegram or self-signed generation is provided.
+        Automatic certificates still require public port 443 to reach this same manager's TLS-ALPN handler intact;
+        a different local port does not change that requirement. Ordinary TLS termination elsewhere is the existing
+        proxy mode, not challenge pass-through. No extra challenge socket or forwarding is provided.
+        Deployment admission refuses a selected Telegram webhook channel outside ports 443, 80, 88 and 8443.
+        Installed inventory, dormant unselected registrations and outbound-only bindings do not select a webhook.
+        No generic per-provider port table is introduced; other providers' acceptance remains provider-owned.
         Automatic issuance/renewal work is library-owned, not joined on same-process teardown; process exit ends local
         work but cannot recall an already-sent CA request. Cold issuance can exceed the unchanged startup window.
         Native TLS exposure proofs use a fresh verified TCP/TLS connection without pooled or resumed sessions on
@@ -15334,9 +15335,10 @@ flow_model:
             inputs:
               - deploy.completed
       parent_connect:
-        location: schema.yaml connect at the exact least common ancestor FlowNode
+        location: 'schema.yaml connect at the exact declared-path least common ancestor, except for a proper descendant addressing another instance of a keyed ancestor: that connection belongs at the keyed receiver''s immediate structural parent and selects the receiver through its existing admitted per-edge key source.'
         canonical_form: |
           `connect` is a list of event-centric structured connections. Each entry is owned by the exact FlowNode containing its schema.yaml and names one source event visible in that flow, one producer flow, one receiver flow, and optional receiver-event rename. `from` and `to` contain exact flow IDs visible from that authoring FlowNode; `.` is the sole sentinel for the authoring flow. They never contain pin identities, runtime instance paths, or guessed event spellings.
+          A keyless intermediate owner does not authorize moving the row higher. A selector on another producer/event/branch is not evidence for this row. Lexically bound ancestors remain bound; their keys are not supplied again.
         fields:
           event: |
             Required exact canonical source event identity visible in the flow authoring this row. It must pass the canonical event-name grammar as authored; leading or trailing slash aliases are invalid and are never normalized into acceptance.
@@ -18288,6 +18290,7 @@ platform_tables:
             completion_projection_phase TEXT CHECK (completion_projection_phase IS NULL OR completion_projection_phase IN ('response_settled', 'conversation_projected', 'response_consumed')),
             completion_continuation_active BOOLEAN NOT NULL DEFAULT FALSE,
             completion_successor_turn JSONB,
+            completion_tool_progress JSONB,
             evidence           JSONB NOT NULL DEFAULT '{}',
             failure            JSONB,
             authorized_at      TIMESTAMPTZ NOT NULL,
@@ -18642,6 +18645,7 @@ platform_tables:
             source_request_event_id UUID NOT NULL REFERENCES events(event_id),
             source_run_owner_key    TEXT NOT NULL,
             enclosing_reply_context_id TEXT REFERENCES reply_contexts(reply_context_id),
+            await_binding           JSONB,
             requester_flow_id       TEXT NOT NULL,
             request_output_pin      TEXT NOT NULL,
             reply_input_pin         TEXT NOT NULL,
@@ -24158,6 +24162,7 @@ configuration_source_authority:
             api_token_file: secret_reference
             public_webhook:
               hostname: one_configured_dns_hostname
+              port: optional_integer_1_to_65535_omitted_defaults_443
               certificate_file: optional_operator_file_path_paired_with_private_key_file
               private_key_file: optional_operator_secret_file_path_paired_with_certificate_file
               email: optional_acme_contact
@@ -33894,8 +33899,13 @@ api_specification:
       EventListFilter:
         type: object
         additionalProperties: false
-        required:
-        - run_id
+        anyOf:
+        - required: [run_id]
+        - required: [has_dead_letter]
+          properties:
+            has_dead_letter: {const: true}
+          not:
+            required: [run_id]
         properties:
           run_id:
             $ref: '#/components/schemas/OpaqueId'
@@ -39551,8 +39561,12 @@ api_specification:
 
         has_dead_letter and reason_code filters; no separate dead_letter.*
 
-        namespace in v1. Multi-bundle-safe reads require explicit filter.run_id;
-        unscoped event firehose reads are not a public v1 surface.
+        namespace in v1. Reads require explicit filter.run_id except when run_id
+        is omitted and has_dead_letter is explicitly true. That exception lists
+        only events with retained dead letters across the selected deployment.
+        Supplied null or blank run_id does not activate the exception. Authentication,
+        EventFull fields, filters and pagination are unchanged; ordinary unscoped
+        event firehose reads are not a public v1 surface.
 
         '
       scope:
@@ -39630,7 +39644,9 @@ api_specification:
       - name: filter
         required: true
         schema:
-          $ref: '#/components/schemas/EventListFilter'
+          allOf:
+          - $ref: '#/components/schemas/EventListFilter'
+          - required: [run_id]
       - name: replay_since
         required: false
         description: Optional catch-up window. If present, delivers events from this time forward, then continues live. Subject
