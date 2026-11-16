@@ -1,4 +1,4 @@
-package runforkpersistence
+package pipelinepersistence
 
 import (
 	"context"
@@ -14,7 +14,7 @@ type SelectedForkStorageTableSnapshot struct {
 	Rows    []string
 }
 
-func (s *RunForkPostgresOwner) ReadSelectedForkRecoveredStorageSnapshotForTest(ctx context.Context, runID string) (map[string]SelectedForkStorageTableSnapshot, error) {
+func (s *PipelinePostgresOwner) ReadSelectedForkRecoveredStorageSnapshotForTest(ctx context.Context, runID string) (map[string]SelectedForkStorageTableSnapshot, error) {
 	var snapshot map[string]SelectedForkStorageTableSnapshot
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
@@ -27,7 +27,7 @@ func (s *RunForkPostgresOwner) ReadSelectedForkRecoveredStorageSnapshotForTest(c
 	return snapshot, nil
 }
 
-func (s *RunForkSQLiteOwner) ReadSelectedForkRecoveredStorageSnapshotForTest(ctx context.Context, runID string) (map[string]SelectedForkStorageTableSnapshot, error) {
+func (s *PipelineSQLiteOwner) ReadSelectedForkRecoveredStorageSnapshotForTest(ctx context.Context, runID string) (map[string]SelectedForkStorageTableSnapshot, error) {
 	var snapshot map[string]SelectedForkStorageTableSnapshot
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var err error

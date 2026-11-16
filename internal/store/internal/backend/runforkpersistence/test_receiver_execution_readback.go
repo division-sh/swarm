@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 
+	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
+	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
 	"github.com/google/uuid"
 )
 
@@ -97,9 +99,9 @@ func readSelectedForkReceiverExecutionProofTx(ctx context.Context, tx *sql.Tx, r
 	return out, nil
 }
 
-func (s *RunForkPostgresOwner) ReadSelectedForkReceiverExecutionProofForTest(ctx context.Context, req SelectedForkReceiverExecutionProofRequest) (SelectedForkReceiverExecutionProof, error) {
+func ReadPostgresSelectedForkReceiverExecutionProofForTest(ctx context.Context, backend *postgresbackend.Backend, req SelectedForkReceiverExecutionProofRequest) (SelectedForkReceiverExecutionProof, error) {
 	var out SelectedForkReceiverExecutionProof
-	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
+	err := backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
 		out, err = readSelectedForkReceiverExecutionProofTx(ctx, tx, req)
 		return err
@@ -110,9 +112,9 @@ func (s *RunForkPostgresOwner) ReadSelectedForkReceiverExecutionProofForTest(ctx
 	return out, nil
 }
 
-func (s *RunForkSQLiteOwner) ReadSelectedForkReceiverExecutionProofForTest(ctx context.Context, req SelectedForkReceiverExecutionProofRequest) (SelectedForkReceiverExecutionProof, error) {
+func ReadSQLiteSelectedForkReceiverExecutionProofForTest(ctx context.Context, backend *sqlitebackend.Backend, req SelectedForkReceiverExecutionProofRequest) (SelectedForkReceiverExecutionProof, error) {
 	var out SelectedForkReceiverExecutionProof
-	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
+	err := backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
 		out, err = readSelectedForkReceiverExecutionProofTx(ctx, tx, req)
 		return err
