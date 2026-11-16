@@ -23,6 +23,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/runtime/timerobligation"
 	"github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store"
@@ -39,10 +40,11 @@ func verifyAbsentSQLiteStoreCause(err error) *bootverify.AdmissionNotRunCause {
 }
 
 type serveStoreInspection struct {
-	selection storebackend.Selection
-	dryRun    bool
-	input     **storeselected.BootCheckInput
-	reset     *destructivereset.Operation
+	selection    storebackend.Selection
+	dryRun       bool
+	input        **storeselected.BootCheckInput
+	reset        *destructivereset.Operation
+	construction *bootverify.ConstructionTarget
 }
 
 func inspectVerifySelectedStore(ctx context.Context, repo string, paths CLISourcePaths, cfg RuntimeConfigLoadResult, swarmDir cliSwarmDirOptions, source semanticview.Source, opts runtime.WorkflowContractValidationOptions, packBases packartifact.PlatformPackBaseResolver, workspaces workspace.Resolver, workspaceOK bool, result *runtime.WorkflowContractValidationResult, serve ...serveStoreInspection) *verifyRetainedAdmissionInventory {
@@ -86,7 +88,13 @@ func inspectVerifySelectedStore(ctx context.Context, repo string, paths CLISourc
 		accountVerifyStoreAccessFailure(result, subject)
 		return nil
 	}
-	if len(serve) != 0 && serve[0].dryRun {
+	if len(serve) != 0 && serve[0].construction != nil {
+		result.BootReport.Observations = append(result.BootReport.Observations, bootverify.AdmissionObservation{
+			CheckID: "startup_process_possession", Owner: "internal/store/construction", Subject: subject,
+			Class: bootverify.AdmissionDeploymentObservation, Status: bootverify.AdmissionNotApplicable,
+			Reason: "the native constructor retains physical exclusion; no separate availability probe is performed and no process generation has been admitted",
+		})
+	} else if len(serve) != 0 && serve[0].dryRun {
 		result.BootReport.Observations = append(result.BootReport.Observations, bootverify.AdmissionObservation{
 			CheckID: "startup_process_possession", Owner: "internal/store/selected.AdmissionInspection.ProbePossession", Subject: subject,
 			Class: bootverify.AdmissionDeploymentObservation, Status: bootverify.AdmissionNotApplicable,
@@ -135,7 +143,7 @@ func inspectVerifySelectedStore(ctx context.Context, repo string, paths CLISourc
 	if !tailAccounted {
 		blockVerifyStoreTail(result, subject, "selected store schema inspection did not complete")
 	}
-	if retained != nil && (len(serve) == 0 || serve[0].reset == nil) {
+	if retained != nil && (len(serve) == 0 || serve[0].reset == nil || serve[0].reset.Cleanup != nil) {
 		inspectVerifyRetainedDependencies(ctx, retained, schemaOK, cfg, source, opts, workspaces, workspaceOK, result)
 	}
 	return retained
@@ -179,6 +187,12 @@ func inspectVerifyAdmissionSnapshot(ctx context.Context, snapshot *storeselected
 			return nil, false, err
 		}
 		if serve[0].reset != nil {
+			if serve[0].reset.Cleanup != nil {
+				if _, err := inspectServeResetDiscard(ctx, snapshot, *serve[0].reset); err != nil {
+					return nil, false, err
+				}
+				return inspectVerifyRecoverySnapshot(ctx, snapshot, repo, paths, cfg, source, opts, packBases, result), true, nil
+			}
 			retained, err := inspectServeResetSnapshot(ctx, snapshot, *serve[0].reset, cfg.Config.Runtime.RecoveryOnStartup, result)
 			return retained, true, err
 		}
@@ -246,6 +260,10 @@ func inspectVerifyRecoverySnapshot(ctx context.Context, snapshot *storeselected.
 	retained := &verifyRetainedAdmissionInventory{}
 	hash := result.BootReport.SourceArtifactHash
 	subject := "source:" + hash
+	var emptySourceErr error
+	if source == nil {
+		emptySourceErr = inspectServeEmptySourcePopulation(ctx, snapshot)
+	}
 	verifyDeploymentObservation(ctx, result, "startup_process_generation", "internal/runtime/startupownership.AdmitAuthorityInspection", subject, failures.ClassLifecycleConflict, func(ctx context.Context) error {
 		inspection, err := snapshot.InspectAuthority(ctx)
 		if err != nil {
@@ -254,11 +272,24 @@ func inspectVerifyRecoverySnapshot(ctx context.Context, snapshot *storeselected.
 		return startupownership.AdmitAuthorityInspection(inspection)
 	})
 	verifyDeploymentObservation(ctx, result, "pinned_source_admission", "internal/runtime/runbundle.AdmitPinnedSources", subject, failures.ClassLifecycleConflict, func(ctx context.Context) error {
+		if source == nil {
+			return emptySourceErr
+		}
 		_, err := PrepareBundleUpgrade(ctx, snapshot, snapshot, repo, source, packBases)
 		return err
 	})
 	inspectVerifyRetainedSources(ctx, snapshot, repo, subject, packBases, result)
 	verifyDeploymentObservation(ctx, result, "startup_recovery_admission", "internal/runtime.InspectStartupRecoveryAdmission", subject, failures.ClassDependencyUnavailable, func(ctx context.Context) error {
+		if source == nil {
+			if emptySourceErr != nil {
+				return emptySourceErr
+			}
+			timers, err := snapshot.ReadTimerObligations(ctx, timerobligation.All(), time.Now().UTC())
+			if err != nil {
+				return err
+			}
+			return runtime.InspectSurvivingTimerRecoveryAdmission(ctx, timers, cfg.Config.Runtime.RecoveryOnStartup)
+		}
 		fact, err := correlation.NewSourceArtifactFact(hash)
 		if err != nil {
 			return err
@@ -314,6 +345,9 @@ func inspectVerifyRecoverySnapshot(ctx context.Context, snapshot *storeselected.
 		return nil
 	})
 	retained.actorsOK = verifyDeploymentObservation(ctx, result, "retained_actor_admission", "internal/runtime/manager.InspectRetainedActors", subject, failures.ClassLifecycleConflict, func(ctx context.Context) error {
+		if source == nil {
+			return emptySourceErr
+		}
 		fact, err := correlation.NewSourceArtifactFact(hash)
 		if err != nil {
 			return err

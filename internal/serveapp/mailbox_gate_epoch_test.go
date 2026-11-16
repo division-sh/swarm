@@ -101,8 +101,8 @@ func newMailboxGateEpoch(t *testing.T, backend servedparity.Backend, root string
 		opts.ConfigPath = writeMockAgentRuntimeConfig(t, name, "")
 		opts.StoreMode, opts.StoreModeSet = name, true
 		previous := buildStoresForServe
-		buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
-			return storeselected.OpenRuntime(ctx, storeselected.RuntimeRequest{Selection: selection, PostgresDSN: location, SessionLockTTL: runtimeSessionLockTTL(cfg)})
+		buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config, input ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {
+			return storeselected.OpenRuntime(ctx, storeselected.RuntimeRequest{Selection: selection, PostgresDSN: location, SessionLockTTL: runtimeSessionLockTTL(cfg), BootCheckInput: firstBootCheckInput(input)})
 		}
 		t.Cleanup(func() { buildStoresForServe = previous })
 	}

@@ -34,12 +34,13 @@ import (
 )
 
 type ServeCheckStageRequest struct {
-	Repo      string
-	Paths     CLISourcePaths
-	Config    RuntimeConfigLoadResult
-	Options   ServeOptions
-	Selection storebackend.Selection
-	PackBases packartifact.PlatformPackBaseResolver
+	Repo         string
+	Paths        CLISourcePaths
+	Config       RuntimeConfigLoadResult
+	Options      ServeOptions
+	Selection    storebackend.Selection
+	PackBases    packartifact.PlatformPackBaseResolver
+	construction *bootverify.ConstructionTarget
 }
 
 type ServeCheckStageResult struct {
@@ -108,7 +109,7 @@ func InspectServeCheckStage(ctx context.Context, in ServeCheckStageRequest) (out
 		retained = inspectVerifySelectedStore(ctx, in.Repo, in.Paths, in.Config,
 			cliSwarmDirOptions{SwarmDir: in.Options.SwarmDir, SwarmDirFlagSet: in.Options.SwarmDirSet},
 			out.Source, out.Options, in.PackBases, inspection, workspaceOK, &out.Validation,
-			serveStoreInspection{selection: in.Selection, dryRun: in.Options.DryRun, input: &out.storeInput, reset: out.reset})
+			serveStoreInspection{selection: in.Selection, dryRun: in.Options.DryRun, input: serveCheckSnapshotOutput(in, &out), reset: out.reset, construction: in.construction})
 	}
 	if out.Source == nil {
 		out.Validation.BootReport.Sort()
@@ -164,6 +165,13 @@ func InspectServeCheckStage(ctx context.Context, in ServeCheckStageRequest) (out
 	})
 	out.Validation.BootReport.Sort()
 	return out, ctx.Err()
+}
+
+func serveCheckSnapshotOutput(in ServeCheckStageRequest, out *ServeCheckStageResult) **storeselected.BootCheckInput {
+	if in.construction != nil {
+		return nil // Fresh checks already run under the native constructor's exclusion.
+	}
+	return &out.storeInput
 }
 
 func (out *ServeCheckStageResult) prepare(ctx context.Context, in ServeCheckStageRequest) error {
