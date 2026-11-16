@@ -3,16 +3,19 @@ package runforkpersistence
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"math"
 
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	storepipeline "github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
 )
 
 // Corrupt only the persisted cut reference, preserving all source history.
-func CorruptReceiverConstructionHistoryCutForTest(ctx context.Context, tx *sql.Tx, run runlifecycle.Snapshot, header pipeline.WorkflowInstance, missingRevision int64) error {
+func corruptReceiverConstructionHistoryCutForTest(ctx context.Context, tx *sql.Tx, run runlifecycle.Snapshot, header pipeline.WorkflowInstance, missingRevision int64) error {
 	_, historical, err := readHistoricalFlowInstanceConstructionEvidenceTx(ctx, tx, run, header)
 	if err != nil {
 		return err
@@ -31,4 +34,74 @@ func CorruptReceiverConstructionHistoryCutForTest(ctx context.Context, tx *sql.T
 		return fmt.Errorf("history-cut fault refuses an existing source revision")
 	}
 	return storerunlifecycle.CorruptReceiverForkRevisionForTest(ctx, tx, run, missingRevision)
+}
+
+func (s *RunForkPostgresOwner) CorruptReceiverConstructionHistoryCutForTest(ctx context.Context, owner flowidentity.RunScopedFlowInstance, entityID string, missingRevision int64) error {
+	return s.backend.RunTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		header, err := storepipeline.ReadReceiverConstructionHeaderForTest(ctx, tx, owner, entityID, false)
+		if err != nil {
+			return err
+		}
+		run, err := s.LoadSnapshotTx(ctx, tx, owner.RunID, false)
+		if err != nil {
+			return err
+		}
+		return corruptReceiverConstructionHistoryCutForTest(ctx, tx, run, header, missingRevision)
+	})
+}
+
+func (s *RunForkSQLiteOwner) CorruptReceiverConstructionHistoryCutForTest(ctx context.Context, owner flowidentity.RunScopedFlowInstance, entityID string, missingRevision int64) error {
+	return s.backend.RunTransaction(ctx, "receiver physical observation fault", func(ctx context.Context, tx *sql.Tx) error {
+		header, err := storepipeline.ReadReceiverConstructionHeaderForTest(ctx, tx, owner, entityID, true)
+		if err != nil {
+			return err
+		}
+		run, err := s.LoadSnapshotTx(ctx, tx, owner.RunID)
+		if err != nil {
+			return err
+		}
+		return corruptReceiverConstructionHistoryCutForTest(ctx, tx, run, header, missingRevision)
+	})
+}
+
+func (s *RunForkPostgresOwner) ReadProjectedReceiverConstructionReceiptForTest(ctx context.Context, owner flowidentity.RunScopedFlowInstance, entityID string) (pipeline.FlowConstructionReceipt, error) {
+	var receipt pipeline.FlowConstructionReceipt
+	err := s.backend.RunTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		header, err := storepipeline.ReadReceiverConstructionHeaderForTest(ctx, tx, owner, entityID, false)
+		if err != nil {
+			return err
+		}
+		run, err := s.LoadSnapshotTx(ctx, tx, owner.RunID, false)
+		if err != nil {
+			return err
+		}
+		var found bool
+		receipt, found, err = s.ReadProjectedReceiverConstructionReceiptTx(ctx, tx, run, header)
+		if err == nil && !found {
+			return errors.New("fixture lacks its exact independently projected receipt")
+		}
+		return err
+	})
+	return receipt, err
+}
+
+func (s *RunForkSQLiteOwner) ReadProjectedReceiverConstructionReceiptForTest(ctx context.Context, owner flowidentity.RunScopedFlowInstance, entityID string) (pipeline.FlowConstructionReceipt, error) {
+	var receipt pipeline.FlowConstructionReceipt
+	err := s.backend.RunTransaction(ctx, "receiver physical observation fault", func(ctx context.Context, tx *sql.Tx) error {
+		header, err := storepipeline.ReadReceiverConstructionHeaderForTest(ctx, tx, owner, entityID, true)
+		if err != nil {
+			return err
+		}
+		run, err := s.LoadSnapshotTx(ctx, tx, owner.RunID)
+		if err != nil {
+			return err
+		}
+		var found bool
+		receipt, found, err = s.ReadProjectedReceiverConstructionReceiptTx(ctx, tx, run, header)
+		if err == nil && !found {
+			return errors.New("fixture lacks its exact independently projected receipt")
+		}
+		return err
+	})
+	return receipt, err
 }

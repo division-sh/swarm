@@ -2,43 +2,53 @@ package runtimepersistence
 
 import (
 	"context"
-	"database/sql"
+	"fmt"
 
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
-	"github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
-	"github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 )
 
 func CopyReceiverConstructionReceiptForTest(ctx context.Context, selected any, source, destination flowidentity.RunScopedFlowInstance, sourceEntity, destinationEntity string) error {
-	return runReceiverConstructionObservationFault(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		if store, ok := selected.(*PostgresStore); ok {
-			return store.pipelinePostgresOwner.CopyReceiverConstructionReceiptForTest(ctx, tx, source, destination, sourceEntity, destinationEntity)
-		}
-		return selected.(*SQLiteRuntimeStore).pipelineSQLiteOwner.CopyReceiverConstructionReceiptForTest(ctx, tx, source, destination, sourceEntity, destinationEntity)
-	})
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return err
+	}
+	switch store := selected.(type) {
+	case *PostgresStore:
+		return store.pipelinePostgresOwner.CopyReceiverConstructionReceiptForTest(ctx, source, destination, sourceEntity, destinationEntity)
+	case *SQLiteRuntimeStore:
+		return store.pipelineSQLiteOwner.CopyReceiverConstructionReceiptForTest(ctx, source, destination, sourceEntity, destinationEntity)
+	default:
+		return fmt.Errorf("receiver observation fault requires the original native owner")
+	}
 }
 
 func CorruptReceiverConstructionHistoryCutForTest(ctx context.Context, selected any, owner flowidentity.RunScopedFlowInstance, entityID string, missingRevision int64) error {
 	if err := owner.Validate(); err != nil {
 		return err
 	}
-	return runReceiverConstructionObservationFault(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		_, postgres := selected.(*PostgresStore)
-		header, err := pipelinepersistence.ReadReceiverConstructionHeaderForTest(ctx, tx, owner, entityID, !postgres)
-		if err != nil {
-			return err
-		}
-		if store, ok := selected.(*PostgresStore); ok {
-			run, err := store.runLifecyclePostgresOwner.LoadSnapshotTx(ctx, tx, owner.RunID, false)
-			if err != nil {
-				return err
-			}
-			return runforkpersistence.CorruptReceiverConstructionHistoryCutForTest(ctx, tx, run, header, missingRevision)
-		}
-		run, err := selected.(*SQLiteRuntimeStore).runLifecycleSQLiteOwner.LoadSnapshotTx(ctx, tx, owner.RunID)
-		if err != nil {
-			return err
-		}
-		return runforkpersistence.CorruptReceiverConstructionHistoryCutForTest(ctx, tx, run, header, missingRevision)
-	})
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return err
+	}
+	switch store := selected.(type) {
+	case *PostgresStore:
+		return store.runForkPostgresOwner.CorruptReceiverConstructionHistoryCutForTest(ctx, owner, entityID, missingRevision)
+	case *SQLiteRuntimeStore:
+		return store.runForkSQLiteOwner.CorruptReceiverConstructionHistoryCutForTest(ctx, owner, entityID, missingRevision)
+	default:
+		return fmt.Errorf("receiver observation fault requires the original native owner")
+	}
+}
+
+func ReadProjectedReceiverConstructionReceiptForTest(ctx context.Context, selected any, owner flowidentity.RunScopedFlowInstance, entityID string) (pipeline.FlowConstructionReceipt, error) {
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return pipeline.FlowConstructionReceipt{}, err
+	}
+	switch store := selected.(type) {
+	case *PostgresStore:
+		return store.runForkPostgresOwner.ReadProjectedReceiverConstructionReceiptForTest(ctx, owner, entityID)
+	case *SQLiteRuntimeStore:
+		return store.runForkSQLiteOwner.ReadProjectedReceiverConstructionReceiptForTest(ctx, owner, entityID)
+	default:
+		return pipeline.FlowConstructionReceipt{}, fmt.Errorf("receiver observation fault requires the original native owner")
+	}
 }
