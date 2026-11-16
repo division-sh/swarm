@@ -120,6 +120,9 @@ func requireLifecycleGateRestartReplacement(t *testing.T, reader lifecycleGateRe
 	if err != nil {
 		t.Fatal(err)
 	}
+	if persisted := carrier.PersistedStateBuckets(); !reflect.DeepEqual(before.Instance.StateBuckets, persisted) {
+		t.Fatalf("pre-mutation state-bucket roundtrip changed evidence: before=%#v after=%#v", before.Instance.StateBuckets, persisted)
+	}
 	activations, err := gateruntime.List(carrier.StateBuckets)
 	if err != nil {
 		t.Fatal(err)
