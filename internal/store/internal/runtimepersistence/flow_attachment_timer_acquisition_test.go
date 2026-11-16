@@ -40,13 +40,27 @@ type attachmentTimerAcquisitionOccurrence struct {
 }
 
 func (o *attachmentTimerAcquisitionOccurrence) Begin(ctx context.Context) (*worklifetime.Lease, error) {
+	return o.begin(ctx, false)
+}
+
+func (o *attachmentTimerAcquisitionOccurrence) BeginStanding(ctx context.Context) (*worklifetime.Lease, error) {
+	return o.begin(ctx, true)
+}
+
+func (o *attachmentTimerAcquisitionOccurrence) begin(ctx context.Context, standing bool) (*worklifetime.Lease, error) {
 	o.calls++
 	if o.calls == 2 && o.workflow.cut == "before_second" {
 		if err := o.workflow.inject(ctx); err != nil {
 			return nil, err
 		}
 	}
-	lease, err := o.Occurrence.Begin(ctx)
+	var lease *worklifetime.Lease
+	var err error
+	if standing {
+		lease, err = o.Occurrence.BeginStanding(ctx)
+	} else {
+		lease, err = o.Occurrence.Begin(ctx)
+	}
 	if err == nil {
 		o.workflow.acquired.Add(1)
 	}
