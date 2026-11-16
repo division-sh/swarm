@@ -26,7 +26,8 @@ func TestStoredInboundProcessHandlerKeepsPendingUntilRestartBothStores(t *testin
 			if err := file.Set(t.Context(), "partner.webhook_signing_secret", secret); err != nil {
 				t.Fatal(err)
 			}
-			opts, start := clockDeploymentHarness(t, backend, canonicalrouting.CopyKeyedRootRawIngress(t))
+			opts, start := clockDeploymentHarness(t, backend, canonicalrouting.CopyConcurrentKeyedRootRawIngress(t))
+			enableChannelOnboardingRecoveryOnStartup(t, opts.ConfigPath)
 			managers := make(chan *runtimepkg.RuntimeContextManager, 2)
 			opts.TestRuntimeContextsReadyHook = func(m *runtimepkg.RuntimeContextManager) { managers <- m }
 			process, served := start()
