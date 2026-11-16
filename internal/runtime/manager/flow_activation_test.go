@@ -2,7 +2,6 @@ package manager
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1911,7 +1910,6 @@ func TestActivateFlowInstanceDoesNotConsumeAmbientTransactionAuthority(t *testin
 	bundle := testFlowBundle(t, "")
 	am, ctx := newFlowActivationManagerForSource(t, bus, instances, semanticview.Wrap(bundle))
 	postCommit := make([]runtimepipelinefixture.OwnerAction, 0, 1)
-	ctx = runtimepipelinefixture.WithSQLTx(ctx, &sql.Tx{})
 	ctx = withFlowActivationPostCommit(ctx, &postCommit)
 
 	if err := activateFlowInstanceForTest(am, ctx, testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")); err != nil {
@@ -2780,7 +2778,6 @@ func TestFlowActivationRejectsForeignSemanticSourceBeforeAnyMutation(t *testing.
 				postCommit := make([]runtimepipelinefixture.OwnerAction, 0, 1)
 				attemptCtx := ctx
 				if transactional {
-					attemptCtx = runtimepipelinefixture.WithSQLTx(attemptCtx, &sql.Tx{})
 					attemptCtx = withFlowActivationPostCommit(attemptCtx, &postCommit)
 				}
 				foreignReq := testActivationRequest(

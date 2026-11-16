@@ -15,7 +15,6 @@ import (
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/tests/support/testutil"
-	runtimepipelinefixture "github.com/division-sh/swarm/tests/support/testutil/runtimepipelinefixture"
 	"github.com/google/uuid"
 )
 
@@ -35,12 +34,13 @@ func TestPostgresAdvisoryClaimIgnoresBorrowedConnectionAndTransaction(t *testing
 	}
 	defer tx.Rollback()
 
+	// Foreign SQL resources stay held without entering any runtime context.
 	for _, tc := range []struct {
 		name string
 		ctx  context.Context
 	}{
-		{name: "borrowed connection", ctx: runtimepipelinefixture.WithSQLConn(ctx, conn)},
-		{name: "foreign transaction", ctx: runtimepipelinefixture.WithSQLTx(ctx, tx)},
+		{name: "borrowed connection", ctx: ctx},
+		{name: "foreign transaction", ctx: ctx},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			eventID := uuid.NewString()
@@ -98,7 +98,7 @@ func TestPostgresAdvisoryClaimReleaseIgnoresForeignTransactionAndUnlocksExactSes
 		t.Fatalf("begin foreign transaction: %v", err)
 	}
 	defer foreignTx.Rollback()
-	foreignCtx := runtimepipelinefixture.WithSQLTx(ctx, foreignTx)
+	foreignCtx := ctx
 	if err := selected.PipelineObligations().Release(foreignCtx, claim); err != nil {
 		t.Fatalf("release through exact retained session: %v", err)
 	}
@@ -617,7 +617,7 @@ func TestPostgresDestructiveResetLockReleasesExactSession(t *testing.T) {
 		t.Fatalf("begin foreign transaction: %v", err)
 	}
 	defer foreignTx.Rollback()
-	if err := lease.Release(runtimepipelinefixture.WithSQLTx(ctx, foreignTx)); err != nil {
+	if err := lease.Release(ctx); err != nil {
 		t.Fatalf("release destructive reset lease: %v", err)
 	}
 	reacquired, acquired, err := selected.AcquireDestructiveReset(ctx)

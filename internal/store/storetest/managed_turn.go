@@ -29,7 +29,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
-	"github.com/division-sh/swarm/internal/sourceartifact"
+	private "github.com/division-sh/swarm/internal/store/internal/runtimepersistence"
 )
 
 type ManagedAgentTurnFixtureStore interface {
@@ -37,9 +37,7 @@ type ManagedAgentTurnFixtureStore interface {
 	runtimeeffects.CompletionStore
 	runtimeeffects.CompletionHeartbeatStore
 	runtimedelivery.Store
-	LoadAgentLifecycleState(context.Context, agentidentity.Identity) (runtimemanager.AgentLifecycleState, bool, error)
-	LoadRunRootedSource(context.Context, string) (sourceartifact.RootedSource, error)
-	SettleSuccess(context.Context, runtimedelivery.Claim, []string, time.Duration, runtimedelivery.HandlerRuleSelectionFact) (runtimedelivery.Snapshot, error)
+	runtimemanager.AgentLifecycleStateReader
 }
 
 type ManagedAgentTurnFixture struct {
@@ -101,7 +99,7 @@ func PersistManagedAgentTurnFixture(t testing.TB, ctx context.Context, fixture M
 	if fixture.Event.ID() == "" || fixture.Event.RunID() != strings.TrimSpace(fixture.RunID) {
 		t.Fatal("managed turn fixture event does not match run")
 	}
-	rooted, err := fixture.Store.LoadRunRootedSource(ctx, fixture.RunID)
+	rooted, err := private.LoadManagedTurnRootedSourceForTest(ctx, fixture.Store, fixture.RunID)
 	if err != nil || rooted.Admission().BundleHash() != bundleSource.BundleHash() {
 		t.Fatalf("managed turn fixture requires its exact retained run source: %v", err)
 	}

@@ -101,20 +101,10 @@ func unclassifiedConcreteStoreProducer(pg *store.PostgresStore) *pipeline.Pipeli
 
 func selectedRawSQLBoundaryLedger() map[string]rawSQLBoundaryEntry {
 	return map[string]rawSQLBoundaryEntry{
-		"tests/support/testutil/runtimepipelinefixture/context.go": {
-			Classification: rawSQLTestSupportBoundary,
-			Issue:          2148,
-			Reason:         "test-only fixture exposes transaction-bound execution for hostile atomicity proof; production runtime has no raw SQL context capability",
-		},
 		"tests/support/testutil/postgres.go": {
 			Classification: rawSQLTestSupportBoundary,
 			Issue:          1943,
 			Reason:         "testutil is the thin testing adapter over the canonical testpostgres lifecycle owner",
-		},
-		"tests/support/testutil/runlifecyclefixture/fixture.go": {
-			Classification: rawSQLTestSupportBoundary,
-			Issue:          2111,
-			Reason:         "test-only hostile readback fixtures deliberately materialize persisted run states that valid lifecycle construction forbids",
 		},
 		"tests/support/testpostgres/connection.go": {
 			Classification: rawSQLTestSupportBoundary,
