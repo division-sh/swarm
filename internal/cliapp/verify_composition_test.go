@@ -16,6 +16,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/runtime"
+	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	"github.com/division-sh/swarm/internal/runtime/bootverify"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
@@ -26,6 +27,7 @@ import (
 	"github.com/division-sh/swarm/internal/store/backendselection"
 	"github.com/division-sh/swarm/internal/store/construction"
 	"github.com/division-sh/swarm/internal/store/devscratch"
+	storeselected "github.com/division-sh/swarm/internal/store/selected"
 	"github.com/division-sh/swarm/internal/store/selected/selectedtest"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
@@ -459,11 +461,29 @@ func TestVerifyPublicExistingStoreReportsDeploymentPreparationBothStores(t *test
 					}
 					runID := uuid.NewString()
 					storetest.RequireRun(t, original, native, storetest.RunFixture{RunID: runID, Origin: storetest.ScenarioSetupOrigin(), Artifact: bundle.SourceArtifact})
+					rooted, err := bundle.SourceArtifact.RootedSource()
+					if err != nil {
+						t.Fatal(err)
+					}
+					coordinate, err := agenttopology.NewSourceCoordinate(rooted.Admission())
+					if err != nil {
+						t.Fatal(err)
+					}
+					sources, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{coordinate}, nil)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if _, err := process.InstallCompleteSourceSet(ctx, agenttopology.SourceSetCommitRequest{OperationID: uuid.NewString(), Plan: sources}); err != nil {
+						t.Fatal(err)
+					}
 					operation, err := process.AdmitResetOperation(ctx, destructivereset.Request{
-						OperationID: uuid.NewString(), ActorTokenID: "operator", RequestHash: "snapshot-survivors", RequestedAt: time.Now().UTC(), IncludeSourceArtifactsSet: true,
+						OperationID: uuid.NewString(), ActorTokenID: "operator", RequestHash: "snapshot-survivors", RequestedAt: time.Now().UTC(), IncludeSourceArtifactsSet: true, IncludeSourceArtifacts: survivor == "clear_to_empty",
 					})
 					if err != nil {
 						t.Fatal(err)
+					}
+					if !reflect.DeepEqual(operation.SourceSet, &sources) {
+						t.Fatalf("reset did not capture the installed source set: %+v", operation)
 					}
 					reader := native.(destructivereset.InventoryReader)
 					plan, err := (destructivereset.InventoryPlanner{Reader: reader}).BuildPlan(ctx, operation.Request)
@@ -472,7 +492,7 @@ func TestVerifyPublicExistingStoreReportsDeploymentPreparationBothStores(t *test
 					}
 					planned := operation
 					planned.Phase, planned.Revision = destructivereset.PhasePlanned, operation.Revision+1
-					planned.Plan = &destructivereset.Result{OperationName: destructivereset.DefaultOperationName, PlannedAt: operation.Request.RequestedAt, Plan: plan}
+					planned.Plan = &destructivereset.Result{OperationName: destructivereset.DefaultOperationName, PlannedAt: operation.Request.RequestedAt, IncludeSourceArtifacts: operation.Request.IncludeSourceArtifacts, Plan: plan}
 					if err := process.AdvanceResetOperation(ctx, operation, planned); err != nil {
 						t.Fatal(err)
 					}
@@ -482,9 +502,17 @@ func TestVerifyPublicExistingStoreReportsDeploymentPreparationBothStores(t *test
 					if err != nil {
 						t.Fatal(err)
 					}
+					var topology *agenttopology.SourceSetCommitRequest
+					if operation.Request.IncludeSourceArtifacts {
+						empty, err := agenttopology.EmptySourceSetPlan()
+						if err != nil {
+							t.Fatal(err)
+						}
+						topology = &agenttopology.SourceSetCommitRequest{OperationID: operation.Request.OperationID, ExpectedRevision: sources.Revision, Plan: empty}
+					}
 					if _, err := process.ApplyDestructiveResetCleanup(original, destructivereset.CleanupRequest{
 						OperationID: operation.Request.OperationID, ActorTokenID: operation.Request.ActorTokenID, RequestedAt: operation.Request.RequestedAt, Result: *planned.Plan, Quiescence: quiescence,
-					}, nil); err != nil {
+					}, topology); err != nil {
 						t.Fatal(err)
 					}
 					committed, err := process.ReadResetOperation(ctx, operation.Request.OperationID)
@@ -510,11 +538,7 @@ func TestVerifyPublicExistingStoreReportsDeploymentPreparationBothStores(t *test
 					if err != nil {
 						t.Fatal(err)
 					}
-					source := semanticview.Wrap(bundle)
-					if survivor == "clear_to_empty" {
-						source = nil
-					}
-					request, _, err := prepareVerifySelectedStoreInspection(ctx, root, paths, cfg, cliSwarmDirOptions{}, source)
+					request, _, err := prepareVerifySelectedStoreInspection(ctx, root, paths, cfg, cliSwarmDirOptions{}, nil)
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -524,6 +548,42 @@ func TestVerifyPublicExistingStoreReportsDeploymentPreparationBothStores(t *test
 					}
 					bases, err := packartifact.NewPlatformPackBaseGenerationOwner(base)
 					if err != nil {
+						t.Fatal(err)
+					}
+					inspection, err := storeselected.OpenAdmissionInspection(ctx, request)
+					if err != nil {
+						t.Fatal(err)
+					}
+					var source semanticview.Source
+					_, inspectErr := inspection.Inspect(ctx, complete, func(snapshot *storeselected.AdmissionSnapshot) error {
+						selected, observed, err := inspectServeResetSource(ctx, ServeCheckStageRequest{Repo: root, PackBases: bases}, snapshot)
+						if err != nil {
+							return err
+						}
+						if !reflect.DeepEqual(observed, &committed) {
+							t.Fatalf("reset source selection did not read the exact committed operation: %+v", observed)
+						}
+						kept, err := observed.RecoverySourceSet()
+						if err != nil {
+							return err
+						}
+						if survivor == "clear_to_empty" {
+							if selected != nil || len(kept.Sources) != 0 || len(kept.Agents) != 0 {
+								t.Fatal("clear reset selected an executable source")
+							}
+						} else {
+							if selected == nil || !reflect.DeepEqual(kept, sources) || selected.SourceArtifact.BundleHash() != coordinate.BundleHash {
+								t.Fatal("kept reset selected a source outside its captured set")
+							}
+							selectedRoot, err := selected.SourceArtifact.RootedSource()
+							if err != nil || selectedRoot.Admission().Reference() != coordinate.RootReference() {
+								t.Fatalf("kept source changed the captured root: %v", err)
+							}
+							source = semanticview.Wrap(selected)
+						}
+						return nil
+					})
+					if err := errors.Join(inspectErr, inspection.Close()); err != nil {
 						t.Fatal(err)
 					}
 					profile, err := cfg.Config.LLMBackendProfile()

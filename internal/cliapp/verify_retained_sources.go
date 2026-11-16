@@ -8,6 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packartifact"
+	"github.com/division-sh/swarm/internal/platform"
 	"github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/bootverify"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
@@ -26,10 +27,6 @@ type verifyRetainedSourceReader interface {
 func inspectVerifyRetainedSources(ctx context.Context, reader verifyRetainedSourceReader, repo, subject string, packBases packartifact.PlatformPackBaseResolver, result *runtime.WorkflowContractValidationResult) {
 	const check = "retained_source_integrity"
 	_, preparationErr := verifyRetainedSourceLoader(repo, packBases)
-	var spec string
-	if preparationErr == nil {
-		spec, preparationErr = EmbeddedPlatformSpecPath()
-	}
 	var inventory startuprecovery.Result
 	verifyDeploymentObservation(ctx, result, check, "internal/runtime/startuprecovery.Inspect", subject, failures.ClassLifecycleConflict, func(ctx context.Context) error {
 		var err error
@@ -58,7 +55,7 @@ func inspectVerifyRetainedSources(ctx context.Context, reader verifyRetainedSour
 		attempted := false
 		verifyDeploymentObservation(ctx, result, check, "internal/runtime/contracts.LoadWorkflowContractBundleFromRootedSource", runSubject, failures.ClassSchemaInvalid, func(ctx context.Context) error {
 			attempted = true
-			_, err := contracts.LoadWorkflowContractBundleFromRootedSource(repo, rooted, spec, contracts.WorkflowContractLoadOptions{
+			_, err := contracts.LoadWorkflowContractBundleFromRootedSource(repo, rooted, platform.PlatformSpecDisplayPath, contracts.WorkflowContractLoadOptions{
 				PlatformPackBases: packBases, AdmitPackInventory: packadmission.AdmitInventory,
 			})
 			return err
