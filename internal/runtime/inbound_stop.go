@@ -167,6 +167,10 @@ func (m *RuntimeContextManager) AcquireInboundPublication(ctx context.Context, a
 	if err != nil {
 		return refuse(err)
 	}
+	ctx, release, admitted := m.inboundRequests.BeginContext(ctx)
+	if !admitted {
+		return refuse(worklifetime.ErrAdmissionFenced)
+	}
 	lookup.Target.RunID = landing.RunID
 	definition.StandingTargets = append([]StandingTarget(nil), definition.StandingTargets...)
 	for index, target := range definition.StandingTargets {
@@ -174,11 +178,18 @@ func (m *RuntimeContextManager) AcquireInboundPublication(ctx context.Context, a
 			definition.StandingTargets[index] = lookup.Target
 		}
 	}
-	return &InboundPublicationUse{runtime: entry.runtime, context: definition, ctx: ctx, release: m.liveSelectionMu.RUnlock}, lookup, nil
+	return &InboundPublicationUse{runtime: entry.runtime, context: definition, ctx: ctx, release: func() {
+		release()
+		m.liveSelectionMu.RUnlock()
+	}}, lookup, nil
 }
 
 func (u *InboundPublicationUse) HandleResolvedWebhook(w http.ResponseWriter, request *http.Request, target InboundTarget) {
 	if u == nil || u.runtime == nil || u.runtime.InboundGateway == nil {
+		http.Error(w, "ingress target is unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	if !ownsInboundTarget(u.context, target) {
 		http.Error(w, "ingress target is unavailable", http.StatusServiceUnavailable)
 		return
 	}
