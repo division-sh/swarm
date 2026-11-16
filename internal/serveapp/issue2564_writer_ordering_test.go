@@ -19,7 +19,6 @@ import (
 	"github.com/division-sh/swarm/internal/operatorread"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
-	"github.com/division-sh/swarm/internal/runtime/failures"
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -226,12 +225,45 @@ func TestIssue2564ServedM33NonterminalDeadlineLateResultBothStores(t *testing.T)
 			release()
 			rt.waitEntityStage(t, seed.RunID, entityID, "review")
 			before := issue2564Entity(t, rt, seed.RunID, entityID)
+			beforeRows, err := storetest.ReadReceiverDeliveryStorage(t.Context(), rt.selected, seed.RunID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			beforeDeliveries := make(map[string][2]string, len(beforeRows))
+			for _, row := range beforeRows {
+				beforeDeliveries[row.DeliveryID] = [2]string{row.EventID, row.Target}
+			}
+			if len(beforeDeliveries) == 0 {
+				t.Fatal("late-result fixture has no accepted deliveries")
+			}
 			p.release("a", 0)
 			p.release("a", 1)
 			rt.waitDeliveries(t, seed.RunID)
-			results := rt.events(t, seed.RunID, issue2564EventName(t, rt, seed.RunID, "hub.result"))
-			if len(results) != 1 || results[0].NoDelivery == nil || results[0].NoDelivery.Reason != events.NoDeliveryResolutionBlocked.Code() || len(results[0].Deliveries) != 0 || len(results[0].DeadLetters) != 1 || results[0].DeadLetters[0].Failure.Class != failures.ClassUnexpectedArrival || results[0].DeadLetters[0].Failure.Detail.Code != "no_route" {
-				t.Fatalf("late result was not a counted no-route outcome: %+v\n%s", results, rt.debug(t, seed.RunID))
+			afterRows, err := storetest.ReadReceiverDeliveryStorage(t.Context(), rt.selected, seed.RunID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			afterDeliveries := make(map[string][2]string, len(afterRows))
+			for _, row := range afterRows {
+				afterDeliveries[row.DeliveryID] = [2]string{row.EventID, row.Target}
+			}
+			if !reflect.DeepEqual(beforeDeliveries, afterDeliveries) {
+				t.Fatalf("late no-route changed run deliveries: before=%+v after=%+v", beforeDeliveries, afterDeliveries)
+			}
+			var diagnosis struct {
+				Instances []operatorread.RunInstanceOperationalStatus `json:"instances"`
+			}
+			requireServedJSONRPCResult(t, rt.Endpoint, "run.diagnose", map[string]any{"run_id": seed.RunID}, &diagnosis)
+			var refused operatorread.RunInstanceOperationalStatus
+			matches := 0
+			for _, instance := range diagnosis.Instances {
+				if instance.FlowInstance == before.Entity.FlowInstance {
+					refused = instance
+					matches++
+				}
+			}
+			if matches != 1 || refused.RefusedEmits != 1 {
+				t.Fatalf("late no-route public instance count: matches=%d instance=%+v\n%s", matches, refused, rt.debug(t, seed.RunID))
 			}
 			after := issue2564Entity(t, rt, seed.RunID, entityID)
 			if !reflect.DeepEqual(before, after) {
