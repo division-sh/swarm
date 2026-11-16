@@ -11,16 +11,34 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 )
 
-// SealInboundExecution serializes provider selection with recovery selection.
-// The process must also join pending-intent selection before exposing intake.
-func (m *RuntimeContextManager) SealInboundExecution(ctx context.Context) error {
+// PrepareInboundStop holds new publications while accepted target creation joins.
+func (m *RuntimeContextManager) PrepareInboundStop() {
 	m.inboundPhaseMu.Lock()
 	defer m.inboundPhaseMu.Unlock()
-	if m.inboundStopping {
-		return m.inboundSealErr
+	if !m.inboundStopping {
+		m.inboundStopping = true
+		m.inboundReady = make(chan struct{})
 	}
-	m.inboundStopping = true
-	m.inboundReady = make(chan struct{})
+}
+
+// SealInboundExecution joins final-set recovery without holding the phase lock.
+// The process must also join pending-intent selection before exposing intake.
+func (m *RuntimeContextManager) SealInboundExecution(ctx context.Context) error {
+	m.PrepareInboundStop()
+	m.inboundPhaseMu.Lock()
+	if done := m.inboundSealDone; done != nil {
+		m.inboundPhaseMu.Unlock()
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-done:
+			m.inboundPhaseMu.RLock()
+			defer m.inboundPhaseMu.RUnlock()
+			return m.inboundSealErr
+		}
+	}
+	m.inboundSealDone = make(chan struct{})
+	m.inboundPhaseMu.Unlock()
 	m.CloseFreshDispatch()
 	m.mu.RLock()
 	var runtimes []*Runtime
@@ -34,7 +52,13 @@ func (m *RuntimeContextManager) SealInboundExecution(ctx context.Context) error 
 	for _, rt := range runtimes {
 		result = errors.Join(result, rt.Bus.SealPipelineRecovery(ctx))
 	}
+	m.inboundPhaseMu.Lock()
 	m.inboundSealErr = result
+	close(m.inboundSealDone)
+	if result != nil {
+		m.closeInboundReadyLocked()
+	}
+	m.inboundPhaseMu.Unlock()
 	return result
 }
 
@@ -44,24 +68,32 @@ func (m *RuntimeContextManager) OpenStoredInbound() error {
 	if !m.inboundStopping || m.inboundSealErr != nil || m.inboundRequests.Closed() {
 		return errors.Join(worklifetime.ErrAdmissionFenced, m.inboundSealErr)
 	}
+	select {
+	case <-m.inboundSealDone:
+	default:
+		return worklifetime.ErrAdmissionFenced
+	}
 	m.inboundStoreOnly = true
+	m.closeInboundReadyLocked()
+	return nil
+}
+
+func (m *RuntimeContextManager) closeInboundReadyLocked() {
 	if m.inboundReady != nil {
 		close(m.inboundReady)
 		m.inboundReady = nil
 	}
-	return nil
 }
 
 func (m *RuntimeContextManager) BeginInboundRequest(ctx context.Context) (context.Context, func(), bool) {
-	if err := m.lockInboundPhase(ctx); err != nil {
-		return ctx, nil, false
-	}
-	defer m.inboundPhaseMu.RUnlock()
 	return m.inboundRequests.BeginContext(ctx)
 }
 
 func (m *RuntimeContextManager) lockInboundPhase(ctx context.Context) error {
 	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		m.inboundPhaseMu.RLock()
 		if m.inboundReady == nil {
 			return nil
@@ -80,10 +112,7 @@ func (m *RuntimeContextManager) CloseInboundRequests(ctx context.Context) error 
 	m.inboundPhaseMu.Lock()
 	m.inboundStoreOnly = false
 	m.inboundRequests.Close()
-	if m.inboundReady != nil {
-		close(m.inboundReady)
-		m.inboundReady = nil
-	}
+	m.closeInboundReadyLocked()
 	m.inboundPhaseMu.Unlock()
 	err := m.inboundRequests.Wait(ctx)
 	return errors.Join(err, m.inboundRequests.Wait(context.Background()))
@@ -104,18 +133,19 @@ type InboundPublicationUse struct {
 	executed *RuntimeContextUse
 	release  func()
 	once     sync.Once
+	result   error
 }
 
-func (u *InboundPublicationUse) Done() (err error) {
+func (u *InboundPublicationUse) Done() error {
 	u.once.Do(func() {
 		if u.executed != nil {
-			err = u.executed.Done()
+			u.result = u.executed.Done()
 		}
 		if u.release != nil {
 			u.release()
 		}
 	})
-	return err
+	return u.result
 }
 
 func (m *RuntimeContextManager) AcquireInboundPublication(ctx context.Context, alias, provider string) (*InboundPublicationUse, RuntimeIngressContextLookup, error) {
@@ -131,7 +161,7 @@ func (m *RuntimeContextManager) AcquireInboundPublication(ctx context.Context, a
 		return &InboundPublicationUse{runtime: use.runtime, context: use.Context, ctx: use.WorkContext(), executed: use}, lookup, nil
 	}
 	if !m.inboundStoreOnly {
-		return nil, m.LookupIngress(alias, provider), worklifetime.ErrAdmissionFenced
+		return nil, m.LookupIngress(alias, provider), errors.Join(worklifetime.ErrAdmissionFenced, m.inboundSealErr)
 	}
 	m.liveSelectionMu.RLock()
 	lookup := m.LookupIngress(alias, provider)
