@@ -227,6 +227,7 @@ func TestIssue2564ServedM33NonterminalDeadlineLateResultBothStores(t *testing.T)
 			rt.waitEntityStage(t, seed.RunID, entityID, "review")
 			before := issue2564Entity(t, rt, seed.RunID, entityID)
 			p.release("a", 0)
+			p.release("a", 1)
 			rt.waitDeliveries(t, seed.RunID)
 			results := rt.events(t, seed.RunID, issue2564EventName(t, rt, seed.RunID, "hub.result"))
 			if len(results) != 1 || results[0].NoDelivery == nil || results[0].NoDelivery.Reason != events.NoDeliveryResolutionBlocked.Code() || len(results[0].Deliveries) != 0 || len(results[0].DeadLetters) != 1 || results[0].DeadLetters[0].Failure.Class != failures.ClassUnexpectedArrival || results[0].DeadLetters[0].Failure.Detail.Code != "no_route" {
