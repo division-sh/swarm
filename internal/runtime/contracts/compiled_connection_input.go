@@ -22,6 +22,7 @@ type compiledConnectionInputValue struct {
 	receiverSchema CompiledEventSchema
 	receiverFlow   string
 	receiverEvent  string
+	selectionFlow  string
 }
 
 type CompiledConnectionInputs struct {
@@ -60,6 +61,13 @@ func (p CompiledConnectionInput) SourceEvidence() FlowInputInstanceSourceTypeEvi
 	evidence.SourceType.Catalog = cloneTypeCatalogDocument(evidence.SourceType.Catalog)
 	evidence.ReceiverType.Catalog = cloneTypeCatalogDocument(evidence.ReceiverType.Catalog)
 	return evidence
+}
+
+func (p CompiledConnectionInput) SelectionFlowID() string {
+	if p.value == nil {
+		return ""
+	}
+	return p.value.selectionFlow
 }
 
 func (p CompiledConnectionInput) ReceiverEventSchema() (CompiledEventSchema, bool) {
@@ -123,10 +131,16 @@ func CompileConnectionInputs(bundle *WorkflowContractBundle, pins ConnectionInpu
 	}
 	for _, connect := range bundle.Semantics.CompositionConnects {
 		connect = connect.normalized()
-		if connect.Resolution == FlowInputResolutionModeNone && connect.KeyFrom == "" {
+		selectionFlow, err := connectionSelectionFlow(bundle, connect)
+		if err != nil {
+			value.errors[connect] = err
 			continue
 		}
-		input, err := compileConnectionInput(bundle, pins, connect)
+		receiverFlow := connectEndpointFlowID(connect.OwnerFlowPath, connect.To)
+		if connect.Resolution == FlowInputResolutionModeNone && connect.KeyFrom == "" && selectionFlow == receiverFlow {
+			continue
+		}
+		input, err := compileConnectionInput(bundle, pins, connect, selectionFlow)
 		if err != nil {
 			value.errors[connect] = err
 			continue
@@ -137,7 +151,7 @@ func CompileConnectionInputs(bundle *WorkflowContractBundle, pins ConnectionInpu
 	return CompiledConnectionInputs{value: value}
 }
 
-func compileConnectionInput(bundle *WorkflowContractBundle, pins ConnectionInputPinProvider, connect FlowConnect) (CompiledConnectionInput, error) {
+func compileConnectionInput(bundle *WorkflowContractBundle, pins ConnectionInputPinProvider, connect FlowConnect, selectionFlow string) (CompiledConnectionInput, error) {
 	if err := lexicallyBoundConnectionKeyError(bundle, connect); err != nil {
 		return CompiledConnectionInput{}, err
 	}
@@ -154,7 +168,7 @@ func compileConnectionInput(bundle *WorkflowContractBundle, pins ConnectionInput
 	if !ok {
 		return CompiledConnectionInput{}, fmt.Errorf("connect receiver input pin is unavailable")
 	}
-	instance, err := bundle.ResolveFlowTemplateInstance(receiverFlow)
+	instance, err := bundle.ResolveFlowTemplateInstance(selectionFlow)
 	if err != nil {
 		return CompiledConnectionInput{}, err
 	}
@@ -162,7 +176,7 @@ func compileConnectionInput(bundle *WorkflowContractBundle, pins ConnectionInput
 	if !ok {
 		return CompiledConnectionInput{}, errConnectionProducerUnbound
 	}
-	evidence, err := bundle.ResolveFlowInputInstanceSourceType(nil, receiverFlow, connect, pin, instance)
+	evidence, err := bundle.ResolveFlowInputInstanceSourceType(nil, selectionFlow, connect, pin, instance)
 	if err != nil {
 		return CompiledConnectionInput{}, err
 	}
@@ -172,8 +186,44 @@ func compileConnectionInput(bundle *WorkflowContractBundle, pins ConnectionInput
 	}
 	return CompiledConnectionInput{value: &compiledConnectionInputValue{
 		mode: connect.Resolution, evidence: evidence, receiverSchema: receiver,
-		receiverFlow: receiverFlow, receiverEvent: receiverEvent,
+		receiverFlow: receiverFlow, receiverEvent: receiverEvent, selectionFlow: selectionFlow,
 	}}, nil
+}
+
+func connectionSelectionFlow(bundle *WorkflowContractBundle, connect FlowConnect) (string, error) {
+	owner := normalizedConnectOwnerFlowPath(connect.OwnerFlowPath)
+	receiver := connectEndpointFlowID(owner, connect.To)
+	producer := connectEndpointFlowID(owner, connect.From)
+	view, found := bundle.FlowViewByID(receiver)
+	if !found {
+		return receiver, nil
+	}
+	var keyed []string
+	for view.Paths.FlowPath != owner {
+		if view.Parent == nil {
+			return receiver, nil
+		}
+		if schema, found := bundle.FlowSchemaByID(view.Paths.FlowPath); found && !schema.Instance.Empty() {
+			keyed = append(keyed, view.Paths.FlowPath)
+		}
+		view = view.Parent
+	}
+	if len(keyed) == 0 {
+		return receiver, nil
+	}
+	boundary := keyed[len(keyed)-1]
+	properSender := strings.HasPrefix(producer, boundary+"/")
+	sameKeyed := producer == receiver && keyed[0] == receiver
+	if !sameKeyed && !(properSender && (receiver == boundary || strings.HasPrefix(receiver, boundary+"/"))) {
+		return receiver, nil
+	}
+	if len(keyed) > 1 {
+		return "", fmt.Errorf("connect can select only one keyed level below its owner; receiver %q requires %d", receiver, len(keyed))
+	}
+	if receiver != boundary && connect.Resolution != FlowInputResolutionModeSelect {
+		return "", fmt.Errorf("connect to keyless receiver %q in another instance requires resolution: select", receiver)
+	}
+	return boundary, nil
 }
 
 func lexicallyBoundConnectionKeyError(bundle *WorkflowContractBundle, connect FlowConnect) error {

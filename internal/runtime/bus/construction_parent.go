@@ -20,7 +20,7 @@ func (o connectInstanceSelector) constructionParent(ctx context.Context, event e
 	if !found {
 		return flowidentity.Instance{}, fmt.Errorf("connection construction requires its admitted tree")
 	}
-	view, found := bundle.FlowViewByID(plan.ReceiverEndpoint().Readback().FlowID)
+	view, found := bundle.FlowViewByID(plan.SelectionFlowID())
 	if !found || view.Parent == nil {
 		return flowidentity.Instance{}, fmt.Errorf("connection receiver has no structural parent")
 	}
@@ -42,6 +42,43 @@ func (o connectInstanceSelector) constructionParent(ctx context.Context, event e
 		return o.constructionInstance(ctx, event.RunID(), parentFlow, owner.ParentRoute.FlowInstance, owner.ParentEntityID, instances)
 	}
 	return o.constructedDescendant(ctx, event.RunID(), owner, parentFlow, instances, selected)
+}
+
+func (o connectInstanceSelector) selectKeylessReceiver(ctx context.Context, event events.Event, plan pinrouting.ConnectRoutePlan, boundary flowidentity.Instance) (pipeline.FlowInstanceSelection, error) {
+	bundle, found := semanticview.Bundle(o.source)
+	if !found {
+		return pipeline.FlowInstanceSelection{}, fmt.Errorf("construction selection requires its admitted tree")
+	}
+	view, found := bundle.FlowViewByID(plan.ReceiverEndpoint().Readback().FlowID)
+	if !found {
+		return pipeline.FlowInstanceSelection{}, fmt.Errorf("construction selection has an unknown target %s", plan.ReceiverEndpoint().Readback().FlowID)
+	}
+	var descendants []string
+	for cursor := view; cursor.Paths.FlowPath != boundary.TemplateID; cursor = cursor.Parent {
+		if cursor.Parent == nil {
+			return pipeline.FlowInstanceSelection{}, fmt.Errorf("target %s is outside lexical owner %s", view.Paths.FlowPath, boundary.TemplateID)
+		}
+		descendants = append(descendants, cursor.Paths.FlowPath)
+	}
+	parent := boundary
+	var selected pipeline.FlowInstanceSelection
+	fact, present := correlation.SourceArtifactFactFromContext(ctx)
+	if !present {
+		return selected, fmt.Errorf("connection ancestry requires its admitted source fact")
+	}
+	for index := len(descendants) - 1; index >= 0; index-- {
+		flowID := descendants[index]
+		lookup, err := pipeline.NewDeclaredFlowInstanceLookup(o.source, fact, event.RunID(), flowID, parent, nil)
+		if err != nil {
+			return selected, err
+		}
+		selected, err = pipeline.PrepareFlowInstanceSelection(ctx, o.index, o.plan, pipeline.FlowInstanceSelectionRequest{Lookup: lookup, Mode: contracts.FlowInputResolutionModeSelect, RunProposal: o.runProposal})
+		if err != nil {
+			return selected, err
+		}
+		parent = selected.Identity()
+	}
+	return selected, nil
 }
 
 func (o connectInstanceSelector) connectionLexicalOwner(ctx context.Context, event events.Event, ownerFlow string, instances map[string]flowidentity.Instance, selected map[string][]flowidentity.Instance) (flowidentity.Instance, error) {

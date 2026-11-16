@@ -39,6 +39,7 @@ type connectInstanceSelection struct {
 	receiver                 pinrouting.ConnectRoutePlanEndpoint
 	mode                     contracts.FlowInputResolutionMode
 	unavailableReceiverError error
+	boundarySelected         bool
 }
 
 func (s connectInstanceSelection) Empty() bool { return s.receiver.Readback().FlowID == "" }
@@ -89,7 +90,9 @@ func (o connectInstanceSelector) Materialize(ctx context.Context, event events.E
 	if err != nil {
 		return pinrouting.ConnectRoutePlanMaterialization{}, connectInstanceSelection{}, true, err
 	}
-	keys, err := pipeline.AdmitFlowInstanceKeyMaterial(o.source, plan.ReceiverEndpoint().Readback().FlowID, resolved)
+	selectionFlow := plan.SelectionFlowID()
+	nested := selectionFlow != plan.ReceiverEndpoint().Readback().FlowID
+	keys, err := pipeline.AdmitFlowInstanceKeyMaterial(o.source, selectionFlow, resolved)
 	if err != nil {
 		return pinrouting.ConnectRoutePlanMaterialization{}, connectInstanceSelection{}, true, err
 	}
@@ -101,7 +104,7 @@ func (o connectInstanceSelector) Materialize(ctx context.Context, event events.E
 	if !present {
 		return pinrouting.ConnectRoutePlanMaterialization{}, connectInstanceSelection{}, true, fmt.Errorf("connect selection requires its admitted source fact")
 	}
-	lookup, err := pipeline.NewDeclaredFlowInstanceLookup(o.source, fact, event.RunID(), plan.ReceiverEndpoint().Readback().FlowID, parent, keys)
+	lookup, err := pipeline.NewDeclaredFlowInstanceLookup(o.source, fact, event.RunID(), selectionFlow, parent, keys)
 	if err != nil {
 		return pinrouting.ConnectRoutePlanMaterialization{}, connectInstanceSelection{}, true, err
 	}
@@ -114,19 +117,34 @@ func (o connectInstanceSelector) Materialize(ctx context.Context, event events.E
 	if preview, _ := ctx.Value(connectRoutePlanPreviewRoutesKey{}).(*connectRoutePlanPreviewRoutes); preview != nil {
 		prepared = preview.plans
 	}
+	if nested {
+		prepared = nil
+	}
 	selected, err := pipeline.PrepareFlowInstanceSelection(ctx, o.index, o.plan, pipeline.FlowInstanceSelectionRequest{
 		Lookup: lookup, Mode: selection.mode, MissingInstanceID: connectMissingInstanceID(selection.KeyDigest), Prepared: prepared, RunProposal: o.runProposal,
 		Constructor: pipeline.FlowInstanceActivationRequest{ContractBundle: o.source, ConstructorInput: string(plan.ReceiverLocalEvent()), ResolvedKey: resolved,
 			PayloadProjection: projection, Bookkeeping: map[string]any{"last_source_event": event.ID()}, TriggerEvent: event},
 	})
+	if err == nil && nested {
+		selection.boundarySelected = true
+		selected, err = o.selectKeylessReceiver(ctx, event, plan, selected.Identity())
+		selection.KeyDigest, selection.KeyMaterial = "", nil
+	}
 	if err != nil {
 		if _, unavailable := selected.UnavailableReceiver(); unavailable {
-			return pinrouting.ConnectRoutePlanMaterialization{Failure: pinrouting.ConnectFailureLifecycleUnavailable}, connectInstanceSelection{
-				FlowInstanceSelection: selected, SourceEventID: event.ID(), unavailableReceiverError: err,
-			}, true, nil
+			if !nested {
+				return pinrouting.ConnectRoutePlanMaterialization{Failure: pinrouting.ConnectFailureLifecycleUnavailable}, connectInstanceSelection{
+					FlowInstanceSelection: selected, SourceEventID: event.ID(), unavailableReceiverError: err,
+				}, true, nil
+			}
+			selection.FlowInstanceSelection, selection.unavailableReceiverError = selected, err
+			return pinrouting.ConnectRoutePlanMaterialization{Failure: pinrouting.ConnectFailureLifecycleUnavailable}, selection, true, nil
 		}
 		if isolatedInstanceLookupMiss(err) {
-			return pinrouting.ConnectRoutePlanMaterialization{Failure: pinrouting.ConnectFailureTargetUnresolved}, connectInstanceSelection{}, true, nil
+			if !nested {
+				return pinrouting.ConnectRoutePlanMaterialization{Failure: pinrouting.ConnectFailureTargetUnresolved}, connectInstanceSelection{}, true, nil
+			}
+			return pinrouting.ConnectRoutePlanMaterialization{Failure: pinrouting.ConnectFailureTargetUnresolved}, selection, true, nil
 		}
 		if _, conflict := pipeline.IsolatedFlowInstanceActivationConflict(err); conflict {
 			return pinrouting.ConnectRoutePlanMaterialization{Failure: pinrouting.ConnectFailureInstanceConflict}, connectInstanceSelection{}, true, nil
