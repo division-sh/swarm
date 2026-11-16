@@ -11,7 +11,6 @@ import (
 
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
-	"github.com/division-sh/swarm/tests/support/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
 
@@ -28,30 +27,16 @@ func TestServedRunDebugStoragePreservesFourNativeFieldsBothStores(t *testing.T) 
 					lookup := runID
 					switch cut {
 					case "null-candidate":
-						if err := func() error {
-							fixtureContext := ctx
-							fixtureOwner := any(fixture.store)
-							write := func(ctx context.Context, tx *sql.Tx) error {
-								if fixture.postgres {
-									return runlifecyclefixture.ForcePostgresCompletionCandidateRevision(ctx, tx, runID)
-								}
-								return runlifecyclefixture.ForceSQLiteCompletionCandidateRevision(ctx, tx, runID)
-							}
-							switch owner := fixtureOwner.(type) {
-							case *PostgresStore:
-								if owner == nil || owner.backend == nil {
-									return fmt.Errorf("postgres event fixture store is required")
-								}
-								return owner.backend.RunTransaction(fixtureContext, write)
-							case *SQLiteRuntimeStore:
-								if owner == nil || owner.backend == nil {
-									return fmt.Errorf("sqlite event fixture store is required")
-								}
-								return owner.backend.RunTransaction(fixtureContext, "unrevisioned event fixture", write)
-							default:
-								return fmt.Errorf("event fixture store %T is unsupported", fixtureOwner)
-							}
-						}(); err != nil {
+						var err error
+						switch store := fixture.store.(type) {
+						case *PostgresStore:
+							err = store.runLifecyclePostgresOwner.ClearCompletionCandidateForTest(ctx, runID)
+						case *SQLiteRuntimeStore:
+							err = store.runLifecycleSQLiteOwner.ClearCompletionCandidateForTest(ctx, runID)
+						default:
+							err = fmt.Errorf("unsupported run lifecycle fixture %T", fixture.store)
+						}
+						if err != nil {
 							t.Fatal(err)
 						}
 					case "due-candidate":

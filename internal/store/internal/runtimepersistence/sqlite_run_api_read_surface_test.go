@@ -16,6 +16,7 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/sourceartifact"
+	nativerunlifecycle "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
 	"github.com/division-sh/swarm/tests/support/testutil/runlifecyclefixture"
 	"github.com/division-sh/swarm/tests/support/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
@@ -107,9 +108,9 @@ func TestSQLiteRunAPIReadSurface_LoadListAndDiagnoseEvidence(t *testing.T) {
 	)); err != nil {
 		t.Fatalf("seed sqlite runtime log: %v", err)
 	}
-	runlifecyclefixture.CorruptSQLiteState(
-		t, ctx, sqliteStore.backend.ConstructionHandle(), older, "completed", now.Add(-30*time.Minute),
-	)
+	if err := nativerunlifecycle.CorruptSQLiteStateForTest(ctx, sqliteStore.backend.ConstructionHandle(), older, "completed", now.Add(-30*time.Minute)); err != nil {
+		t.Fatalf("corrupt SQLite run state %s: %v", older, err)
+	}
 	seedSQLiteEntityStateRows(t, sqliteStore.backend.ConstructionHandle(), ctx, newer, newerEntityA, newerEntityB)
 	seedSQLiteEntityStateRows(t, sqliteStore.backend.ConstructionHandle(), ctx, older, olderEntity)
 	rootEvent := loadSQLiteDeliveryFixtureEvent(t, ctx, sqliteStore.backend.ConstructionHandle(), newerEvent)

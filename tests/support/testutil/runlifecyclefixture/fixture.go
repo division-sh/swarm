@@ -1,8 +1,6 @@
 package runlifecyclefixture
 
 import (
-	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -11,13 +9,6 @@ import (
 
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
-)
-
-type Dialect string
-
-const (
-	DialectPostgres Dialect = "postgres"
-	DialectSQLite   Dialect = "sqlite"
 )
 
 func ScenarioSetupOrigin() runtimerunlifecycle.RunOrigin {
@@ -35,20 +26,6 @@ func EventOrigin(t testing.TB, eventID, eventType string) runtimerunlifecycle.Ru
 		t.Fatalf("construct semantic event run origin: %v", err)
 	}
 	return origin
-}
-
-func ForcePostgresCompletionCandidateRevision(ctx context.Context, tx *sql.Tx, runID string) error {
-	_, err := tx.ExecContext(ctx, `INSERT INTO run_completion_evidence (run_id, revision, record_kind, due_at)
-		SELECT run_id,MAX(revision),'clear',NULL FROM run_completion_evidence WHERE run_id=$1::uuid AND record_kind='request'
-		GROUP BY run_id ON CONFLICT (run_id,revision,record_kind) DO NOTHING`, strings.TrimSpace(runID))
-	return err
-}
-
-func ForceSQLiteCompletionCandidateRevision(ctx context.Context, tx *sql.Tx, runID string) error {
-	_, err := tx.ExecContext(ctx, `INSERT INTO run_completion_evidence (run_id, revision, record_kind, due_at)
-		SELECT run_id,MAX(revision),'clear',NULL FROM run_completion_evidence WHERE run_id=? AND record_kind='request'
-		GROUP BY run_id ON CONFLICT (run_id,revision,record_kind) DO NOTHING`, strings.TrimSpace(runID))
-	return err
 }
 
 type CorruptSnapshot struct {
@@ -95,96 +72,6 @@ func NormalizeCorruptSnapshot(snapshot CorruptSnapshot) (CorruptSnapshot, string
 		)
 	}
 	return snapshot, failure, nullableFixtureTime(snapshot.EndedAt), nil
-}
-
-func CorruptPostgresOrigin(
-	t testing.TB,
-	ctx context.Context,
-	db *sql.DB,
-	runID string,
-	origin runtimerunlifecycle.RunOrigin,
-) {
-	t.Helper()
-	if err := corruptOrigin(ctx, db, DialectPostgres, runID, origin); err != nil {
-		t.Fatalf("corrupt PostgreSQL run origin %s: %v", runID, err)
-	}
-}
-
-func CorruptSQLiteOrigin(
-	t testing.TB,
-	ctx context.Context,
-	db *sql.DB,
-	runID string,
-	origin runtimerunlifecycle.RunOrigin,
-) {
-	t.Helper()
-	if err := corruptOrigin(ctx, db, DialectSQLite, runID, origin); err != nil {
-		t.Fatalf("corrupt SQLite run origin %s: %v", runID, err)
-	}
-}
-
-func corruptOrigin(
-	ctx context.Context,
-	db *sql.DB,
-	dialect Dialect,
-	runID string,
-	origin runtimerunlifecycle.RunOrigin,
-) error {
-	if err := origin.Validate(); err != nil {
-		return err
-	}
-	query := `
-		UPDATE runs
-		SET origin_kind = ?,
-		    trigger_event_id = NULLIF(?, ''),
-		    trigger_event_type = NULLIF(?, ''),
-		    forked_from_run_id = NULLIF(?, ''),
-		    forked_from_point_kind = NULLIF(?, ''),
-		    forked_from_revision = NULLIF(?, 0),
-		    forked_from_event_id = NULLIF(?, '')
-		WHERE run_id = ?
-	`
-	args := []any{
-		origin.Kind(), origin.EventID(), origin.EventType(),
-		origin.SourceRunID(), origin.ForkPointKind(), origin.ForkRevision(), origin.SourceEventID(), strings.TrimSpace(runID),
-	}
-	if dialect == DialectPostgres {
-		query = `
-			UPDATE runs
-			SET origin_kind = $2,
-			    trigger_event_id = NULLIF($3, '')::uuid,
-			    trigger_event_type = NULLIF($4, ''),
-			    forked_from_run_id = NULLIF($5, '')::uuid,
-			    forked_from_point_kind = NULLIF($6, ''),
-			    forked_from_revision = NULLIF($7, 0),
-			    forked_from_event_id = NULLIF($8, '')::uuid
-			WHERE run_id = $1::uuid
-		`
-		args = []any{
-			strings.TrimSpace(runID), origin.Kind(), origin.EventID(), origin.EventType(),
-			origin.SourceRunID(), origin.ForkPointKind(), origin.ForkRevision(), origin.SourceEventID(),
-		}
-	}
-	_, err := db.ExecContext(ctx, query, args...)
-	return err
-}
-
-func CorruptSQLiteState(
-	t testing.TB,
-	ctx context.Context,
-	db *sql.DB,
-	runID string,
-	state string,
-	endedAt time.Time,
-) {
-	t.Helper()
-	if _, err := db.ExecContext(ctx, `
-		UPDATE runs
-		SET status = ?, ended_at = ?
-		WHERE run_id = ?
-	`, strings.TrimSpace(state), nullableFixtureTime(endedAt), strings.TrimSpace(runID)); err != nil {
-		t.Fatalf("corrupt SQLite run state %s: %v", runID, err)
-	}
 }
 
 func nullableFixtureTime(value time.Time) any {

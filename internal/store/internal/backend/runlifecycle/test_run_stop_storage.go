@@ -41,11 +41,10 @@ func (s *RunLifecycleSQLiteOwner) ReadRunStopStorageForTest(ctx context.Context,
 
 func readRunStopStorageTxForTest(ctx context.Context, tx *sql.Tx, runID string) (RunStopStorage, error) {
 	var out RunStopStorage
-	state, err := ReadStopRunControlStorageTx(ctx, tx, runID)
-	if err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT r.status,COALESCE(c.control_status,'') FROM runs r LEFT JOIN run_control_state c ON c.run_id=r.run_id WHERE r.run_id=$1`, runID).Scan(&out.Status, &out.Control); err != nil {
 		return RunStopStorage{}, err
 	}
-	out.Status, out.Control = state.Status, state.Control
+	var err error
 	out.Pending, err = readStopPendingDeliveryCountTx(ctx, tx, runID)
 	if err != nil {
 		return RunStopStorage{}, err

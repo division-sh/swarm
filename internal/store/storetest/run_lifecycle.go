@@ -230,7 +230,7 @@ func materializeRunFixtureState(ctx context.Context, runner RunFixtureStore, fix
 
 type sourceArtifactFixtureOwner interface {
 	sourceartifactfixture.Writer
-	GetSourceArtifact(context.Context, string) (sourceartifact.Persisted, error)
+	sourceartifact.Reader
 }
 
 func ensureSemanticFixtureSourceArtifact(ctx context.Context, runner RunFixtureStore, bundleHash string, artifact *sourceartifact.AdmittedSourceArtifact) error {
