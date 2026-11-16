@@ -478,7 +478,9 @@ func proveSixtyOfHundredSelectedFork(t *testing.T, backend string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	selectedDeploymentRequirePauseRevisionProvenance(t, standing, pausePlan.ForkPoint.Revision, plan.ForkPoint.Revision, atCut)
+	if err := selectedDeploymentPauseRevisionProvenance(standing, pausePlan.ForkPoint.Revision, plan.ForkPoint.Revision, atCut); err != nil {
+		t.Fatal(err)
+	}
 	if err := runfork.ValidateFanOutPendingReplayAdmission(plan); err != nil {
 		t.Fatal(err)
 	}
@@ -578,35 +580,36 @@ func selectedDeploymentPauseRevisionFacts(t *testing.T, f *deploymentResourceFix
 	return facts
 }
 
-func selectedDeploymentRequirePauseRevisionProvenance(t *testing.T, facts map[int64][]selectedDeploymentRevisionFact, paused, planned int64, cut operatorread.OperatorEventListResult) {
-	t.Helper()
+func selectedDeploymentPauseRevisionProvenance(facts map[int64][]selectedDeploymentRevisionFact, paused, planned int64, cut operatorread.OperatorEventListResult) error {
 	if planned < paused {
-		t.Fatalf("paused source revision regressed: pause=%d plan=%d", paused, planned)
+		return fmt.Errorf("paused source revision regressed: pause=%d plan=%d", paused, planned)
 	}
-	eventsAtCut := make(map[string]operatorread.OperatorEventDelivery, len(cut.Events))
+	eventsAtCut := make(map[string]operatorread.OperatorEventFull, len(cut.Events))
 	deliveriesAtCut := make(map[string]string, len(cut.Events))
 	for _, event := range cut.Events {
 		if len(event.Deliveries) != 1 {
-			t.Fatalf("issued event %s lost its sole receiver", event.EventID)
+			return fmt.Errorf("issued event %s lost its sole receiver", event.EventID)
 		}
-		eventsAtCut[event.EventID] = event.Deliveries[0]
+		eventsAtCut[event.EventID] = event
 		deliveriesAtCut[event.Deliveries[0].DeliveryID] = event.EventID
 	}
-	knownIntents := map[string]bool{}
-	for revision, recorded := range facts {
-		if revision > paused {
-			continue
-		}
+	priorFacts := map[string]selectedDeploymentRevisionFact{}
+	knownFeeds := map[string]bool{}
+	for revision := int64(1); revision <= paused; revision++ {
+		recorded := facts[revision]
 		for _, fact := range recorded {
-			if fact.family == "fan_out_obligations" && fact.value["fact_kind"] == "intent" && fact.value["origin_kind"] == "deployment" {
-				knownIntents[fact.key] = true
+			priorFacts[fact.family+"|"+fact.key] = fact
+			if fact.present && fact.family == "fan_out_obligations" && fact.value["fact_kind"] == "intent" && fact.value["origin_kind"] == "deployment" {
+				if feedID, ok := fact.value["deployment_feed_id"].(string); ok && feedID != "" {
+					knownFeeds[feedID] = true
+				}
 			}
 		}
 	}
 	for revision := paused + 1; revision <= planned; revision++ {
 		recorded := facts[revision]
 		if len(recorded) == 0 {
-			t.Fatalf("paused source revision %d has no readable provenance (pause=%d plan=%d)", revision, paused, planned)
+			return fmt.Errorf("paused source revision %d has no readable provenance (pause=%d plan=%d)", revision, paused, planned)
 		}
 		for _, fact := range recorded {
 			kind := ""
@@ -622,30 +625,72 @@ func selectedDeploymentRequirePauseRevisionProvenance(t *testing.T, facts map[in
 					atCut, issued := eventsAtCut[eventID]
 					status, _ := fact.value["status"].(string)
 					allowed = issued && deliveriesAtCut[deliveryID] == eventID &&
-						(status == atCut.Status || atCut.StartedAt != nil && status == "delivered")
+						(status == atCut.Deliveries[0].Status || atCut.Deliveries[0].StartedAt != nil && status == "delivered")
 				case "event_receipts":
 					eventID, _ := fact.value["event_id"].(string)
-					_, issued := eventsAtCut[eventID]
-					allowed = issued && fact.value["subscriber_type"] == "platform" && fact.value["subscriber_id"] == "pipeline" && fact.value["outcome"] == "success"
+					atCut, issued := eventsAtCut[eventID]
+					allowed = issued && (atCut.Deliveries[0].Status == "delivered" || atCut.Deliveries[0].StartedAt != nil) &&
+						fact.value["subscriber_type"] == "platform" && fact.value["subscriber_id"] == "pipeline" && fact.value["outcome"] == "success"
 				case "fan_out_obligations":
+					prior, known := priorFacts[fact.family+"|"+fact.key]
 					switch kind {
 					case "intent":
-						allowed = knownIntents[fact.key] && fact.value["origin_kind"] == "deployment" && fact.value["cardinality"] == float64(100) && fact.value["cursor"] == float64(100)
+						allowed = known && prior.present && prior.value["fact_kind"] == "intent" &&
+							fact.value["origin_kind"] == "deployment" && fact.value["deployment_feed_id"] == prior.value["deployment_feed_id"] &&
+							fact.value["source_resource_version_id"] == prior.value["source_resource_version_id"] &&
+							fact.value["cardinality"] == float64(100) && fact.value["cursor"] == float64(100)
 					case "outcome":
+						// The original event and its outcome commit together. A later
+						// projection may repeat that fact; it cannot add an outcome.
 						eventID, _ := fact.value["event_id"].(string)
-						_, issued := eventsAtCut[eventID]
-						sourceEventID, _ := fact.value["source_event_id"].(string)
-						_, inherited := eventsAtCut[sourceEventID]
+						atCut, issued := eventsAtCut[eventID]
+						feedID, _ := fact.value["deployment_feed_id"].(string)
 						ordinal, ordinalOK := fact.value["ordinal"].(float64)
-						allowed = issued && (sourceEventID == "" || inherited) && fact.value["origin_kind"] == "deployment" &&
-							fact.value["outcome_kind"] == "committed" && ordinalOK && ordinal >= 0 && ordinal < 100
+						allowed = known && prior.present && reflect.DeepEqual(prior.value, fact.value) && issued && knownFeeds[feedID] &&
+							fact.value["origin_kind"] == "deployment" && fact.value["outcome_source_event_id"] == nil &&
+							fact.value["outcome_kind"] == "committed" && ordinalOK && ordinal >= 0 && ordinal < 100 &&
+							atCut.Payload["account_id"] == fmt.Sprintf("item-%03d", int(ordinal))
 					}
 				}
 			}
 			if !allowed {
-				t.Fatalf("paused source advanced by unproved revision %d family=%s key=%s kind=%s present=%t fact=%v (pause=%d plan=%d)", revision, fact.family, fact.key, kind, fact.present, fact.value, paused, planned)
+				return fmt.Errorf("paused source advanced by unproved revision %d family=%s key=%s kind=%s present=%t fact=%v (pause=%d plan=%d)", revision, fact.family, fact.key, kind, fact.present, fact.value, paused, planned)
 			}
+			priorFacts[fact.family+"|"+fact.key] = fact
 		}
+	}
+	return nil
+}
+
+func TestSixtyOfHundredPauseRevisionProvenance(t *testing.T) {
+	cut := operatorread.OperatorEventListResult{Events: []operatorread.OperatorEventFull{{
+		EventID: "issued-event", Payload: map[string]any{"account_id": "item-000"},
+		Deliveries: []operatorread.OperatorEventDelivery{{DeliveryID: "issued-delivery", Status: "delivered"}},
+	}}}
+	intent := selectedDeploymentRevisionFact{family: "fan_out_obligations", key: "intent", present: true, value: map[string]any{
+		"fact_kind": "intent", "origin_kind": "deployment", "deployment_feed_id": "original-feed",
+		"cardinality": float64(100), "cursor": float64(100), "source_resource_version_id": "original-version",
+	}}
+	outcome := selectedDeploymentRevisionFact{family: "fan_out_obligations", key: "outcome-0", present: true, value: map[string]any{
+		"fact_kind": "outcome", "origin_kind": "deployment", "deployment_feed_id": "original-feed",
+		"event_id": "issued-event", "outcome_source_event_id": nil, "ordinal": float64(0), "outcome_kind": "committed",
+	}}
+	for _, test := range []struct {
+		name      string
+		facts     map[int64][]selectedDeploymentRevisionFact
+		wantError bool
+	}{
+		{"same committed original outcome recaptured", map[int64][]selectedDeploymentRevisionFact{1: {intent, outcome}, 2: {outcome}}, false},
+		{"new outcome after pause", map[int64][]selectedDeploymentRevisionFact{1: {intent}, 2: {outcome}}, true},
+		{"new event after pause", map[int64][]selectedDeploymentRevisionFact{1: {intent, outcome}, 2: {{family: "events", key: "new-event", present: true, value: map[string]any{"event_id": "new-event"}}}}, true},
+		{"unreadable successor", map[int64][]selectedDeploymentRevisionFact{1: {intent, outcome}}, true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			err := selectedDeploymentPauseRevisionProvenance(test.facts, 1, 2, cut)
+			if (err != nil) != test.wantError {
+				t.Fatalf("revision classification error=%v, wantError=%t", err, test.wantError)
+			}
+		})
 	}
 }
 
