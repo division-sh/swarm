@@ -41,11 +41,10 @@ func withInstalledServePostgresConfig(t *testing.T, body, backend string) string
 	if raw == nil {
 		return body
 	}
-	connection, err := testpostgres.ParseConnection(raw.(string))
+	parameters, err := testpostgres.ParseConnectionParameters(raw.(string))
 	if err != nil {
 		t.Fatal(err)
 	}
-	parameters := connection.Parameters()
 	t.Setenv("TEST_SERVE_FIXTURE_PASSWORD", parameters.Password)
 	var document map[string]any
 	if err := yaml.Unmarshal([]byte(body), &document); err != nil {

@@ -5,19 +5,29 @@ import (
 	"errors"
 	"slices"
 
+	"github.com/division-sh/swarm/internal/runtime/bootverify"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/construction"
 )
 
-// BootCheckInput carries observations only. It neither retains possession nor
-// substitutes for construction's own exclusion and process admission.
+// BootCheckInput carries either an inspection observation or the fixed stage
+// that native construction invokes. Neither grants possession or admission.
 type BootCheckInput struct {
+	checks    bootverify.ConstructionChecks
 	sqlite    *construction.SQLiteInspectionInput
 	request   store.SchemaBootstrapRequest
 	schema    store.SchemaInspection
 	authority startupownership.AuthorityInspection
 	absent    bool
+}
+
+func ConstructionCheckInput(checks bootverify.ConstructionChecks) *BootCheckInput {
+	return &BootCheckInput{checks: checks}
+}
+
+func PostgresCheckTarget(dsn string) (bootverify.ConstructionTarget, error) {
+	return construction.PostgresCheckTarget(dsn)
 }
 
 func (e *AbsentSQLiteStore) BootInput(request store.SchemaBootstrapRequest) *BootCheckInput {
@@ -48,7 +58,7 @@ type bootCheckReader interface {
 }
 
 func (i *BootCheckInput) revalidate(ctx context.Context, reader bootCheckReader) error {
-	if i == nil {
+	if i == nil || i.checks != nil {
 		return nil
 	}
 	current, err := reader.InspectSchema(ctx, i.request)

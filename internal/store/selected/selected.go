@@ -18,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/runtime"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
+	"github.com/division-sh/swarm/internal/runtime/bootverify"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimechanneldelivery "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	runtimechannelnative "github.com/division-sh/swarm/internal/runtime/channelnative"
@@ -329,7 +330,11 @@ func validateOpenedRuntime(ctx context.Context, owner *Owner) (*Owner, error) {
 }
 
 func openPostgresRuntime(ctx context.Context, dsn string, ttl time.Duration, input *BootCheckInput) (*Owner, error) {
-	selected, _, err := storeconstruction.OpenPostgresRuntime(ctx, dsn)
+	var checks bootverify.ConstructionChecks
+	if input != nil {
+		checks = input.checks
+	}
+	selected, _, err := storeconstruction.OpenPostgresRuntime(ctx, dsn, checks)
 	if err != nil {
 		return nil, err
 	}
@@ -346,10 +351,12 @@ func openPostgresRuntime(ctx context.Context, dsn string, ttl time.Duration, inp
 
 func openSQLiteRuntime(ctx context.Context, path string, ttl time.Duration, input *BootCheckInput) (*Owner, error) {
 	var sqliteInput *storeconstruction.SQLiteInspectionInput
+	var checks bootverify.ConstructionChecks
 	if input != nil {
 		sqliteInput = input.sqlite
+		checks = input.checks
 	}
-	selected, _, err := storeconstruction.OpenSQLiteRuntimeForServing(ctx, path, sqliteInput)
+	selected, _, err := storeconstruction.OpenSQLiteRuntimeWithChecks(ctx, path, checks, sqliteInput)
 	if err != nil {
 		return nil, err
 	}

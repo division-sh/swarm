@@ -130,7 +130,7 @@ func startupAnswerRequest(ctx context.Context, cfg *config.Config, profile llmse
 		}
 		adapter := &OpenAICompatibleRuntime{baseURL: base}
 		payload, err = adapter.buildRequest(session, input, model.ConcreteModel)
-		endpoint = base + "/chat/completions"
+		endpoint = openAICompatibleChatCompletionsURL(base)
 		decode = func(raw []byte) (Response, error) {
 			var parsed openAICompatibleResponse
 			if err := json.Unmarshal(raw, &parsed); err != nil {
