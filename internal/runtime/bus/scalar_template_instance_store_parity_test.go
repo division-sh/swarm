@@ -13,9 +13,13 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	"github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -27,14 +31,20 @@ import (
 
 type postgresScalarTemplateInstanceStore struct {
 	*store.PostgresStore
-	indexCalls int
-	indexErr   error
+	indexCalls  int
+	indexErr    error
+	lookupFault func(runtimepipeline.FlowInstanceLookupRequest) error
 }
 
 func (s *postgresScalarTemplateInstanceStore) LookupFlowInstance(ctx context.Context, request runtimepipeline.FlowInstanceLookupRequest) (runtimepipeline.FlowInstanceObservation, bool, error) {
 	s.indexCalls++
 	if s.indexErr != nil {
 		return runtimepipeline.FlowInstanceObservation{}, false, s.indexErr
+	}
+	if s.lookupFault != nil {
+		if err := s.lookupFault(request); err != nil {
+			return runtimepipeline.FlowInstanceObservation{}, false, err
+		}
 	}
 	return s.PostgresStore.LookupFlowInstance(ctx, request)
 }
@@ -49,14 +59,20 @@ func (s *postgresScalarTemplateInstanceStore) ListFlowInstances(ctx context.Cont
 
 type sqliteScalarTemplateInstanceStore struct {
 	*store.SQLiteRuntimeStore
-	indexCalls int
-	indexErr   error
+	indexCalls  int
+	indexErr    error
+	lookupFault func(runtimepipeline.FlowInstanceLookupRequest) error
 }
 
 func (s *sqliteScalarTemplateInstanceStore) LookupFlowInstance(ctx context.Context, request runtimepipeline.FlowInstanceLookupRequest) (runtimepipeline.FlowInstanceObservation, bool, error) {
 	s.indexCalls++
 	if s.indexErr != nil {
 		return runtimepipeline.FlowInstanceObservation{}, false, s.indexErr
+	}
+	if s.lookupFault != nil {
+		if err := s.lookupFault(request); err != nil {
+			return runtimepipeline.FlowInstanceObservation{}, false, err
+		}
 	}
 	return s.SQLiteRuntimeStore.LookupFlowInstance(ctx, request)
 }
@@ -71,12 +87,18 @@ func (s *sqliteScalarTemplateInstanceStore) ListFlowInstances(ctx context.Contex
 
 type scalarPlanningIndexReader struct {
 	runtimepipeline.FlowInstanceIndexReader
-	read func() error
+	read        func() error
+	lookupFault func(runtimepipeline.FlowInstanceLookupRequest) error
 }
 
 func (r scalarPlanningIndexReader) LookupFlowInstance(ctx context.Context, request runtimepipeline.FlowInstanceLookupRequest) (runtimepipeline.FlowInstanceObservation, bool, error) {
 	if err := r.read(); err != nil {
 		return runtimepipeline.FlowInstanceObservation{}, false, err
+	}
+	if r.lookupFault != nil {
+		if err := r.lookupFault(request); err != nil {
+			return runtimepipeline.FlowInstanceObservation{}, false, err
+		}
 	}
 	return r.FlowInstanceIndexReader.LookupFlowInstance(ctx, request)
 }
@@ -90,7 +112,7 @@ func (r scalarPlanningIndexReader) ListFlowInstances(ctx context.Context, scope 
 
 func (s *postgresScalarTemplateInstanceStore) WithFlowInstancePlanningSnapshot(ctx context.Context, scope runtimepipeline.FlowInstanceLookupScope, prepare func(context.Context, runtimepipeline.FlowInstanceIndexReader) error) error {
 	return s.PostgresStore.WithFlowInstancePlanningSnapshot(ctx, scope, func(ctx context.Context, reader runtimepipeline.FlowInstanceIndexReader) error {
-		return prepare(ctx, scalarPlanningIndexReader{FlowInstanceIndexReader: reader, read: func() error {
+		return prepare(ctx, scalarPlanningIndexReader{FlowInstanceIndexReader: reader, lookupFault: s.lookupFault, read: func() error {
 			s.indexCalls++
 			return s.indexErr
 		}})
@@ -99,7 +121,7 @@ func (s *postgresScalarTemplateInstanceStore) WithFlowInstancePlanningSnapshot(c
 
 func (s *sqliteScalarTemplateInstanceStore) WithFlowInstancePlanningSnapshot(ctx context.Context, scope runtimepipeline.FlowInstanceLookupScope, prepare func(context.Context, runtimepipeline.FlowInstanceIndexReader) error) error {
 	return s.SQLiteRuntimeStore.WithFlowInstancePlanningSnapshot(ctx, scope, func(ctx context.Context, reader runtimepipeline.FlowInstanceIndexReader) error {
-		return prepare(ctx, scalarPlanningIndexReader{FlowInstanceIndexReader: reader, read: func() error {
+		return prepare(ctx, scalarPlanningIndexReader{FlowInstanceIndexReader: reader, lookupFault: s.lookupFault, read: func() error {
 			s.indexCalls++
 			return s.indexErr
 		}})
@@ -144,6 +166,25 @@ func (s *sqliteScalarTemplateInstanceStore) scalarTemplateInstanceIndexCalls() i
 func TestScalarTemplateInstanceResolutionPersistsAndReplaysOnSQLiteAndPostgres(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
+			for _, tc := range []struct {
+				name  string
+				shape canonicalrouting.CrossInstanceConnectionShape
+			}{
+				{"same_flow_parent_binding", canonicalrouting.CrossInstanceSameKeyedFlow},
+				{"nested_parent_binding", canonicalrouting.CrossInstanceNestedKeyless},
+				{"nested_account_absent", canonicalrouting.CrossInstanceNestedKeyless},
+				{"nested_receiver_unavailable", canonicalrouting.CrossInstanceNestedKeyless},
+				{"nested_foreign_run", canonicalrouting.CrossInstanceNestedKeyless},
+				{"nested_account_read_error", canonicalrouting.CrossInstanceNestedKeyless},
+				{"nested_receiver_read_error", canonicalrouting.CrossInstanceNestedKeyless},
+				{"nested_intermediate_read_error", canonicalrouting.CrossInstanceNestedKeyless},
+				{"nested_interleaved_plans", canonicalrouting.CrossInstanceNestedKeyless},
+				{"nested_recorded_replay", canonicalrouting.CrossInstanceNestedKeyless},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					proveCrossInstanceNativeBoundary(t, backend, tc.name, tc.shape)
+				})
+			}
 			for _, fixture := range []canonicalrouting.ArtifactID{canonicalrouting.TemplateSelectExisting, canonicalrouting.TemplateSelectOrCreate} {
 				t.Run(string(fixture), func(t *testing.T) {
 					repo := canonicalrouting.RepoRoot(t)
@@ -288,6 +329,297 @@ func TestScalarTemplateInstanceResolutionPersistsAndReplaysOnSQLiteAndPostgres(t
 				})
 			}
 		})
+	}
+}
+
+func proveCrossInstanceNativeBoundary(t *testing.T, backend, name string, shape canonicalrouting.CrossInstanceConnectionShape) {
+	t.Helper()
+	root := canonicalrouting.CopyCrossInstanceConnection(t, shape)
+	boundOuter := strings.HasSuffix(name, "parent_binding")
+	if boundOuter {
+		root = canonicalrouting.CopyWrappedCrossInstanceConnection(t, shape, false)
+		canonicalrouting.BindCrossInstanceOuterKey(t, root)
+	} else {
+		canonicalrouting.AddCrossInstanceKeylessIntermediate(t, root)
+		if name == "nested_account_absent" {
+			canonicalrouting.AddCrossInstancePreparedAccount(t, root)
+		}
+	}
+	repo := canonicalrouting.RepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := semanticview.Wrap(bundle)
+	runID := uuid.NewString()
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForSource(context.Background(), source), runID)
+	selected := newScalarTemplateInstanceParityStore(t, backend, ctx)
+	ctx = originalEventBusFixtureContext(t, ctx, selected)
+	at := time.Now().UTC()
+	ensureRun := func(id string) {
+		t.Helper()
+		storetest.RequireRun(t, runtimecorrelation.WithRunID(ctx, id), selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: id, Artifact: bundle.SourceArtifact, StartedAt: at})
+	}
+	seed := func(id, flow, key string, parent runtimeflowidentity.Instance) runtimeflowidentity.Instance {
+		t.Helper()
+		var identity runtimeflowidentity.Instance
+		var err error
+		schema, found := source.FlowSchemaByID(flow)
+		if !found {
+			t.Fatalf("undeclared native fixture flow %q", flow)
+		}
+		switch {
+		case flow == ".":
+			identity = runtimeflowidentity.Stored(source, ".", id, id, runtimeflowidentity.EntityID(id), "")
+		case !schema.Instance.Empty():
+			identity, err = runtimeflowidentity.KeyedChild(source, parent, flow, key)
+		default:
+			identity, err = runtimeflowidentity.KeylessChild(source, parent, flow)
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		instance := runtimepipeline.WorkflowInstance{InstanceID: identity.InstanceID, StorageRef: identity.InstancePath, EntityID: identity.EntityID, ParentFlowID: identity.ParentRoute.FlowID, ParentFlowInstance: identity.ParentRoute.FlowInstance, ParentEntityID: identity.ParentEntityID, WorkflowName: flow, WorkflowVersion: source.WorkflowVersion(), InstanceKey: key, CreatedAt: at, EnteredStageAt: at}
+		if !schema.Instance.Empty() {
+			instance.InstanceKind = "template"
+		}
+		if entity, present := entityruntime.ResolveForFlow(source, flow); present {
+			constructor, err := runtimepipeline.CompileFlowConstructor(source, flow, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			payload := map[string]any{}
+			if !schema.Instance.Empty() {
+				payload[schema.Instance.Path()] = key
+			}
+			instance.Fields, err = constructor.InitialFields(payload, key)
+			if err != nil {
+				t.Fatal(err)
+			}
+			instance.EntityType = entity.EntityType
+		}
+		seedComponentFlowConstruction(t, runtimecorrelation.WithRunID(ctx, id), selected, source, instance)
+		return identity
+	}
+	ensureRun(runID)
+	parent := seed(runID, ".", "", runtimeflowidentity.Instance{})
+	prefix := ""
+	if boundOuter {
+		prefix = "envelope/"
+		parent = seed(runID, "envelope", "left", parent)
+	}
+	accountFlow := prefix + "account"
+	sender := seed(runID, accountFlow, "7", parent)
+	var alternateReceiver runtimeflowidentity.Instance
+	if name == "nested_interleaved_plans" {
+		bridge := seed(runID, accountFlow+"/bridge", "", sender)
+		alternateReceiver = seed(runID, accountFlow+"/bridge/audit", "", bridge)
+	}
+	if shape == canonicalrouting.CrossInstanceNestedKeyless {
+		sender = seed(runID, accountFlow+"/ticket", "42", sender)
+	}
+	targetParent, targetRun := parent, runID
+	if name == "nested_foreign_run" {
+		targetRun = uuid.NewString()
+		ensureRun(targetRun)
+		targetParent = seed(targetRun, ".", "", runtimeflowidentity.Instance{})
+	}
+	var target runtimeflowidentity.Instance
+	if name != "nested_account_absent" {
+		target = seed(targetRun, accountFlow, "8", targetParent)
+		if shape == canonicalrouting.CrossInstanceNestedKeyless {
+			if !boundOuter {
+				target = seed(targetRun, accountFlow+"/bridge", "", target)
+			}
+			flow := accountFlow + "/audit"
+			if !boundOuter {
+				flow = accountFlow + "/bridge/audit"
+			}
+			target = seed(targetRun, flow, "", target)
+		}
+	}
+	if boundOuter {
+		rootOwner := runtimeflowidentity.Stored(source, ".", runID, runID, runtimeflowidentity.EntityID(runID), "")
+		otherParent := seed(runID, "envelope", "right", rootOwner)
+		other := seed(runID, accountFlow, "8", otherParent)
+		if shape == canonicalrouting.CrossInstanceNestedKeyless {
+			other = seed(runID, accountFlow+"/audit", "", other)
+		}
+		if other.EntityID == target.EntityID || target.ParentEntityID == sender.EntityID {
+			t.Fatal("repeated-key parent proof lost distinct structural owners")
+		}
+	}
+	var native any
+	setReadFault := func(fault func(runtimepipeline.FlowInstanceLookupRequest) error) {
+		switch owner := selected.(type) {
+		case *sqliteScalarTemplateInstanceStore:
+			native, owner.lookupFault = owner.SQLiteRuntimeStore, fault
+		case *postgresScalarTemplateInstanceStore:
+			native, owner.lookupFault = owner.PostgresStore, fault
+		}
+	}
+	setReadFault(nil)
+	if name == "nested_receiver_unavailable" {
+		if count, err := storetest.SetWorkflowProjectionDraining(ctx, native, runID, target.InstancePath); err != nil || count != 1 {
+			t.Fatalf("unavailable receiver fixture changed %d headers: %v", count, err)
+		}
+	}
+	before, err := selected.ListWorkflowInstances(ctx, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var beforeForeign []runtimepipeline.WorkflowInstance
+	if targetRun != runID {
+		beforeForeign, err = selected.ListWorkflowInstances(runtimecorrelation.WithRunID(ctx, targetRun), targetRun)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	readFailure := errors.New("independent cross-instance read failure")
+	faultReads := 0
+	accountLookups := 0
+	if name == "nested_account_absent" {
+		setReadFault(func(request runtimepipeline.FlowInstanceLookupRequest) error {
+			if request.DeclaredSelection() && request.FlowID() == accountFlow {
+				accountLookups++
+			}
+			return nil
+		})
+	}
+	readError := strings.HasSuffix(name, "read_error")
+	if readError {
+		faultFlow := accountFlow
+		if name == "nested_receiver_read_error" {
+			faultFlow += "/bridge/audit"
+		} else if name == "nested_intermediate_read_error" {
+			faultFlow += "/bridge"
+		}
+		setReadFault(func(request runtimepipeline.FlowInstanceLookupRequest) error {
+			if request.DeclaredSelection() && request.FlowID() == faultFlow {
+				faultReads++
+				return readFailure
+			}
+			return nil
+		})
+	}
+	eventName := "account.cross"
+	if shape == canonicalrouting.CrossInstanceNestedKeyless {
+		eventName = "ticket.cross"
+	}
+	event := eventtest.ExistingRunRootIngressWithRoutingSource(uuid.NewString(), events.EventType(sender.InstancePath+"/"+eventName), "fixture", "", json.RawMessage(`{"target_account_id":"8"}`), 0, runID, events.EventEnvelope{}, eventtest.ConcreteTemplateRoutingSource(sender.TemplateID, sender.InstancePath, sender.EntityID), at)
+	opts := runtimebus.EventBusOptions{ContractBundle: source}
+	var activationPlanner runtimepipeline.FlowInstanceActivationPlanner
+	if name == "nested_account_absent" {
+		opts.TemplateInstancePlanner = runtimepipeline.FlowInstanceActivationPlannerFunc(func(ctx context.Context, request runtimepipeline.FlowInstanceActivationRequest) (runtimepipeline.FlowInstanceActivationPlan, error) {
+			return activationPlanner.PrepareFlowInstanceActivation(ctx, request)
+		})
+	}
+	bus, err := newNativeScopedTestEventBus(t, selected, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if name == "nested_account_absent" {
+		coordinator := newEventBusWorkflowCoordinator(bus, selected, newFixtureWorkflowModule(t, bundle))
+		if coordinator == nil {
+			t.Fatal("prepared-account control requires its original native construction owner")
+		}
+		planner := manager.NewAgentManagerWithOptions(nil, nil, manager.AgentManagerOptions{
+			ExecutionPosture: executionposture.Live, BaseContext: ctx, SourceArtifactFact: testSourceArtifactFact(source),
+			SemanticSource: source, WorkflowInstances: coordinator, WorkOwner: nativeBusWorkOwner(t, ctx), ReceiverExecution: eventreceiver.NormalExecution(),
+		})
+		activationPlanner = planner
+		t.Cleanup(func() {
+			if err := planner.Shutdown(); err != nil {
+				t.Error(err)
+			}
+		})
+	}
+	plan, err := bus.CheckPublishRecipientPlan(ctx, event)
+	positive := boundOuter || name == "nested_recorded_replay" || name == "nested_interleaved_plans"
+	switch {
+	case readError:
+		if !errors.Is(err, readFailure) || faultReads == 0 || len(plan.DeliveryRoutes) != 0 {
+			t.Fatalf("independent lookup error became absence/route: reads=%d plan=%+v err=%v", faultReads, plan, err)
+		}
+		if err := bus.Publish(ctx, event); !errors.Is(err, readFailure) {
+			t.Fatalf("native publication swallowed the named read error: %v", err)
+		}
+	case positive:
+		want := events.RouteIdentity{FlowID: target.TemplateID, FlowInstance: target.InstancePath, EntityID: target.EntityID}
+		if err != nil || plan.TargetFailure != "" || len(plan.DeliveryRoutes) != 1 || plan.DeliveryRoutes[0].Target.Route() != want || plan.DeliveryRoutes[0].ConnectClaim.Empty() {
+			t.Fatalf("cross-instance row escaped its recorded outer parent: plan=%+v target=%+v err=%v", plan, target, err)
+		}
+		if name == "nested_interleaved_plans" {
+			other := eventtest.ExistingRunRootIngressWithRoutingSource(uuid.NewString(), event.Type(), "fixture", "", json.RawMessage(`{"target_account_id":"7"}`), 0, runID, events.EventEnvelope{}, event.RoutingSource(), at)
+			otherPlan, err := bus.CheckPublishRecipientPlan(ctx, other)
+			otherTarget := events.RouteIdentity{FlowID: alternateReceiver.TemplateID, FlowInstance: alternateReceiver.InstancePath, EntityID: alternateReceiver.EntityID}
+			if err != nil || otherPlan.TargetFailure != "" || len(otherPlan.DeliveryRoutes) != 1 || otherPlan.DeliveryRoutes[0].Target.Route() != otherTarget || plan.DeliveryRoutes[0].Target.Route() != want {
+				t.Fatalf("interleaved receiver selection changed an earlier plan: first=%+v other=%+v err=%v", plan, otherPlan, err)
+			}
+			if err := bus.Publish(ctx, other); err != nil {
+				t.Fatal(err)
+			}
+			otherRoutes, err := selected.ListEventDeliveryRoutes(ctx, other.ID())
+			if err != nil || !reflect.DeepEqual(otherRoutes, otherPlan.DeliveryRoutes) {
+				t.Fatalf("interleaved publication lost its own immutable receiver: routes=%+v err=%v", otherRoutes, err)
+			}
+		}
+		if err := bus.Publish(ctx, event); err != nil {
+			t.Fatal(err)
+		}
+		routes, err := selected.ListEventDeliveryRoutes(ctx, event.ID())
+		if err != nil || len(routes) != 1 || !reflect.DeepEqual(routes, plan.DeliveryRoutes) {
+			t.Fatalf("native parent-bound route differs from immutable plan: %+v err=%v", routes, err)
+		}
+		stored, found, err := selected.LoadPreparedPublishEvent(ctx, event.ID())
+		if err != nil || !found || stored.Event.Event().SourceRoute().EntityID != sender.EntityID {
+			t.Fatalf("native parent-bound publication replaced its sender: %+v found=%t err=%v", stored, found, err)
+		}
+		if name == "nested_recorded_replay" {
+			restarted, err := newNativeScopedTestEventBus(t, selected, runtimebus.EventBusOptions{ContractBundle: source})
+			if err != nil {
+				t.Fatal(err)
+			}
+			carrier := subscribeInternalDeliveriesForTest(t, restarted, routes[0].Recipient.ID())
+			selected.setScalarTemplateInstanceIndexError(errors.New("nested recorded replay must not reselect account or keyless descendants"))
+			selected.resetScalarTemplateInstanceIndexCalls()
+			if _, err := restarted.RecoverPersistedPipeline(ctx, runtimepipelineobligation.ClaimedWork{Event: event, Scope: runtimepipelineobligation.ScopeSubscribed}, nil); err != nil {
+				t.Fatal(err)
+			}
+			replayed := requireBusEvent(t, carrier, "recorded nested keyless receiver")
+			if replayed.TargetRoute() != want || replayed.SourceRoute() != event.SourceRoute() || selected.scalarTemplateInstanceIndexCalls() != 0 {
+				t.Fatalf("recorded nested delivery reinterpreted current ancestry: target=%+v source=%+v reads=%d", replayed.TargetRoute(), replayed.SourceRoute(), selected.scalarTemplateInstanceIndexCalls())
+			}
+			selected.setScalarTemplateInstanceIndexError(nil)
+		}
+	default:
+		wantFailure := runtimepinrouting.TargetFailureFromConnect(runtimepinrouting.ConnectFailureTargetUnresolved).Code()
+		if name == "nested_receiver_unavailable" {
+			wantFailure = runtimepinrouting.FailureTargetUnreachableTerminated.Code()
+		}
+		if err != nil || plan.TargetFailure != wantFailure || len(plan.DeliveryRoutes) != 0 {
+			t.Fatalf("absent/unavailable receiver was selected or constructed: %+v err=%v", plan, err)
+		}
+		if name == "nested_account_absent" && accountLookups != 2 {
+			t.Fatalf("nested path borrowed the earlier prepared account instead of native absence: lookups=%d", accountLookups)
+		}
+		if err := bus.Publish(ctx, event); err != nil {
+			t.Fatalf("publish counted nested refusal: %v", err)
+		}
+		if routes, err := selected.ListEventDeliveryRoutes(ctx, event.ID()); err != nil || len(routes) != 0 {
+			t.Fatalf("refused nested path committed deliveries: %+v err=%v", routes, err)
+		}
+	}
+	setReadFault(nil)
+	after, err := selected.ListWorkflowInstances(ctx, runID)
+	if err != nil || !reflect.DeepEqual(before, after) {
+		t.Fatalf("selection constructed/reinitialized unrelated state: before=%+v after=%+v err=%v", before, after, err)
+	}
+	if targetRun != runID {
+		afterForeign, err := selected.ListWorkflowInstances(runtimecorrelation.WithRunID(ctx, targetRun), targetRun)
+		if err != nil || !reflect.DeepEqual(beforeForeign, afterForeign) {
+			t.Fatalf("foreign run changed during refusal: before=%+v after=%+v err=%v", beforeForeign, afterForeign, err)
+		}
 	}
 }
 

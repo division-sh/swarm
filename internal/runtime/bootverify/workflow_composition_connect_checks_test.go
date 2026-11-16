@@ -492,7 +492,7 @@ func TestRun_FailsClosedForInvalidParentCompositionConnect(t *testing.T) {
 		{"nested_intrinsic_select", "schema.yaml", "payload.target_account_id", "event.id", "event.id is only valid for resolution create"},
 		{"nested_create", "schema.yaml", "to: account/audit, resolution: select", "to: account/audit, resolution: create", `connect to keyless receiver "account/audit" in another instance requires resolution: select`},
 		{"nested_select_or_create", "schema.yaml", "to: account/audit, resolution: select", "to: account/audit, resolution: select-or-create", `connect to keyless receiver "account/audit" in another instance requires resolution: select`},
-		{"nested_missing_mode", "schema.yaml", "to: account/audit, resolution: select", "to: account/audit", `connect to keyless receiver "account/audit" in another instance requires resolution: select`},
+		{"nested_missing_mode", "schema.yaml", "to: account/audit, resolution: select, key_from: payload.target_account_id", "to: account/audit", `connect to keyless receiver "account/audit" in another instance requires resolution: select`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := canonicalrouting.CopyCrossInstanceConnection(t, canonicalrouting.CrossInstanceNestedKeyless)
