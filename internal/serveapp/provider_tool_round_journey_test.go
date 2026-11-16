@@ -62,9 +62,7 @@ func TestChannelOneBotOpenAICompatibleReasoningToolRound(t *testing.T) {
 			const reply = "Swarm heard: round customer"
 			waitUncertainCopyDelivery(t, h, 0, reply)
 			requireReceptionistReplies(t, h, map[string]string{reply: "2001"})
-			if len(llmapi.ActorRequests(provider.Requests())) != 2 || business.Load() != 2 {
-				t.Fatalf("requests=%d, want one non-emit tool round", len(provider.Requests()))
-			}
+			requireTemplateRoundRequests(t, provider.Requests(), business.Load(), 2)
 			next := postResponsesChannelUpdate(t, callback, signing, map[string]any{
 				"update_id": 835902, "message": map[string]any{
 					"message_id": 835902, "from": map[string]any{"id": 2001},
@@ -77,10 +75,19 @@ func TestChannelOneBotOpenAICompatibleReasoningToolRound(t *testing.T) {
 			const nextReply = "Swarm heard: remembered customer"
 			waitUncertainCopyDelivery(t, h, 1, nextReply)
 			requireReceptionistReplies(t, h, map[string]string{reply: "2001", nextReply: "2001"})
-			if len(llmapi.ActorRequests(provider.Requests())) != 3 || business.Load() != 3 {
-				t.Fatalf("requests=%d, want completed round plus one new user request", len(provider.Requests()))
-			}
+			requireTemplateRoundRequests(t, provider.Requests(), business.Load(), 3)
 		})
+	}
+}
+
+func requireTemplateRoundRequests(t *testing.T, requests []llmapi.Request, business int32, want int) {
+	t.Helper()
+	actors := len(llmapi.ActorRequests(requests))
+	startup := len(requests) - actors
+	// telegram-chat declares an instance key: template flows have no static
+	// boot-start target, unlike an already instantiated agent population.
+	if actors != want || int(business) != want || startup != 0 || len(requests) != int(business)+startup {
+		t.Fatalf("provider calls: total=%d actors=%d business=%d startup=%d, want %d business + 0 startup", len(requests), actors, business, startup, want)
 	}
 }
 
@@ -154,9 +161,7 @@ func TestChannelOneBotAnthropicToolRound(t *testing.T) {
 			const reply = "Swarm heard: Anthropic customer"
 			waitUncertainCopyDelivery(t, h, 0, reply)
 			requireReceptionistReplies(t, h, map[string]string{reply: "2001"})
-			if len(llmapi.ActorRequests(provider.Requests())) != 2 || business.Load() != 2 {
-				t.Fatalf("Anthropic requests=%d, want one exact non-emit round", len(provider.Requests()))
-			}
+			requireTemplateRoundRequests(t, provider.Requests(), business.Load(), 2)
 		})
 	}
 }

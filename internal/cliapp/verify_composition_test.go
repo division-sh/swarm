@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/packartifact"
+	"github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/bootverify"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
@@ -352,9 +353,18 @@ func TestVerifyPublicExistingStoreReportsDeploymentPreparationBothStores(t *test
 				if err != nil || !reflect.DeepEqual(before, after) {
 					t.Fatalf("verify changed schema: before=%+v after=%+v err=%v", before, after, err)
 				}
-				for _, observation := range result.Observations {
-					if observation.CheckID == "selected_store_schema" && observation.Status != bootverify.AdmissionPassed {
-						t.Fatalf("preparation mistaken for invalidity: %+v", observation)
+				for _, check := range []string{"selected_store_access", "selected_store_schema"} {
+					passed := false
+					for _, observation := range result.Observations {
+						if observation.CheckID == check {
+							if observation.Status != bootverify.AdmissionPassed {
+								t.Fatalf("native store read did not pass: %+v", observation)
+							}
+							passed = true
+						}
+					}
+					if !passed {
+						t.Fatalf("missing explicit %s observation", check)
 					}
 				}
 				if !prepared {
@@ -431,6 +441,132 @@ func TestVerifyPublicExistingStoreReportsDeploymentPreparationBothStores(t *test
 					t.Fatalf("read-only upgrade inspection changed admitted source: %+v, %v", availability, err)
 				}
 			})
+			for _, survivor := range []string{"valid", "invalid_kept_source", "clear_to_empty"} {
+				t.Run("committed_cleanup_snapshot_"+survivor, func(t *testing.T) {
+					native, text := newVerifyCompositionBootStore(t, backend, root, complete)
+					configPath := filepath.Join(t.TempDir(), "runtime.yaml")
+					writeRuntimeConfigText(t, configPath, text+"llm: {backend: anthropic}\n")
+					process, err := native.AcquireProcessCapability(ctx, startupownership.AcquireRequest{
+						OwnerID: "cleanup-survivors", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString(),
+					})
+					if err != nil {
+						t.Fatal(err)
+					}
+					t.Cleanup(func() { _ = process.Release(context.Background()) })
+					original, err := startupownership.WithProcessMutationAuthority(ctx, process)
+					if err != nil {
+						t.Fatal(err)
+					}
+					runID := uuid.NewString()
+					storetest.RequireRun(t, original, native, storetest.RunFixture{RunID: runID, Origin: storetest.ScenarioSetupOrigin(), Artifact: bundle.SourceArtifact})
+					operation, err := process.AdmitResetOperation(ctx, destructivereset.Request{
+						OperationID: uuid.NewString(), ActorTokenID: "operator", RequestHash: "snapshot-survivors", RequestedAt: time.Now().UTC(), IncludeSourceArtifactsSet: true,
+					})
+					if err != nil {
+						t.Fatal(err)
+					}
+					reader := native.(destructivereset.InventoryReader)
+					plan, err := (destructivereset.InventoryPlanner{Reader: reader}).BuildPlan(ctx, operation.Request)
+					if err != nil {
+						t.Fatal(err)
+					}
+					planned := operation
+					planned.Phase, planned.Revision = destructivereset.PhasePlanned, operation.Revision+1
+					planned.Plan = &destructivereset.Result{OperationName: destructivereset.DefaultOperationName, PlannedAt: operation.Request.RequestedAt, Plan: plan}
+					if err := process.AdvanceResetOperation(ctx, operation, planned); err != nil {
+						t.Fatal(err)
+					}
+					quiescence, err := native.(destructivereset.QuiescenceStore).ApplyDestructiveResetQuiescence(original, destructivereset.QuiescenceRequest{
+						OperationID: operation.Request.OperationID, ActorTokenID: operation.Request.ActorTokenID, RequestedAt: operation.Request.RequestedAt, Result: *planned.Plan,
+					})
+					if err != nil {
+						t.Fatal(err)
+					}
+					if _, err := process.ApplyDestructiveResetCleanup(original, destructivereset.CleanupRequest{
+						OperationID: operation.Request.OperationID, ActorTokenID: operation.Request.ActorTokenID, RequestedAt: operation.Request.RequestedAt, Result: *planned.Plan, Quiescence: quiescence,
+					}, nil); err != nil {
+						t.Fatal(err)
+					}
+					committed, err := process.ReadResetOperation(ctx, operation.Request.OperationID)
+					if err != nil || committed.Phase != destructivereset.PhaseCleanupCommitted || committed.Cleanup == nil {
+						t.Fatalf("cleanup did not commit through its owner: %+v, %v", committed, err)
+					}
+					artifact := bundle.SourceArtifact
+					if survivor == "invalid_kept_source" {
+						artifact = sourceartifactfixture.New("manifest.yaml", []byte("invalid: ["))
+					}
+					// Reuse a member of P after cleanup. Its current row must not be
+					// discarded by the old cleanup receipt's membership list.
+					storetest.RequireRun(t, original, native, storetest.RunFixture{RunID: runID, Origin: storetest.ScenarioSetupOrigin(), Artifact: artifact})
+					before, err := reader.ReadResetInventory(ctx)
+					if err != nil {
+						t.Fatal(err)
+					}
+					cfg, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: root, ExplicitPath: configPath})
+					if err != nil {
+						t.Fatal(err)
+					}
+					paths, err := ResolveCLISourcePaths(root, CLISourcePathOptions{SourceRoot: root, ConfigPath: configPath})
+					if err != nil {
+						t.Fatal(err)
+					}
+					source := semanticview.Wrap(bundle)
+					if survivor == "clear_to_empty" {
+						source = nil
+					}
+					request, _, err := prepareVerifySelectedStoreInspection(ctx, root, paths, cfg, cliSwarmDirOptions{}, source)
+					if err != nil {
+						t.Fatal(err)
+					}
+					base, err := LoadConfiguredPlatformPackBase(root, cfg)
+					if err != nil {
+						t.Fatal(err)
+					}
+					bases, err := packartifact.NewPlatformPackBaseGenerationOwner(base)
+					if err != nil {
+						t.Fatal(err)
+					}
+					profile, err := cfg.Config.LLMBackendProfile()
+					if err != nil {
+						t.Fatal(err)
+					}
+					report := runtime.WorkflowContractValidationResult{BootReport: bootverify.Report{Purpose: bootverify.ExecutionValidation, SourceArtifactHash: bundle.SourceArtifact.BundleHash()}}
+					inspectVerifySelectedStore(ctx, root, paths, cfg, cliSwarmDirOptions{}, source, runtime.WorkflowContractValidationOptions{LLMProfile: profile}, bases, nil, false, &report,
+						serveStoreInspection{selection: request.Selection, dryRun: true, reset: &committed})
+					failed, exactRefusal := false, false
+					seen := map[string]bool{}
+					for _, observation := range report.BootReport.Observations {
+						failed = failed || observation.Status == bootverify.AdmissionFailed || observation.Status == bootverify.AdmissionUnavailable
+						seen[observation.CheckID] = observation.Status == bootverify.AdmissionPassed
+						if observation.Status == bootverify.AdmissionFailed {
+							if survivor == "invalid_kept_source" && observation.CheckID == "retained_source_integrity" && strings.HasPrefix(observation.Subject, "run:"+runID+"/source:") {
+								exactRefusal = true
+							}
+							if survivor == "clear_to_empty" && observation.CheckID == "pinned_source_admission" && strings.Contains(observation.Reason, "surviving runs or deliveries") {
+								exactRefusal = true
+							}
+						}
+					}
+					if failed != (survivor != "valid") || (survivor != "valid" && !exactRefusal) {
+						t.Fatalf("committed cleanup concealed or invented survivor refusal: %+v", report.BootReport)
+					}
+					if survivor == "valid" {
+						for _, check := range bootverify.SelectedStoreDependentAdmissionChecks() {
+							if !seen[check.ID] {
+								t.Fatalf("surviving population did not pass %s: %+v", check.ID, report.BootReport)
+							}
+						}
+					}
+					after, err := reader.ReadResetInventory(ctx)
+					if err != nil || !reflect.DeepEqual(before, after) {
+						t.Fatalf("snapshot changed surviving inventory: %v", err)
+					}
+					afterOperation, err := process.ReadResetOperation(ctx, operation.Request.OperationID)
+					if err != nil || !reflect.DeepEqual(committed, afterOperation) {
+						t.Fatalf("snapshot advanced the committed operation: %v", err)
+					}
+				})
+			}
 		})
 	}
 }
