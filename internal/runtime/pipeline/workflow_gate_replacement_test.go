@@ -265,7 +265,11 @@ func VerifyGateReplacementRollbackAcrossRunsBothStoresForTest(t *testing.T, open
 			if err := fixture.SetCardInsertFault(firstCtx, last, true); err != nil {
 				t.Fatal(err)
 			}
+			faultInstalled := true
 			t.Cleanup(func() {
+				if !faultInstalled {
+					return
+				}
 				if err := fixture.SetCardInsertFault(firstCtx, last, false); err != nil {
 					t.Error(err)
 				}
@@ -317,6 +321,7 @@ func VerifyGateReplacementRollbackAcrossRunsBothStoresForTest(t *testing.T, open
 			if err := fixture.SetCardInsertFault(firstCtx, last, false); err != nil {
 				t.Fatal(err)
 			}
+			faultInstalled = false
 			// EXACT frozen request is the final state-changing proof action.
 			if result, err := commit.Commit(); err != nil || result.Replayed || result.OperationID != commit.OperationID || result.PreviousRevision != revision || result.CurrentRevision != commit.NextRevision {
 				t.Fatalf("rollback left an operation completion or wrong revision: result=%+v %v", result, err)
