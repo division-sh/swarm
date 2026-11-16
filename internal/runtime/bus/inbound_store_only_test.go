@@ -55,10 +55,10 @@ func TestStoredInboundPlanRequiresRecoverySealAndCannotAttachExecution(t *testin
 	if _, err := bus.ApplyInboundDeliveryCommit(ctx, plan, nil); err == nil {
 		t.Fatal("store-only plan entered activation/readiness finalizers")
 	}
-	if err := bus.CompleteStoredInboundDeliveryCommit(ctx, plan, nil); err == nil {
+	if valid, err := bus.CompleteStoredInboundDeliveryCommit(ctx, plan, nil); valid || err == nil {
 		t.Fatal("missing native commit evidence accepted")
 	}
-	if err := bus.CompleteStoredInboundDeliveryCommit(ctx, InboundDeliveryPlan{}, nil); err == nil {
+	if valid, err := bus.CompleteStoredInboundDeliveryCommit(ctx, InboundDeliveryPlan{}, nil); valid || err == nil {
 		t.Fatal("ordinary plan converted to store-only completion")
 	}
 }

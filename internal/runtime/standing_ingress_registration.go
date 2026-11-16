@@ -9,11 +9,18 @@ import (
 // AdmitPublicIngressTarget classifies only the context already acquired for
 // this request and retains its existing credential-replacement fence.
 func (u *RuntimeContextUse) AdmitPublicIngressTarget(target InboundTarget) (InboundTarget, bool, error) {
-	if u == nil || u.runtime == nil || u.Context.BundleHash() != target.BundleHash {
+	if u == nil {
+		return InboundTarget{}, false, fmt.Errorf("ingress registration requires its exact runtime context")
+	}
+	return admitPublicIngressTarget(u.runtime, u.Context, target)
+}
+
+func admitPublicIngressTarget(rt *Runtime, ownedContext BundleContext, target InboundTarget) (InboundTarget, bool, error) {
+	if rt == nil || ownedContext.BundleHash() != target.BundleHash {
 		return InboundTarget{}, false, fmt.Errorf("ingress registration requires its exact runtime context")
 	}
 	found := false
-	for _, owned := range u.Context.StandingTargets {
+	for _, owned := range ownedContext.StandingTargets {
 		if sameDeclaredIngressTarget(target, owned) && target.RunID == owned.RunID {
 			found = true
 			break
@@ -22,7 +29,7 @@ func (u *RuntimeContextUse) AdmitPublicIngressTarget(target InboundTarget) (Inbo
 	if !found {
 		return InboundTarget{}, false, fmt.Errorf("public ingress target is not owned by the acquired context")
 	}
-	return u.runtime.admitPublicIngressBinding(u.Context.DeclaredChannelPublication, target)
+	return rt.admitPublicIngressBinding(ownedContext.DeclaredChannelPublication, target)
 }
 
 // Binding classification reads only the existing declaration and frozen
