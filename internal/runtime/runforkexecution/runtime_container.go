@@ -432,6 +432,10 @@ func (c *selectedContractForkLocalRuntimeContainer) PrepareAttachment(ctx contex
 	runCtx = runtimeeffects.WithController(runCtx, controller)
 	runCtx = managedexecution.WithAdmission(runCtx, c.admission)
 	runCtx, cancelRuntime := context.WithCancelCause(runCtx)
+	if probe := req.Operation.cancelProbe; probe != nil {
+		probe.bindChild(req.Operation.cancelProbeID, req.ForkRunID, lease.Context(), runCtx)
+		cancelRuntime = probe.wrap(fmt.Sprintf("child/op%d/run=%s", req.Operation.cancelProbeID, req.ForkRunID), runCtx, cancelRuntime)
+	}
 	runCtx, agentRuntime, admission, err := c.prepareServingScope(runCtx, req, bus, pipeline)
 	if err != nil {
 		cancelRuntime(err)
