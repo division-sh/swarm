@@ -2146,70 +2146,79 @@ func (m *RuntimeContextManager) AcquireIngress(ctx context.Context, alias, provi
 			m.liveSelectionMu.RUnlock()
 		}
 	}()
+	lookup, err := m.loadIngressLanding(ctx, alias, provider)
+	if err != nil || !lookup.Loaded() {
+		return nil, lookup, err
+	}
+	m.inboundPhaseMu.RLock()
+	defer m.inboundPhaseMu.RUnlock()
+	if m.inboundStopping {
+		return nil, lookup, worklifetime.ErrAdmissionFenced
+	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	aliasFound := false
-	for _, bundleHash := range m.order {
-		entry := m.contexts[bundleHash]
-		if entry == nil || entry.context == nil {
-			continue
+	entry, err := m.ingressEntryLocked(lookup)
+	if err != nil {
+		return nil, lookup, err
+	}
+	use, err := m.acquireEntryLocked(ctx, entry)
+	if err != nil {
+		return nil, lookup, err
+	}
+	use.Context = bindIngressLandingRun(use.Context, lookup.Target)
+	priorRelease := use.releaseAdmission
+	use.releaseAdmission = func() {
+		if priorRelease != nil {
+			priorRelease()
 		}
-		for _, raw := range entry.context.StandingTargets {
-			target := raw.normalized()
-			if target.Alias != alias {
-				continue
-			}
-			aliasFound = true
-			if target.Provider != provider {
-				continue
-			}
-			lookup := RuntimeIngressContextLookup{Target: target, Found: true, AliasFound: true, State: entry.state, Cause: entry.cause}
-			lookup.authorIngress = declaredAuthorIngress(entry.runtime, entry.context, target)
-			if lookup.State == "" {
-				lookup.State = RuntimeContextStateLoaded
-			}
-			if lookup.State != RuntimeContextStateLoaded {
-				if strings.TrimSpace(lookup.Cause) == "" {
-					lookup.Cause = RuntimeContextCauseUnavailable
-				}
-				return nil, lookup, nil
-			}
-			lookup.Context = runtimeContextMetadata(entry.context)
-			if m.landingRuns == nil {
-				return nil, lookup, fmt.Errorf("inbound requires the deployment landing-run reader")
-			}
-			landing, found, err := m.landingRuns.LoadLandingRun(ctx, runtimerunlifecycle.LiveRunScope{FlowPath: target.FlowPath})
-			if err != nil {
-				return nil, lookup, err
-			}
-			if !found || !landing.Source.Matches(entry.context.SourceArtifactFact) ||
-				(landing.State != runtimerunlifecycle.StateLive && landing.State != runtimerunlifecycle.StatePaused) {
-				lookup.State, lookup.Cause = RuntimeContextStateUnloaded, RuntimeContextCauseUnavailable
-				return nil, lookup, nil
-			}
-			lookup.Target.RunID = landing.RunID
-			use, err := m.acquireEntryLocked(ctx, entry)
-			if err != nil {
-				return nil, lookup, err
-			}
-			use.Context.StandingTargets = append([]StandingTarget(nil), use.Context.StandingTargets...)
-			for i, owned := range use.Context.StandingTargets {
-				if owned.Alias == target.Alias && owned.Provider == target.Provider {
-					use.Context.StandingTargets[i] = lookup.Target
-				}
-			}
-			priorRelease := use.releaseAdmission
-			use.releaseAdmission = func() {
-				if priorRelease != nil {
-					priorRelease()
-				}
-				m.liveSelectionMu.RUnlock()
-			}
-			releaseSelection = false
-			return use, lookup, nil
+		m.liveSelectionMu.RUnlock()
+	}
+	releaseSelection = false
+	return use, lookup, nil
+}
+
+func (m *RuntimeContextManager) loadIngressLanding(ctx context.Context, alias, provider string) (RuntimeIngressContextLookup, error) {
+	lookup := m.LookupIngress(alias, provider)
+	if !lookup.Loaded() {
+		return lookup, nil
+	}
+	m.mu.RLock()
+	reader := m.landingRuns
+	m.mu.RUnlock()
+	if reader == nil {
+		return lookup, fmt.Errorf("inbound requires the deployment landing-run reader")
+	}
+	landing, found, err := reader.LoadLandingRun(ctx, runtimerunlifecycle.LiveRunScope{FlowPath: lookup.Target.FlowPath})
+	if err != nil {
+		return lookup, err
+	}
+	if !found || !landing.Source.Matches(lookup.Context.SourceArtifactFact) ||
+		(landing.State != runtimerunlifecycle.StateLive && landing.State != runtimerunlifecycle.StatePaused) {
+		lookup.State, lookup.Cause = RuntimeContextStateUnloaded, RuntimeContextCauseUnavailable
+		return lookup, nil
+	}
+	lookup.Target.RunID = landing.RunID
+	return lookup, nil
+}
+
+func (m *RuntimeContextManager) ingressEntryLocked(lookup RuntimeIngressContextLookup) (*runtimeContextEntry, error) {
+	entry := m.contexts[lookup.Context.BundleHash()]
+	if m.resetExecutionFenced || !runtimeContextEntryLoaded(entry) || entry.runtime == nil ||
+		entry.context.PublicationGeneration != lookup.Context.PublicationGeneration ||
+		!entry.context.RootAdmission.Equal(lookup.Context.RootAdmission) {
+		return nil, worklifetime.ErrAdmissionFenced
+	}
+	return entry, nil
+}
+
+func bindIngressLandingRun(definition BundleContext, target StandingTarget) BundleContext {
+	definition.StandingTargets = append([]StandingTarget(nil), definition.StandingTargets...)
+	for i, owned := range definition.StandingTargets {
+		if owned.Alias == target.Alias && owned.Provider == target.Provider {
+			definition.StandingTargets[i] = target
 		}
 	}
-	return nil, RuntimeIngressContextLookup{State: RuntimeContextStateUnloaded, Cause: RuntimeContextCauseNotLoaded, AliasFound: aliasFound}, nil
+	return definition
 }
 
 func (m *RuntimeContextManager) DeactivateBundleHash(bundleHash, cause string) RuntimeContextDeactivationResult {
