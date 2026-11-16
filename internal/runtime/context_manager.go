@@ -354,6 +354,7 @@ type RuntimeContextManager struct {
 	inboundSealDone            chan struct{}
 	inboundSealErr             error
 	inboundRequests            shutdownAdmission
+	inboundSelections          shutdownAdmission
 	availability               RunBundleAvailabilityReader
 	landingRuns                runtimerunlifecycle.LandingRunReader
 	contexts                   map[string]*runtimeContextEntry
