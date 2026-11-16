@@ -210,12 +210,25 @@ func TestVerifyRetainedSourceConsumerSharesFrozenConfiguredPackGeneration(t *tes
 		t.Fatal(err)
 	}
 	counted := &verifyCountedPackResolver{PlatformPackBaseResolver: bases}
+	cache, temporary := t.TempDir(), t.TempDir()
+	t.Setenv("XDG_CACHE_HOME", cache)
+	t.Setenv("TMPDIR", temporary)
+	assertUnmaterialized := func() {
+		t.Helper()
+		for _, path := range []string{filepath.Join(cache, "swarm", "embedded-assets"), filepath.Join(temporary, "swarm-embedded-assets")} {
+			if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("retained inspection materialized a specification cache: %s: %v", path, err)
+			}
+		}
+	}
+	assertUnmaterialized()
 	var report runtime.WorkflowContractValidationResult
 	inspectVerifyRetainedSources(context.Background(), retained, RepoRoot(), "source:"+record.BundleHash, counted, &report)
 	if counted.calls == 0 || len(report.BootReport.Observations) != 2 || report.BootReport.Observations[1].Status != bootverify.AdmissionPassed {
 		t.Fatalf("retained report did not compile frozen source/configured generation: calls=%d report=%+v", counted.calls, report.BootReport)
 	}
 	verifyRetainedReportCells(t, bases)
+	assertUnmaterialized()
 }
 
 func verifyRetainedReportCells(t *testing.T, bases packartifact.PlatformPackBaseResolver) {
