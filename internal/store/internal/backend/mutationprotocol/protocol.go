@@ -106,6 +106,7 @@ type Attempt struct {
 	kind                   Kind
 	story                  *privateactivity.Mutation
 	effects                *privatefork.Effects
+	revisions              map[string]privatefork.Result
 	handoff                *runhandoff.CandidateHandoff
 	candidates             *runhandoff.CandidateCoordinator
 	active                 bool
@@ -374,14 +375,14 @@ func (a *Attempt) finalize(ctx context.Context, phase *Phase) error {
 	if a.effects.HasDeclarations() {
 		a.effects.SetPendingEventCounts(a.pendingEventCounts())
 		*phase = RevisionFinalize
+		var err error
 		if a.dialect == privateactivity.DialectPostgres {
-			if _, err := privatefork.FinalizePostgres(ctx, a.tx, a.effects); err != nil {
-				return err
-			}
+			a.revisions, err = privatefork.FinalizePostgres(ctx, a.tx, a.effects)
 		} else {
-			if _, err := privatefork.FinalizeSQLite(ctx, a.tx, a.effects); err != nil {
-				return err
-			}
+			a.revisions, err = privatefork.FinalizeSQLite(ctx, a.tx, a.effects)
+		}
+		if err != nil {
+			return err
 		}
 		clear(a.eventCounts)
 	} else if err := a.FlushEventCounts(ctx); err != nil {
@@ -402,6 +403,7 @@ type Result[T any] struct {
 	err          error
 	phase        Phase
 	dialect      privateactivity.Dialect
+	revisions    map[string]privatefork.Result
 }
 
 func (r Result[T]) Acknowledged() bool { return r.acknowledged }
@@ -430,6 +432,16 @@ func (r Result[T]) Value() (T, bool) {
 		return zero, false
 	}
 	return r.value, true
+}
+
+// AcknowledgedRevision is the exact finalizer receipt, never a later head read.
+// Like Value, it retains COMMIT truth even if post-COMMIT cleanup reported an error.
+func (r Result[T]) AcknowledgedRevision(runID string) (int64, bool) {
+	if !r.acknowledged {
+		return 0, false
+	}
+	revision, found := r.revisions[runID]
+	return revision.Revision, found
 }
 
 type nativeRunner func(context.Context, func(context.Context, *sql.Tx) error) (bool, error)
@@ -641,5 +653,9 @@ func run[T any](ctx context.Context, dialect privateactivity.Dialect, evidence E
 	if handoff != nil {
 		nativeErr = errors.Join(nativeErr, handoff.Commit())
 	}
-	return Result[T]{value: value, acknowledged: true, err: nativeErr, phase: PostCommit}
+	var revisions map[string]privatefork.Result
+	if previous != nil {
+		revisions = previous.revisions
+	}
+	return Result[T]{value: value, acknowledged: true, err: nativeErr, phase: PostCommit, revisions: revisions}
 }

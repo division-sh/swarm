@@ -12,6 +12,7 @@ import (
 
 	runtimelifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	privateactivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
+	privatefork "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/division-sh/swarm/internal/store/internal/runhandoff"
 	"github.com/google/uuid"
 )
@@ -89,6 +90,11 @@ func TestAttemptResultUsesOnlyAcknowledgedRetry(t *testing.T) {
 			if len(attempts) == 2 {
 				value = "committed"
 			}
+			// Model transport independently of the native finalizer's storage proof.
+			attempt.revisions = map[string]privatefork.Result{"exact-run": {Revision: int64(len(attempts)), Changed: false}}
+			if len(attempts) == 1 {
+				attempt.revisions["retired-only"] = privatefork.Result{Revision: 37}
+			}
 			err = attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
 				_, err := tx.ExecContext(ctx, `INSERT INTO mutation_protocol_probe (value) VALUES (?)`, value)
 				return err
@@ -100,6 +106,14 @@ func TestAttemptResultUsesOnlyAcknowledgedRetry(t *testing.T) {
 	}
 	if value, ok := result.Value(); !ok || value != "committed" {
 		t.Fatalf("published wrong attempt result: %q, %v", value, ok)
+	}
+	if revision, ok := result.AcknowledgedRevision("exact-run"); !ok || revision != 2 {
+		t.Fatalf("published wrong finalization receipt: %d, %v", revision, ok)
+	}
+	for _, runID := range []string{"retired-only", "missing", " exact-run "} {
+		if revision, ok := result.AcknowledgedRevision(runID); ok || revision != 0 {
+			t.Fatalf("foreign/retired receipt escaped: run=%q revision=%d found=%v", runID, revision, ok)
+		}
 	}
 	var got string
 	if err := db.QueryRow(`SELECT value FROM mutation_protocol_probe`).Scan(&got); err != nil || got != "committed" {
@@ -130,12 +144,18 @@ func TestAcknowledgedResultSurvivesCleanupFailure(t *testing.T) {
 		func(ctx context.Context, write func(context.Context, *sql.Tx) error) (bool, error) {
 			ack, err := native(ctx, write)
 			return ack, errors.Join(err, cleanupErr)
-		}, func(context.Context, *Attempt) (int, error) { return 17, nil })
+		}, func(_ context.Context, attempt *Attempt) (int, error) {
+			attempt.revisions = map[string]privatefork.Result{"exact-run": {Revision: 9, Changed: false}}
+			return 17, nil
+		})
 	if !result.Acknowledged() || !errors.Is(result.Err(), cleanupErr) {
 		t.Fatalf("lost acknowledged cleanup outcome: %+v", result)
 	}
 	if value, ok := result.Value(); !ok || value != 17 {
 		t.Fatalf("lost acknowledged value: %d, %v", value, ok)
+	}
+	if revision, ok := result.AcknowledgedRevision("exact-run"); !ok || revision != 9 {
+		t.Fatalf("postcommit error concealed unchanged-projection receipt: %d, %v", revision, ok)
 	}
 }
 
@@ -148,12 +168,20 @@ func TestMissingAcknowledgementHidesAttemptValue(t *testing.T) {
 		func(ctx context.Context, write func(context.Context, *sql.Tx) error) (bool, error) {
 			_, err := native(ctx, write)
 			return false, errors.Join(err, lost)
-		}, func(context.Context, *Attempt) (int, error) { return 19, nil })
+		}, func(_ context.Context, attempt *Attempt) (int, error) {
+			attempt.revisions = map[string]privatefork.Result{"exact-run": {Revision: 9}}
+			return 19, nil
+		})
 	if result.Acknowledged() || !errors.Is(result.Err(), lost) {
 		t.Fatalf("invented commit truth: %+v", result)
 	}
 	if value, ok := result.Value(); ok || value != 0 {
 		t.Fatalf("unacknowledged value escaped: %d, %v", value, ok)
+	}
+	for _, hidden := range []Result[int]{result, {}, {revisions: map[string]privatefork.Result{"exact-run": {Revision: 9}}}, {acknowledged: true}} {
+		if revision, ok := hidden.AcknowledgedRevision("exact-run"); ok || revision != 0 {
+			t.Fatalf("unacknowledged or absent receipt escaped: %d, %v", revision, ok)
+		}
 	}
 }
 
