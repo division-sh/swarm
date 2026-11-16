@@ -3,12 +3,10 @@ package runtime
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"sync"
 
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
-	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 )
 
 // PrepareInboundStop holds new publications while accepted target creation joins.
@@ -17,7 +15,9 @@ func (m *RuntimeContextManager) PrepareInboundStop() {
 	defer m.inboundPhaseMu.Unlock()
 	if !m.inboundStopping {
 		m.inboundStopping = true
-		m.inboundReady = make(chan struct{})
+		if !m.inboundRequests.Closed() {
+			m.inboundReady = make(chan struct{})
+		}
 	}
 }
 
@@ -149,44 +149,57 @@ func (u *InboundPublicationUse) Done() error {
 }
 
 func (m *RuntimeContextManager) AcquireInboundPublication(ctx context.Context, alias, provider string) (*InboundPublicationUse, RuntimeIngressContextLookup, error) {
-	if err := m.lockInboundPhase(ctx); err != nil {
-		return nil, RuntimeIngressContextLookup{}, err
-	}
-	defer m.inboundPhaseMu.RUnlock()
-	if !m.inboundStopping {
-		use, lookup, err := m.AcquireIngress(ctx, alias, provider)
-		if err != nil || use == nil {
+	for {
+		if err := m.lockInboundPhase(ctx); err != nil {
+			return nil, RuntimeIngressContextLookup{}, err
+		}
+		m.inboundPhaseMu.RUnlock()
+		m.liveSelectionMu.RLock()
+		lookup, err := m.loadIngressLanding(ctx, alias, provider)
+		if err != nil || !lookup.Loaded() {
+			m.liveSelectionMu.RUnlock()
 			return nil, lookup, err
 		}
-		return &InboundPublicationUse{runtime: use.runtime, context: use.Context, ctx: use.WorkContext(), executed: use}, lookup, nil
+		m.inboundPhaseMu.RLock()
+		if m.inboundReady != nil {
+			m.inboundPhaseMu.RUnlock()
+			m.liveSelectionMu.RUnlock()
+			continue
+		}
+		m.mu.RLock()
+		use, err := m.acquireInboundPublicationLocked(ctx, lookup)
+		m.mu.RUnlock()
+		m.inboundPhaseMu.RUnlock()
+		if err != nil || use == nil {
+			m.liveSelectionMu.RUnlock()
+			return nil, lookup, err
+		}
+		priorRelease := use.release
+		use.release = func() {
+			if priorRelease != nil {
+				priorRelease()
+			}
+			m.liveSelectionMu.RUnlock()
+		}
+		return use, lookup, nil
+	}
+}
+
+func (m *RuntimeContextManager) acquireInboundPublicationLocked(ctx context.Context, lookup RuntimeIngressContextLookup) (*InboundPublicationUse, error) {
+	entry, err := m.ingressEntryLocked(lookup)
+	if err != nil {
+		return nil, err
+	}
+	if !m.inboundStopping {
+		use, err := m.acquireEntryLocked(ctx, entry)
+		if err != nil {
+			return nil, err
+		}
+		use.Context = bindIngressLandingRun(use.Context, lookup.Target)
+		return &InboundPublicationUse{runtime: use.runtime, context: use.Context, ctx: use.WorkContext(), executed: use}, nil
 	}
 	if !m.inboundStoreOnly {
-		return nil, m.LookupIngress(alias, provider), errors.Join(worklifetime.ErrAdmissionFenced, m.inboundSealErr)
-	}
-	m.liveSelectionMu.RLock()
-	lookup := m.LookupIngress(alias, provider)
-	refuse := func(err error) (*InboundPublicationUse, RuntimeIngressContextLookup, error) {
-		m.liveSelectionMu.RUnlock()
-		return nil, lookup, err
-	}
-	if !lookup.Loaded() || lookup.Context == nil {
-		return refuse(nil)
-	}
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	entry := m.contexts[lookup.Context.BundleHash()]
-	if !runtimeContextEntryLoaded(entry) || entry.runtime == nil || entry.context.PublicationGeneration != lookup.Context.PublicationGeneration || m.resetExecutionFenced {
-		return refuse(worklifetime.ErrAdmissionFenced)
-	}
-	if m.landingRuns == nil {
-		return refuse(fmt.Errorf("inbound requires the deployment landing-run reader"))
-	}
-	landing, found, err := m.landingRuns.LoadLandingRun(ctx, runlifecycle.LiveRunScope{FlowPath: lookup.Target.FlowPath})
-	if err != nil {
-		return refuse(err)
-	}
-	if !found || !landing.Source.Matches(entry.context.SourceArtifactFact) || (landing.State != runlifecycle.StateLive && landing.State != runlifecycle.StatePaused) {
-		return refuse(fmt.Errorf("inbound landing run is unavailable"))
+		return nil, errors.Join(worklifetime.ErrAdmissionFenced, m.inboundSealErr)
 	}
 	definition := *entry.context
 	definition.Runtime = entry.runtime
@@ -195,23 +208,14 @@ func (m *RuntimeContextManager) AcquireInboundPublication(ctx context.Context, a
 		ctx, err = entry.runtime.mutationContext(ctx)
 	}
 	if err != nil {
-		return refuse(err)
+		return nil, err
 	}
 	ctx, release, admitted := m.inboundRequests.BeginContext(ctx)
 	if !admitted {
-		return refuse(worklifetime.ErrAdmissionFenced)
+		return nil, worklifetime.ErrAdmissionFenced
 	}
-	lookup.Target.RunID = landing.RunID
-	definition.StandingTargets = append([]StandingTarget(nil), definition.StandingTargets...)
-	for index, target := range definition.StandingTargets {
-		if target.Alias == alias && target.Provider == provider {
-			definition.StandingTargets[index] = lookup.Target
-		}
-	}
-	return &InboundPublicationUse{runtime: entry.runtime, context: definition, ctx: ctx, release: func() {
-		release()
-		m.liveSelectionMu.RUnlock()
-	}}, lookup, nil
+	definition = bindIngressLandingRun(definition, lookup.Target)
+	return &InboundPublicationUse{runtime: entry.runtime, context: definition, ctx: ctx, release: release}, nil
 }
 
 func (u *InboundPublicationUse) HandleResolvedWebhook(w http.ResponseWriter, request *http.Request, target InboundTarget) {
