@@ -210,12 +210,13 @@ func TestMailboxUnchangedGateUpgradeAnswerBothStores(t *testing.T) {
 				}
 				assertAttribution()
 				seen := map[string]bool{}
+				cursors := map[string]bool{}
 				query := map[string]any{"filter": map[string]any{"run_id": before.RunID, "event_name": "mailbox.card_decided"}, "limit": 100}
 				for {
 					var page operatorread.OperatorEventListResult
 					requireServedJSONRPCResult(t, rt.Endpoint, "event.list", query, &page)
 					for _, event := range page.Events {
-						if event.RunID != before.RunID || event.EventName != "mailbox.card_decided" || seen[event.EventID] {
+						if event.RunID != before.RunID || event.EventName != "mailbox.card_decided" || event.EventID != decided.DecisionEventID || seen[event.EventID] {
 							t.Fatalf("wrong/duplicate decision event: %+v", event)
 						}
 						seen[event.EventID] = true
@@ -223,6 +224,10 @@ func TestMailboxUnchangedGateUpgradeAnswerBothStores(t *testing.T) {
 					if page.NextCursor == "" {
 						break
 					}
+					if cursors[page.NextCursor] {
+						t.Fatal("decision event cursor repeated or cycled")
+					}
+					cursors[page.NextCursor] = true
 					query["cursor"] = page.NextCursor
 				}
 				if len(seen) != 1 {
