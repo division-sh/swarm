@@ -3,12 +3,17 @@ package serveapp
 import (
 	"context"
 	"database/sql"
+	"net/http/httptest"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/tests/support/store/testutil/agentfixture"
 )
 
 func TestChannelDeliveryAbruptProcessDeathPublicJourney(t *testing.T) {
@@ -223,15 +228,19 @@ func waitChannelDeliveryProcessAttempt(t *testing.T, db *sql.DB, backend servedp
 func TestChannelDeliverySettlementWaitIncludesPlannedWork(t *testing.T) {
 	for _, state := range []string{"planned", "rendered"} {
 		t.Run(state, func(t *testing.T) {
-			db := newChannelResponsibilityProjectionDB(t)
-			if _, err := db.Exec(`INSERT INTO channel_delivery_plans (source_kind,state) VALUES ('summary',?)`, state); err != nil {
+			db, path := newChannelResponsibilityProjectionDB(t)
+			observation := openChannelFixtureObservation(t, "sqlite", path)
+			if _, err := db.Exec(`UPDATE channel_delivery_plans SET state=? WHERE source_kind='summary'`, state); err != nil {
 				t.Fatal(err)
+			}
+			if count, err := observation.CountUnsettledResponsibilities(t.Context()); err != nil || count != 1 {
+				t.Fatalf("canonical summary responsibilities=%d, want one: %v", count, err)
 			}
 			started, done := make(chan struct{}), make(chan struct{})
 			go func() {
 				close(started)
 				defer close(done)
-				waitChannelDeliverySendsSettled(t, db, summaryResponsibilityProjection{db: db})
+				waitChannelDeliverySendsSettled(t, db, observation)
 			}()
 			<-started
 			select {
@@ -251,9 +260,34 @@ func TestChannelDeliverySettlementWaitIncludesPlannedWork(t *testing.T) {
 	}
 }
 
-func newChannelResponsibilityProjectionDB(t *testing.T) *sql.DB {
+func newChannelResponsibilityProjectionDB(t *testing.T) (*sql.DB, string) {
 	t.Helper()
-	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "wait.db"))
+	isolateCLIAPIConfigEnv(t)
+	t.Setenv("HOME", t.TempDir())
+	selected := storetest.StartSQLiteRuntimeStore(t)
+	ctx := t.Context()
+	process, err := agentfixture.ProcessCapability(t, ctx, selected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, err = startupownership.WithProcessMutationAuthority(ctx, process)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := selected.InsertMailboxItem(ctx, runtimetools.MailboxItem{Type: runtimetools.NotifyHumanMailboxItemType, Summary: "pending waiter control"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := process.Release(ctx); err != nil {
+		t.Fatal(err)
+	}
+	provider := &channelOnboardingTelegramProvider{}
+	telegram := httptest.NewServer(provider)
+	t.Cleanup(telegram.Close)
+	redirectExternalHosts(t, map[string]string{"api.telegram.org": telegram.URL})
+	t.Setenv("SWARM_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "credentials.json"))
+	config := writeStoreBackendRuntimeConfig(t, "sqlite", selected.Path())
+	registerChannelFixtureAccount(t, config, "waiter-control-token", "420079", provider)
+	db, err := sql.Open("sqlite", selected.Path())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -263,28 +297,7 @@ func newChannelResponsibilityProjectionDB(t *testing.T) *sql.DB {
 			t.Error(err)
 		}
 	})
-	for _, ddl := range []string{
-		`CREATE TABLE channel_delivery_plans (delivery_id TEXT, source_kind TEXT, source_id TEXT, current_receipt_operation_id TEXT, state TEXT NOT NULL)`,
-		`CREATE TABLE channel_delivery_receipts (delivery_id TEXT, effect_operation_id TEXT, state TEXT)`,
-		`CREATE TABLE runtime_external_effect_operations (authority_kind TEXT, authority_evidence TEXT, state TEXT)`,
-		`CREATE TABLE mailbox (item_id TEXT, status TEXT)`,
-		`CREATE TABLE decision_cards (card_id TEXT, status TEXT)`,
-	} {
-		if _, err := db.Exec(ddl); err != nil {
-			t.Fatal(err)
-		}
-	}
-	return db
-}
-
-// The private projection reader below is used only by the two synthetic summary
-// waiter controls. The full native predicate matrix lives with channeldelivery.
-type summaryResponsibilityProjection struct{ db *sql.DB }
-
-func (o summaryResponsibilityProjection) CountUnsettledResponsibilities(ctx context.Context) (int, error) {
-	var count int
-	err := o.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM channel_delivery_plans WHERE source_kind='summary' AND state IN ('planned','rendered')`).Scan(&count)
-	return count, err
+	return db, selected.Path()
 }
 
 func waitChannelDeliverySendsSettled(t *testing.T, db *sql.DB, observation interface {
