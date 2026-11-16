@@ -601,7 +601,7 @@ func cardDecisionLines(card decisioncard.Card) []string {
 		return []string{"Decision: " + card.Verdict, "Actor: " + card.DecidedBy,
 			"At: " + card.DecidedAt.UTC().Format(time.RFC3339Nano)}
 	case decisioncard.StatusSuperseded:
-		return []string{"The flow moved on. No action was taken."}
+		return []string{decisioncard.SupersededMessage(card.SupersededReason)}
 	case decisioncard.StatusExpired:
 		return []string{"The decision expired. No action was taken."}
 	default:

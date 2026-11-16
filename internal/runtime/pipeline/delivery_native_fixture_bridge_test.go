@@ -65,6 +65,14 @@ type PipelineDeliveryNativeFixtureForTest struct {
 	ReopenProjection                  func() WorkflowPersistence
 	ReopenExecution                   func() *PipelineDeliveryNativeFixtureForTest
 	UpgradeSource                     func(context.Context, semanticview.Source) error
+	UpgradeCardCadence                decisioncard.CadencePolicy
+	SourceSetRevision                 func(context.Context) (string, error)
+	PrepareUpgradeSource              func(context.Context, semanticview.Source) (func() (bool, error), error)
+	InputDrafts                       interface {
+		BeginInputForTest(context.Context, decisioncard.BeginInputRequest) (decisioncard.InputDraft, error)
+		PreviewInputTextForTest(context.Context, string, string, string, time.Time) (decisioncard.InputFieldProgress, error)
+		AdvanceInputTextForTest(context.Context, string, string, string, time.Time) (decisioncard.InputFieldProgress, error)
+	}
 	TransitionWire                    func(context.Context, string, string) (json.RawMessage, error)
 	SetTransitionWire                 func(context.Context, string, string, json.RawMessage) (int64, error)
 	JoinExecution                     func(context.Context) error

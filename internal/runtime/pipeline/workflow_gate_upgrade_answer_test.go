@@ -102,7 +102,7 @@ func VerifyGateAnswerUpgradeOrdersBothStoresForTest(t *testing.T, open pipelineD
 						t.Fatalf("stale prepared answer crossed native source switch: %+v %v", committed, err)
 					}
 					current, err := fixture.Cards.GetDecisionCard(ctx, card.CardID)
-					if err != nil || current.Status != decisioncard.StatusPending || current.DecisionEventID != "" {
+					if err != nil || current.Status != decisioncard.StatusSuperseded || current.SupersededReason != decisioncard.SupersededByUpdate || current.DecisionEventID != "" {
 						t.Fatalf("rejected answer changed issuance: %+v %v", current, err)
 					}
 					if fixture.EventIDCount(ctx, mutation.decide.DecisionEventID) != 0 {
