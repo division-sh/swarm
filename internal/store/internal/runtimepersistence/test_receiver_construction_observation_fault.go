@@ -2,7 +2,6 @@ package runtimepersistence
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
@@ -41,21 +40,6 @@ func SetReceiverConstructionObservationUnavailableForTest(ctx context.Context, s
 		return store.pipelinePostgresOwner.SetReceiverConstructionObservationUnavailableForTest(ctx, unavailable)
 	case *SQLiteRuntimeStore:
 		return store.pipelineSQLiteOwner.SetReceiverConstructionObservationUnavailableForTest(ctx, unavailable)
-	default:
-		return fmt.Errorf("receiver observation fault requires the original native owner")
-	}
-}
-
-// Retained for the distinct fork-predecessor and receipt-correspondence cuts.
-func runReceiverConstructionObservationFault(ctx context.Context, selected any, write func(context.Context, *sql.Tx) error) error {
-	if err := validateChannelObservationOwner(selected); err != nil {
-		return err
-	}
-	switch owner := selected.(type) {
-	case *PostgresStore:
-		return owner.backend.RunTransaction(ctx, write)
-	case *SQLiteRuntimeStore:
-		return owner.backend.RunTransaction(ctx, "receiver physical observation fault", write)
 	default:
 		return fmt.Errorf("receiver observation fault requires the original native owner")
 	}
