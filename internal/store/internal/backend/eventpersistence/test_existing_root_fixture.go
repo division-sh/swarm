@@ -6,40 +6,10 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
-	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 )
-
-func eventFacts(
-	eventID string,
-	eventType events.EventType,
-	producer events.ProducerIdentity,
-	payload []byte,
-	envelope events.EventEnvelope,
-	createdAt time.Time,
-) (events.EventFacts, error) {
-	routingSource := events.NoRoutingSource()
-	source := envelope.Source.Normalized()
-	if !source.Empty() {
-		var err error
-		if source.FlowInstance != "" {
-			routingSource, err = events.NewConcreteTemplateInstanceRoutingSource(source)
-		} else {
-			routingSource, err = events.NewExternalIngressRoutingSource(source.FlowID, events.RoutingSourceAuthorityProviderAdmissionPlan)
-		}
-		if err != nil {
-			return events.EventFacts{}, err
-		}
-	}
-	return events.EventFacts{
-		ID: eventID, Type: eventType,
-		Producer: events.ProducerClaim{Type: producer.Type(), ID: producer.ID()},
-		Payload:  payload, Envelope: envelope, RoutingSource: routingSource,
-		CreatedAt: createdAt, ExecutionMode: executionmode.Live,
-	}, nil
-}
 
 func fixtureSettlement(event events.Event) (events.RouteSettlement, error) {
 	switch event.Type() {
@@ -66,7 +36,8 @@ func (s *EventPostgresOwner) InsertRevisionedExistingRunRootForTest(ctx context.
 		return err
 	})
 	if err != nil {
-		return events.Event{}, err
+		var empty events.Event
+		return empty, err
 	}
 	return event, nil
 }
@@ -79,17 +50,14 @@ func (s *EventSQLiteOwner) InsertRevisionedExistingRunRootForTest(ctx context.Co
 		return err
 	})
 	if err != nil {
-		return events.Event{}, err
+		var empty events.Event
+		return empty, err
 	}
 	return event, nil
 }
 
 func InsertExistingRunRootEventTxForTest(ctx context.Context, attempt *mutationprotocol.Attempt, postgres bool, eventID, runID string, eventType events.EventType, producer events.ProducerIdentity, payload []byte, envelope events.EventEnvelope, createdAt time.Time) (events.Event, error) {
-	facts, err := eventFacts(eventID, eventType, producer, payload, envelope, createdAt)
-	if err != nil {
-		return events.Event{}, err
-	}
-	event, err := events.NewExistingRunRootIngressEvent(events.ExistingRunRootIngressEventInput{Facts: facts, RunID: runID})
+	event, err := eventfixture.ExistingRunRoot(eventID, runID, eventType, producer, payload, envelope, createdAt)
 	if err != nil {
 		return event, err
 	}

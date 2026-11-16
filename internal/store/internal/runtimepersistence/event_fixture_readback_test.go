@@ -18,6 +18,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
 	"github.com/division-sh/swarm/tests/support/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
@@ -260,6 +261,30 @@ func TestSemanticEventPublicationEvidencePreservesExactCutsBothStores(t *testing
 				}
 				if inserted, err := CommitSemanticEventFixtureForTest(ctx, selected, admitted, settlement, routes, scope, disposition); err != nil || !inserted {
 					t.Fatalf("commit exact publication: inserted=%v err=%v", inserted, err)
+				}
+				if phase == "direct" {
+					var capture func(context.Context, string, ...runforkrevision.Family) (int64, error)
+					switch owner := selected.(type) {
+					case *PostgresStore:
+						capture = owner.runForkPostgresOwner.CaptureSelectedRunForkRevisionForTest
+					case *SQLiteRuntimeStore:
+						capture = owner.runForkSQLiteOwner.CaptureSelectedRunForkRevisionForTest
+					}
+					for _, invalid := range []struct {
+						run      string
+						families []runforkrevision.Family
+					}{{"invalid", []runforkrevision.Family{runforkrevision.FamilyEvents}}, {runID, nil}, {runID, []runforkrevision.Family{runforkrevision.FamilyEvents, "invalid"}}} {
+						if revision, err := capture(ctx, invalid.run, invalid.families...); err == nil || revision != 0 {
+							t.Fatalf("invalid capture returned a receipt: %d, %v", revision, err)
+						}
+					}
+					revision, err := capture(ctx, runID, runforkrevision.FamilyEvents)
+					if err != nil || revision <= 0 {
+						t.Fatalf("native acknowledged revision: %d, %v", revision, err)
+					}
+					if unchanged, err := capture(ctx, runID, runforkrevision.FamilyEvents); err != nil || unchanged != revision {
+						t.Fatalf("unchanged projection lost exact receipt: %d -> %d, %v", revision, unchanged, err)
+					}
 				}
 				probe, restore, err := InstallTransactionProbeForTest(selected, transactiontest.Options{})
 				if err != nil {

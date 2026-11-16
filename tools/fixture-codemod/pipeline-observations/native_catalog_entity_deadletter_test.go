@@ -77,7 +77,7 @@ t.Fatalf("dead_letter = %v, want %v for entity %q; evidence=%v read_error=%v", g
 }
 
 func TestNativeCatalogEntityDeadLetterOwnerPreservesExactPhysicalCuts(t *testing.T) {
-	path := filepath.Join("..", "..", "..", "internal", "store", "internal", "backend", "delivery", "dead_letter_owner.go")
+	path := filepath.Join("..", "..", "..", "internal", "store", "internal", "backend", "delivery", "test_dead_letter_observations.go")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)

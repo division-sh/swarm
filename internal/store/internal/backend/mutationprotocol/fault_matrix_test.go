@@ -192,6 +192,9 @@ func faultMatrixCount(t *testing.T, db *sql.DB, value string) int {
 
 func faultMatrixNoValue(t *testing.T, result Result[string], phase Phase) {
 	t.Helper()
+	if revision, ok := result.AcknowledgedRevision(faultMatrixMissingRun); ok || revision != 0 {
+		t.Fatalf("failed mutation exposed a revision receipt: %d, %v", revision, ok)
+	}
 	if result.Acknowledged() || result.Err() == nil || result.Phase() != phase {
 		t.Fatalf("failed attempt = ack:%v phase:%v err:%v; want unacknowledged phase %v", result.Acknowledged(), result.Phase(), result.Err(), phase)
 	}
