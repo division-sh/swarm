@@ -221,6 +221,9 @@ func (p *serveLifecyclePresenter) failWithDiagnostic(step int, name string, err 
 }
 
 func (p *serveLifecyclePresenter) writeFailureContextLocked(out io.Writer) {
+	if p.verbose && p.store != nil {
+		fmt.Fprintf(out, "  store selection            backend=%s path=%s\n", p.store.Backend.String(), p.store.SQLitePath)
+	}
 	if !p.verbose && p.store != nil {
 		if p.store.Backend == storebackend.BackendSQLite {
 			fmt.Fprintf(out, "  store                      sqlite · %s\n", strings.TrimSpace(p.store.SQLitePath))
@@ -242,7 +245,7 @@ func (p *serveLifecyclePresenter) writeFailureContextLocked(out io.Writer) {
 	}
 }
 
-func (p *serveLifecyclePresenter) recordStore(selection storebackend.Selection) {
+func (p *serveLifecyclePresenter) recordStoreSelection(selection storebackend.Selection) {
 	if p == nil {
 		return
 	}
@@ -250,7 +253,10 @@ func (p *serveLifecyclePresenter) recordStore(selection storebackend.Selection) 
 	copy := selection
 	p.store = &copy
 	p.mu.Unlock()
+}
 
+func (p *serveLifecyclePresenter) recordStore(selection storebackend.Selection) {
+	p.recordStoreSelection(selection)
 	detail := "backend=" + selection.Backend.String()
 	if selection.Backend == storebackend.BackendSQLite {
 		detail += " path=" + strings.TrimSpace(selection.SQLitePath)

@@ -71,6 +71,9 @@ func inspectVerifySelectedStore(ctx context.Context, repo string, paths CLISourc
 		if err != nil {
 			return err
 		}
+		if len(serve) != 0 {
+			request.CheckTarget = serve[0].construction
+		}
 		schemaRequest = schema
 		if request.Selection.Backend == storebackend.BackendPostgres {
 			storeBudget = verifyRemoteDeadline
@@ -380,7 +383,7 @@ func inspectVerifyRunDrift(ctx context.Context, snapshot *storeselected.Admissio
 	for _, run := range runs {
 		report, err := snapshot.InspectRunMutationDrift(ctx, run.RunID)
 		if err != nil {
-			drift = append(drift, verifyRunFailure(run.RunID, err))
+			drift = append(drift, fmt.Errorf("run %s: %s: %w", run.RunID, err, verifyRunFailure(run.RunID, err)))
 			continue
 		}
 		if len(report.Rows) != 0 {
@@ -388,7 +391,7 @@ func inspectVerifyRunDrift(ctx context.Context, snapshot *storeselected.Admissio
 			if err := writeVerifyRunResult(&rendered, verifyRunCommandResult{DriftReport: report, Status: "drift", Errors: []failures.Envelope{}}); err != nil {
 				return err
 			}
-			drift = append(drift, verifyRunFailure(run.RunID, errors.New(rendered.String())))
+			drift = append(drift, fmt.Errorf("run %s: %s", run.RunID, rendered.String()))
 		}
 	}
 	return errors.Join(drift...)
