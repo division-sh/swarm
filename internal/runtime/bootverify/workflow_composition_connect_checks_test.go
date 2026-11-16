@@ -2,6 +2,9 @@ package bootverify
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -75,6 +78,61 @@ func TestRun_AllowsTemplateInstanceKeyCompositionConnectWithoutAddress(t *testin
 		report := Run(t.Context(), semanticview.Wrap(bundle), Options{})
 		if reportContains(report.Errors(), "composition_connect_validation", "") {
 			t.Fatalf("frozen C53 retained the false path-only LCA refusal: %+v", report.Errors())
+		}
+	})
+	for _, tc := range []struct {
+		name  string
+		shape canonicalrouting.CrossInstanceConnectionShape
+	}{
+		{"same_declared_keyed_flow", canonicalrouting.CrossInstanceSameKeyedFlow},
+		{"nested_keyless_receiver", canonicalrouting.CrossInstanceNestedKeyless},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := canonicalrouting.CopyCrossInstanceConnection(t, tc.shape)
+			bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
+			report := Run(t.Context(), semanticview.Wrap(bundle), Options{})
+			if reportContains(report.Errors(), "composition_connect_validation", "") {
+				t.Fatalf("one-key cross-instance row refused: %+v", report.Errors())
+			}
+		})
+	}
+	t.Run("one_key_below_bound_outer", func(t *testing.T) {
+		root := canonicalrouting.CopyWrappedCrossInstanceConnection(t, canonicalrouting.CrossInstanceNestedKeyless, false)
+		replaceCrossInstanceVerifySource(t, root, "envelope/schema.yaml", "inputs:", "instance: envelope_id\ninputs:")
+		writeBootverifyFixtureFile(t, filepath.Join(root, "envelope/state.yaml"), "envelope_id: text\n")
+		bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
+		report := Run(t.Context(), semanticview.Wrap(bundle), Options{})
+		if reportContains(report.Errors(), "composition_connect_validation", "") {
+			t.Fatalf("already-bound outer key counted as a reselected level: %+v", report.Errors())
+		}
+	})
+	t.Run("nested_default_same_name_source", func(t *testing.T) {
+		root := canonicalrouting.CopyCrossInstanceConnection(t, canonicalrouting.CrossInstanceNestedKeyless)
+		replaceCrossInstanceVerifySource(t, root, "schema.yaml", ", key_from: payload.target_account_id", "")
+		replaceCrossInstanceVerifySource(t, root, "account/ticket/events.yaml", "target_account_id:", "account_id:")
+		replaceCrossInstanceVerifySource(t, root, "account/ticket/nodes.yaml", "fields: {target_account_id:", "fields: {account_id:")
+		bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
+		found := false
+		for _, connect := range bundle.Semantics.CompositionConnects {
+			if connect.Event != "ticket.cross" {
+				continue
+			}
+			input, present, err := bundle.ConnectionInput(connect)
+			if err != nil || !present || input.SelectionFlowID() != "account" || input.SourceEvidence().Source.Path != "payload.account_id" {
+				t.Fatalf("default source must use selected account's key: input=%+v present=%t err=%v", input.SourceEvidence(), present, err)
+			}
+			found = true
+		}
+		if !found {
+			t.Fatal("nested row missing from admitted source")
+		}
+	})
+	t.Run("ordinary_local_descendant_unchanged", func(t *testing.T) {
+		root := canonicalrouting.CopyLexicalAddressing(t, false)
+		bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
+		report := Run(t.Context(), semanticview.Wrap(bundle), Options{})
+		if reportContains(report.Errors(), "composition_connect_validation", "") {
+			t.Fatalf("ordinary local edges reinterpreted as cross-instance selection: %+v", report.Errors())
 		}
 	})
 }
@@ -409,6 +467,68 @@ func TestCompositionSourceRejectsRetiredFanInGrammarBeforeBoot(t *testing.T) {
 }
 
 func TestRun_FailsClosedForInvalidParentCompositionConnect(t *testing.T) {
+	for _, tc := range []struct {
+		name, want string
+		shape      canonicalrouting.CrossInstanceConnectionShape
+	}{
+		{"same_flow_misplaced", `connect belongs in envelope/schema.yaml, the lowest owner that can select keyed receiver "envelope/account"`, canonicalrouting.CrossInstanceSameKeyedFlow},
+		{"nested_misplaced", `connect belongs in envelope/schema.yaml, the lowest owner that can select keyed ancestor "envelope/account" for receiver "envelope/account/audit"`, canonicalrouting.CrossInstanceNestedKeyless},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := canonicalrouting.CopyWrappedCrossInstanceConnection(t, tc.shape, true)
+			bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
+			report := Run(t.Context(), semanticview.Wrap(bundle), Options{})
+			if !reportContains(report.Errors(), "composition_connect_validation", tc.want) {
+				t.Fatalf("misplaced row lost exact teaching %q: %+v", tc.want, report.Errors())
+			}
+		})
+	}
+	for _, tc := range []struct {
+		name, label, before, after, want string
+	}{
+		{"nested_missing_source", "schema.yaml", "payload.target_account_id", "payload.absent_account_id", "resolution source payload.absent_account_id has no declared type"},
+		{"nested_optional_source", "account/ticket/events.yaml", "target_account_id: text", "target_account_id: text?", "resolution source payload.target_account_id must be a required producer event field"},
+		{"nested_incompatible_source", "account/ticket/events.yaml", "target_account_id: text", "target_account_id: integer", "key_types_incompatible"},
+		{"nested_intrinsic_select", "schema.yaml", "payload.target_account_id", "event.id", "event.id is only valid for resolution create"},
+		{"nested_create", "schema.yaml", "to: account/audit, resolution: select", "to: account/audit, resolution: create", `connect to keyless receiver "account/audit" in another instance requires resolution: select`},
+		{"nested_select_or_create", "schema.yaml", "to: account/audit, resolution: select", "to: account/audit, resolution: select-or-create", `connect to keyless receiver "account/audit" in another instance requires resolution: select`},
+		{"nested_missing_mode", "schema.yaml", "to: account/audit, resolution: select", "to: account/audit", `connect to keyless receiver "account/audit" in another instance requires resolution: select`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := canonicalrouting.CopyCrossInstanceConnection(t, canonicalrouting.CrossInstanceNestedKeyless)
+			replaceCrossInstanceVerifySource(t, root, tc.label, tc.before, tc.after)
+			bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
+			if bundle != nil || err == nil || !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), "schema.yaml") {
+				t.Fatalf("source must refuse at the authored row with %q: bundle=%t err=%v", tc.want, bundle != nil, err)
+			}
+		})
+	}
+	for _, tc := range []struct {
+		name, key, receiver string
+		levels              int
+	}{
+		{"two_keyed_levels", "audit_id", "account/audit", 2},
+		{"three_keyed_levels", "audit_id", "account/audit/leaf", 3},
+		{"repeated_key_name_still_two_levels", "account_id", "account/audit", 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := canonicalrouting.CopyCrossInstanceConnection(t, canonicalrouting.CrossInstanceNestedKeyless)
+			replaceCrossInstanceVerifySource(t, root, "account/audit/schema.yaml", "stages: []", "instance: "+tc.key+"\nstages: []")
+			writeBootverifyFixtureFile(t, filepath.Join(root, "account/audit/state.yaml"), tc.key+": text\ncross_count: 0\n")
+			if tc.levels == 3 {
+				replaceCrossInstanceVerifySource(t, root, "schema.yaml", "to: account/audit,", "to: account/audit/leaf,")
+				writeBootverifyFixtureFile(t, filepath.Join(root, "account/audit/leaf/manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+				writeBootverifyFixtureFile(t, filepath.Join(root, "account/audit/leaf/schema.yaml"), "instance: leaf_id\ninputs: [ticket.cross]\n")
+				writeBootverifyFixtureFile(t, filepath.Join(root, "account/audit/leaf/state.yaml"), "leaf_id: text\n")
+				writeBootverifyFixtureFile(t, filepath.Join(root, "account/audit/leaf/nodes.yaml"), "leaf:\n  ticket.cross: {}\n")
+			}
+			bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
+			want := fmt.Sprintf("connect can select only one keyed level below its owner; receiver %q requires %d", tc.receiver, tc.levels)
+			if bundle != nil || err == nil || !strings.Contains(err.Error(), want) {
+				t.Fatalf("multi-key cross-instance row admitted or lost teaching %q: bundle=%t err=%v", want, bundle != nil, err)
+			}
+		})
+	}
 	tests := []struct {
 		name      string
 		variant   canonicalrouting.CompositionConnectVariant
@@ -479,6 +599,16 @@ func TestRun_FailsClosedForInvalidParentCompositionConnect(t *testing.T) {
 			}
 		})
 	}
+}
+
+func replaceCrossInstanceVerifySource(t *testing.T, root, label, before, after string) {
+	t.Helper()
+	path := filepath.Join(root, label)
+	raw, err := os.ReadFile(path)
+	if err != nil || strings.Count(string(raw), before) != 1 {
+		t.Fatalf("cross-instance fixture %s lacks exact source %q: %v", label, before, err)
+	}
+	writeBootverifyFixtureFile(t, path, strings.Replace(string(raw), before, after, 1))
 }
 
 func TestRun_AcceptsParentCompositionConnectToRootInput(t *testing.T) {

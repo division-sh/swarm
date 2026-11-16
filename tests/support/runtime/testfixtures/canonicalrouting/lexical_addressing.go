@@ -9,6 +9,75 @@ import (
 
 const crossAccountRow = "  - {event: ticket.cross, from: account/ticket, to: account, resolution: select, key_from: payload.target_account_id}\n"
 
+type CrossInstanceConnectionShape uint8
+
+const (
+	CrossInstanceSameKeyedFlow CrossInstanceConnectionShape = iota + 1
+	CrossInstanceNestedKeyless
+)
+
+func crossInstanceConnectionRow(shape CrossInstanceConnectionShape) string {
+	if shape == CrossInstanceSameKeyedFlow {
+		return "  - {event: account.cross, from: account, to: account, rename: account.cross.accepted, resolution: select, key_from: payload.target_account_id}\n"
+	}
+	return "  - {event: ticket.cross, from: account/ticket, to: account/audit, resolution: select, key_from: payload.target_account_id}\n"
+}
+
+func CopyCrossInstanceConnection(t testing.TB, shape CrossInstanceConnectionShape) string {
+	t.Helper()
+	root := CopyLexicalAddressing(t, true)
+	switch shape {
+	case CrossInstanceSameKeyedFlow:
+		applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), crossAccountRow, crossInstanceConnectionRow(shape))
+		applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "  - {event: cross.requested, from: ., to: account/ticket, resolution: select}\n", "")
+		writeClosedVariantFile(t, root, "account/schema.yaml", `instance: account_id
+inputs: [opened, root.audit, cross.forwarded, account.cross.accepted]
+outputs: [account.cross]
+connect:
+  - {event: ticket.done, from: ticket, to: audit}
+`)
+		writeClosedVariantFile(t, root, "account/events.yaml", "account.cross:\n  target_account_id: text\n")
+		writeClosedVariantFile(t, root, "account/nodes.yaml", `receiver:
+  opened: {}
+  root.audit: {}
+  cross.forwarded:
+    emit: {event: account.cross, fields: {target_account_id: payload.target_account_id}}
+  account.cross.accepted:
+    data_accumulation:
+      writes: [{target_field: cross_count, value: state.cross_count + 1}]
+`)
+		writeClosedVariantFile(t, root, "account/ticket/schema.yaml", "instance: ticket_id\ninputs: [opened]\noutputs: [ticket.done]\n")
+		writeClosedVariantFile(t, root, "account/ticket/events.yaml", "ticket.done:\n")
+		writeClosedVariantFile(t, root, "account/ticket/nodes.yaml", "reporter:\n  opened:\n    emit: {event: ticket.done}\n")
+	case CrossInstanceNestedKeyless:
+		applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), crossAccountRow, crossInstanceConnectionRow(shape))
+		writeClosedVariantFile(t, root, "account/schema.yaml", "instance: account_id\ninputs: [opened, root.audit, cross.forwarded]\nconnect:\n  - {event: ticket.done, from: ticket, to: audit}\n")
+		writeClosedVariantFile(t, root, "account/nodes.yaml", "receiver:\n  opened: {}\n  root.audit: {}\n  cross.forwarded: {}\n")
+		writeClosedVariantFile(t, root, "account/audit/schema.yaml", "stages: []\ninputs: [ticket.done, root.audit, ticket.cross]\n")
+		writeClosedVariantFile(t, root, "account/audit/state.yaml", "cross_count: 0\n")
+		writeClosedVariantFile(t, root, "account/audit/nodes.yaml", `audit:
+  ticket.done: {}
+  root.audit: {}
+  ticket.cross:
+    data_accumulation:
+      writes: [{target_field: cross_count, value: state.cross_count + 1}]
+`)
+	default:
+		t.Fatalf("unsupported cross-instance fixture shape %d", shape)
+	}
+	return root
+}
+
+func UseCrossInstanceAgentReceiver(t testing.TB, root string, shape CrossInstanceConnectionShape) {
+	t.Helper()
+	flow, event := "account", "account.cross.accepted"
+	if shape == CrossInstanceNestedKeyless {
+		flow, event = "account/audit", "ticket.cross"
+	}
+	applyClosedReplacement(t, filepath.Join(root, flow, "nodes.yaml"), "  "+event+":\n    data_accumulation:\n      writes: [{target_field: cross_count, value: state.cross_count + 1}]\n", "")
+	writeClosedVariantFile(t, root, filepath.Join(flow, "agents.yaml"), "receiver:\n  model: regular\n  intent:\n    inline: Consume the selected cross-instance event.\n  subscriptions: ["+event+"]\n")
+}
+
 func CopyLexicalAddressing(t testing.TB, crossAccount bool) string {
 	t.Helper()
 	root := t.TempDir()
@@ -67,7 +136,16 @@ connect:
 
 func CopyWrappedLexicalAddressing(t testing.TB, higherOwner bool) string {
 	t.Helper()
-	original := CopyLexicalAddressing(t, true)
+	return copyWrappedLexicalAddressing(t, CopyLexicalAddressing(t, true), crossAccountRow, higherOwner)
+}
+
+func CopyWrappedCrossInstanceConnection(t testing.TB, shape CrossInstanceConnectionShape, higherOwner bool) string {
+	t.Helper()
+	return copyWrappedLexicalAddressing(t, CopyCrossInstanceConnection(t, shape), crossInstanceConnectionRow(shape), higherOwner)
+}
+
+func copyWrappedLexicalAddressing(t testing.TB, original, row string, higherOwner bool) string {
+	t.Helper()
 	root := t.TempDir()
 	copyTree(t, original, filepath.Join(root, "envelope"))
 	writeClosedVariantFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
@@ -75,11 +153,11 @@ func CopyWrappedLexicalAddressing(t testing.TB, higherOwner bool) string {
 	if higherOwner {
 		path := filepath.Join(root, "envelope", "schema.yaml")
 		raw, err := os.ReadFile(path)
-		if err != nil || strings.Count(string(raw), crossAccountRow) != 1 {
+		if err != nil || strings.Count(string(raw), row) != 1 {
 			t.Fatalf("wrapped cross-account fixture lost its exact row: %v", err)
 		}
-		writeClosedVariantFile(t, root, "envelope/schema.yaml", strings.Replace(string(raw), crossAccountRow, "", 1))
-		schema += "connect:\n  - {event: ticket.cross, from: envelope/account/ticket, to: envelope/account, resolution: select, key_from: payload.target_account_id}\n"
+		writeClosedVariantFile(t, root, "envelope/schema.yaml", strings.Replace(string(raw), row, "", 1))
+		schema += "connect:\n" + strings.NewReplacer("from: account", "from: envelope/account", "to: account", "to: envelope/account").Replace(row)
 	}
 	writeClosedVariantFile(t, root, "schema.yaml", schema)
 	return root
