@@ -18,7 +18,7 @@ func TestNativeBusStopStoragePreservesPhysicalPredicatesAndEveryField(t *testing
 			continue
 		}
 		matched++
-		control := selectedCausalObservationBody(t, "internal/store/internal/backend/runlifecycle/standalone_fixture_storage.go", "ReadStopRunControlStorageTx")
+		control := selectedCausalObservationBody(t, "internal/store/internal/backend/runlifecycle/test_run_stop_storage.go", "readRunStopStorageTxForTest")
 		deliveries := selectedCausalObservationBody(t, "internal/store/internal/backend/runlifecycle/test_run_stop_storage.go", "readStopPendingDeliveryCountTx")
 		revisions := selectedCausalObservationBody(t, "internal/store/internal/backend/runforkrevision/postgres.go", "CountActivityJournalRevisionsForTest")
 		if !reflect.DeepEqual(eventDeliveryDiagnosticSQL(t, row.Before), eventDeliveryDiagnosticSQL(t, control+"\n"+deliveries+"\n"+revisions)) {
@@ -35,9 +35,8 @@ func TestNativeBusStopStoragePreservesPhysicalPredicatesAndEveryField(t *testing
 				t.Fatalf("stop witness lost %s", call)
 			}
 		}
-		native := selectedCausalObservationBody(t, "internal/store/internal/backend/runlifecycle/test_run_stop_storage.go", "readRunStopStorageTxForTest")
-		for _, call := range []string{"ReadStopRunControlStorageTx(ctx, tx, runID)", "readStopPendingDeliveryCountTx(ctx, tx, runID)", "runforkrevision.CountActivityJournalRevisionsForTest(ctx, tx, runID)", "return RunStopStorage{}, err"} {
-			if !strings.Contains(native, call) {
+		for _, call := range []string{"Scan(&out.Status, &out.Control)", "readStopPendingDeliveryCountTx(ctx, tx, runID)", "runforkrevision.CountActivityJournalRevisionsForTest(ctx, tx, runID)", "return RunStopStorage{}, err"} {
+			if !strings.Contains(control, call) {
 				t.Fatalf("native stop witness lost %s", call)
 			}
 		}

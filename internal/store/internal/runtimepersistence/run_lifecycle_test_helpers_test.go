@@ -16,6 +16,7 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
+	storerunlifecycle "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
 	"github.com/division-sh/swarm/tests/support/testutil/sourceartifactfixture"
 	"github.com/division-sh/swarm/tests/support/testutil/stagecatalogfixture"
 )
@@ -509,7 +510,7 @@ func executeRunCompletionCandidateForEvent(
 		}
 		if err := owner.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, _ *privateauthoractivity.Mutation) error {
 			var err error
-			request, err = requestPostgresCompletionCandidateTx(txctx, tx, runID, nil, false)
+			request, err = storerunlifecycle.RequestPostgresCompletionCandidateTx(txctx, tx, runID, nil)
 			return err
 		}); err != nil {
 			return err
@@ -524,7 +525,7 @@ func executeRunCompletionCandidateForEvent(
 		}
 		if err := owner.runPrivateAuthorActivityMutation(ctx, "test request SQLite completion candidate", func(txctx context.Context, tx *sql.Tx, _ *privateauthoractivity.Mutation) error {
 			var err error
-			request, err = requestSQLiteCompletionCandidateTx(txctx, tx, runID, nil, owner.now(), false)
+			request, err = storerunlifecycle.RequestSQLiteCompletionCandidateTx(txctx, tx, runID, nil, owner.now())
 			return err
 		}); err != nil {
 			return err

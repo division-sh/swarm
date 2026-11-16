@@ -8,11 +8,10 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	private "github.com/division-sh/swarm/internal/store/internal/runtimepersistence"
+	"github.com/division-sh/swarm/tests/support/testutil/sourceartifactfixture"
 )
 
-type DurableDataCatalogStore interface {
-	EnsureSourceArtifactWithData(context.Context, *sourceartifact.AdmittedSourceArtifact, runtimedata.Catalog) (sourceartifact.EnsureResult, error)
-}
+type DurableDataCatalogStore = sourceartifactfixture.Writer
 
 type RootedDataCatalogStore interface {
 	EnsureRootedSourceWithData(context.Context, sourceartifact.RootedSource, runtimedata.Catalog) (sourceartifact.RootedEnsureResult, error)

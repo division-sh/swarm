@@ -46,7 +46,6 @@ import (
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	agentfixture "github.com/division-sh/swarm/tests/support/store/testutil/agentfixture"
-	runtimepipelinefixture "github.com/division-sh/swarm/tests/support/testutil/runtimepipelinefixture"
 	"github.com/division-sh/swarm/tests/support/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
@@ -418,7 +417,7 @@ func TestSQLiteRuntimeStoreUpsertAgentIgnoresAmbientPipelineTransaction(t *testi
 		t.Fatalf("begin sqlite tx: %v", err)
 	}
 	now := time.Now().UTC()
-	txctx := runtimepipelinefixture.WithSQLTx(ctx, tx)
+	txctx := ctx
 	if err := agentfixture.UpsertStatic(t, txctx, store, runtimemanager.PersistedAgent{
 		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 			ID:            "agent-in-pipeline-tx",

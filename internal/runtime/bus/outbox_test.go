@@ -534,7 +534,7 @@ func TestEngineDispatcherDoesNotConsumeAmbientSQLTransactionAuthority(t *testing
 	}
 	postCommitActions := make([]runtimepipelinefixture.OwnerAction, 0, 1)
 	rollbackActions := make([]runtimepipelinefixture.OwnerAction, 0, 1)
-	txctx := runtimepipelinefixture.WithSQLTx(context.Background(), tx)
+	txctx := context.Background()
 	txctx = runtimepipelinefixture.WithPostCommitActions(txctx, &postCommitActions)
 	txctx = runtimepipelinefixture.WithRollbackActions(txctx, &rollbackActions)
 
@@ -687,7 +687,7 @@ func TestEngineDispatcherConsumesImmutableCommittedIntentWithoutAmbientQueue(t *
 	}}
 	postCommitActions := make([]runtimepipelinefixture.OwnerAction, 0, 1)
 	rollbackActions := make([]runtimepipelinefixture.OwnerAction, 0, 1)
-	txctx := runtimepipelinefixture.WithSQLTx(context.Background(), tx)
+	txctx := context.Background()
 	txctx = runtimepipelinefixture.WithPostCommitActions(txctx, &postCommitActions)
 	txctx = runtimepipelinefixture.WithRollbackActions(txctx, &rollbackActions)
 
@@ -753,7 +753,7 @@ func TestEngineDispatcherAmbientSQLContextDoesNotBypassDurableManifest(t *testin
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	ctx := runtimepipelinefixture.WithSQLTx(context.Background(), tx)
+	ctx := context.Background()
 	err = eb.EngineDispatcher().DispatchPostCommit(ctx, []runtimeengine.EmitIntent{{
 		Event: eventtest.RunCreatingRootIngress(
 			eventtest.UUID("evt-no-post-commit-queue"),
@@ -808,7 +808,7 @@ func TestEngineOutboxPersistsEventsAndDeliveriesInTransaction(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	ctx := runtimepipelinefixture.WithSQLTx(context.Background(), tx)
+	ctx := context.Background()
 	runtimebustest.Subscribe(t, eb, "reviewer", "custom.emitted")
 	intent := runtimeengine.EmitIntent{
 		Event: eventtest.RunCreatingRootIngress(
@@ -891,7 +891,7 @@ func TestEngineOutboxExactDuplicateDispatchIsOperationNoOp(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Begin: %v", err)
 		}
-		ctx := runtimepipelinefixture.WithSQLTx(context.Background(), tx)
+		ctx := context.Background()
 		if err := commitEnginePublicationsForTest(ctx, eb, store, []runtimeengine.EmitIntent{intent}); err != nil {
 			_ = tx.Rollback()
 			t.Fatalf("WriteOutbox: %v", err)
@@ -973,7 +973,7 @@ func TestEngineOutboxPublicationClaimSpansCommitToDispatchAndRollsBack(t *testin
 			}
 			rollbackActions := []runtimepipelinefixture.OwnerAction{}
 			postCommitActions := []runtimepipelinefixture.OwnerAction{}
-			ctx := runtimepipelinefixture.WithRollbackActions(runtimepipelinefixture.WithSQLTx(context.Background(), tx), &rollbackActions)
+			ctx := runtimepipelinefixture.WithRollbackActions(context.Background(), &rollbackActions)
 			ctx = runtimepipelinefixture.WithPostCommitActions(ctx, &postCommitActions)
 			if err := commitEnginePublicationsForTest(ctx, eb, store, []runtimeengine.EmitIntent{intent}); err != nil {
 				t.Fatalf("WriteOutbox: %v", err)
@@ -1037,7 +1037,7 @@ func TestEngineOutboxPreservesAppendOutcomeForEveryIntentInBatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx := runtimepipelinefixture.WithSQLTx(context.Background(), tx)
+	ctx := context.Background()
 	if err := commitEnginePublicationsForTest(ctx, eb, store, []runtimeengine.EmitIntent{intent, intent}); err != nil {
 		t.Fatalf("WriteOutbox: %v", err)
 	}
@@ -1084,7 +1084,7 @@ func TestEngineOutboxPreexistingExactDuplicateBatchDispatchesZero(t *testing.T) 
 		if err != nil {
 			t.Fatal(err)
 		}
-		ctx := runtimepipelinefixture.WithSQLTx(context.Background(), tx)
+		ctx := context.Background()
 		if err := commitEnginePublicationsForTest(ctx, eb, store, intents); err != nil {
 			t.Fatalf("WriteOutbox: %v", err)
 		}
@@ -1136,7 +1136,7 @@ func TestEngineOutboxConflictingSameIDBatchRollsBackOrderedOutcomes(t *testing.T
 	}
 	rollbackActions := []runtimepipelinefixture.OwnerAction{}
 	postCommitActions := []runtimepipelinefixture.OwnerAction{}
-	ctx := runtimepipelinefixture.WithRollbackActions(runtimepipelinefixture.WithSQLTx(context.Background(), tx), &rollbackActions)
+	ctx := runtimepipelinefixture.WithRollbackActions(context.Background(), &rollbackActions)
 	ctx = runtimepipelinefixture.WithPostCommitActions(ctx, &postCommitActions)
 	if err := commitEnginePublicationsForTest(ctx, eb, store, []runtimeengine.EmitIntent{intent, conflict}); err == nil || !strings.Contains(err.Error(), "conflicting event identity") {
 		t.Fatalf("WriteOutbox conflict error = %v", err)
@@ -1160,7 +1160,7 @@ func TestEngineOutboxConflictingSameIDBatchRollsBackOrderedOutcomes(t *testing.T
 		if err != nil {
 			t.Fatal(err)
 		}
-		ctx := runtimepipelinefixture.WithSQLTx(context.Background(), tx)
+		ctx := context.Background()
 		if err := commitEnginePublicationsForTest(ctx, eb, store, []runtimeengine.EmitIntent{intent}); err != nil {
 			t.Fatal(err)
 		}
@@ -1204,7 +1204,7 @@ func TestEngineOutboxDistinctIntentBatchDispatchesEachOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx := runtimepipelinefixture.WithSQLTx(context.Background(), tx)
+	ctx := context.Background()
 	if err := commitEnginePublicationsForTest(ctx, eb, store, intents); err != nil {
 		t.Fatal(err)
 	}
@@ -1297,7 +1297,7 @@ func TestEngineOutboxSubscribedIntentConsumesCanonicalMaterializedRoutePlan(t *t
 			events.EventLineage{RunID: runtimebustest.DefaultRunID, ParentEventID: eventtest.UUID("outbox-materialized-parent"), ExecutionMode: executionmode.Live},
 			events.EventEnvelope{}, eventtest.ConcreteTemplateRoutingSource("review", "review/inst-1", runtimeflowidentity.EntityID("review/inst-1")), time.Now().UTC()),
 	}
-	ctx := runtimepipelinefixture.WithSQLTx(context.Background(), tx)
+	ctx := context.Background()
 	if err := commitEnginePublicationsForTest(ctx, eb, store, []runtimeengine.EmitIntent{intent}); err != nil {
 		t.Fatalf("WriteOutbox: %v", err)
 	}
@@ -1361,7 +1361,7 @@ func TestEngineOutboxAndDispatcher_UseCanonicalDirectRecipientManifest(t *testin
 			time.Now().UTC(),
 		),
 	}
-	ctx := runtimepipelinefixture.WithSQLTx(context.Background(), tx)
+	ctx := context.Background()
 	if err := commitEnginePublicationsForTest(ctx, eb, store, []runtimeengine.EmitIntent{intent}); err != nil {
 		t.Fatalf("WriteOutbox: %v", err)
 	}
@@ -1502,7 +1502,7 @@ func TestEngineOutbox_TargetFailureDeadLetterErrorFailsClosed(t *testing.T) {
 			time.Now().UTC(),
 		),
 	}
-	ctx := runtimepipelinefixture.WithSQLTx(context.Background(), tx)
+	ctx := context.Background()
 	err = commitEnginePublicationsForTest(ctx, eb, store, []runtimeengine.EmitIntent{intent})
 	if !errors.Is(err, deadLetterErr) {
 		t.Fatalf("WriteOutbox error = %v, want dead-letter persistence failure", err)
@@ -1555,7 +1555,7 @@ func TestEngineOutboxAndDispatcher_DeliverInternalSubscribersOutsidePersistedMan
 			time.Now().UTC(),
 		),
 	}
-	ctx := runtimepipelinefixture.WithSQLTx(context.Background(), tx)
+	ctx := context.Background()
 	if err := commitEnginePublicationsForTest(ctx, eb, store, []runtimeengine.EmitIntent{intent}); err != nil {
 		t.Fatalf("WriteOutbox: %v", err)
 	}
@@ -1627,7 +1627,7 @@ func TestEngineOutboxAndDispatcher_DoesNotFabricateRoutesForPendingInternalDeliv
 			time.Now().UTC(),
 		),
 	}
-	txctx := runtimepipelinefixture.WithSQLTx(context.Background(), tx)
+	txctx := context.Background()
 	if err := commitEnginePublicationsForTest(txctx, eb, store, []runtimeengine.EmitIntent{intent}); err != nil {
 		_ = tx.Rollback()
 		t.Fatalf("WriteOutbox: %v", err)
@@ -1796,7 +1796,7 @@ func TestEnginePublicationRejectsFilteredDirectIntentBeforePersistence(t *testin
 		),
 	}
 	intent = requesterReturnIntentForTest(t, intent.Event, "reviewer-ent-2", events.DeliveryContext{})
-	ctx := runtimepipelinefixture.WithSQLTx(context.Background(), tx)
+	ctx := context.Background()
 	if err := commitEnginePublicationsForTest(ctx, eb, store, []runtimeengine.EmitIntent{intent}); err == nil || !strings.Contains(err.Error(), "human-task requester is missing, unavailable or ambiguous") {
 		_ = tx.Rollback()
 		t.Fatalf("commit engine publications error = %v, want rejected recipient", err)

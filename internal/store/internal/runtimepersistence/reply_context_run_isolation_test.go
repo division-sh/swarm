@@ -16,7 +16,6 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres"
 	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/sqlite"
-	replycontextstore "github.com/division-sh/swarm/internal/store/internal/backend/replycontext"
 	"github.com/google/uuid"
 )
 
@@ -47,28 +46,7 @@ func TestIssue642ReplyCorrelationScopesBothStores(t *testing.T) {
 				t.Helper()
 				var err error
 				if record.RunID == "" {
-					err = func() error {
-						fixtureContext := ctx
-						fixtureOwner := any(store)
-						write := func(ctx context.Context, tx *sql.Tx) error {
-							_, err := replycontextstore.InsertConstraintFixtureForTest(ctx, tx, backend.name == "postgres", record)
-							return err
-						}
-						switch owner := fixtureOwner.(type) {
-						case *PostgresStore:
-							if owner == nil || owner.backend == nil {
-								return fmt.Errorf("postgres event fixture store is required")
-							}
-							return owner.backend.RunTransaction(fixtureContext, write)
-						case *SQLiteRuntimeStore:
-							if owner == nil || owner.backend == nil {
-								return fmt.Errorf("sqlite event fixture store is required")
-							}
-							return owner.backend.RunTransaction(fixtureContext, "unrevisioned event fixture", write)
-						default:
-							return fmt.Errorf("event fixture store %T is unsupported", fixtureOwner)
-						}
-					}()
+					_, err = insertReplyConstraintForTest(ctx, store, record, false)
 				} else {
 					err = store.CreateReplyContext(ctx, record)
 				}
@@ -100,29 +78,7 @@ func TestIssue642ReplyCorrelationScopesBothStores(t *testing.T) {
 			t.Run("runless_exact_idempotence", func(t *testing.T) { requireCreated(t, runless) })
 			t.Run("runless_distinct_request_collision", func(t *testing.T) {
 				collision := create(t, "")
-				var inserted bool
-				if err := func() error {
-					fixtureContext := ctx
-					fixtureOwner := any(store)
-					write := func(ctx context.Context, tx *sql.Tx) (err error) {
-						inserted, err = replycontextstore.InsertConstraintFixtureForTest(ctx, tx, backend.name == "postgres", collision)
-						return err
-					}
-					switch owner := fixtureOwner.(type) {
-					case *PostgresStore:
-						if owner == nil || owner.backend == nil {
-							return fmt.Errorf("postgres event fixture store is required")
-						}
-						return owner.backend.RunTransaction(fixtureContext, write)
-					case *SQLiteRuntimeStore:
-						if owner == nil || owner.backend == nil {
-							return fmt.Errorf("sqlite event fixture store is required")
-						}
-						return owner.backend.RunTransaction(fixtureContext, "unrevisioned event fixture", write)
-					default:
-						return fmt.Errorf("event fixture store %T is unsupported", fixtureOwner)
-					}
-				}(); err != nil || inserted {
+				if inserted, err := insertReplyConstraintForTest(ctx, store, collision, false); err != nil || inserted {
 					t.Fatal("runless distinct request reused correlation authority")
 				}
 				if _, err := store.LoadReplyContext(ctx, collision.ID); !errors.Is(err, runtimereplycontext.ErrNotFound) {
