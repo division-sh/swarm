@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/operatorread"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 )
@@ -92,7 +93,7 @@ func TestStoredInboundServedStopRetainsNativePendingBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			instance, found, err := rt.Pipeline.LoadConstructedFlowInstance(t.Context(), owner, runID)
+			instance, found, err := rt.Pipeline.LoadConstructedFlowInstance(t.Context(), owner, identity.NormalizeEntityID(runID))
 			if err != nil || !found || instance.Fields["processed_count"] != float64(1) {
 				t.Fatalf("stopping process started stored input: found=%t instance=%+v err=%v", found, instance, err)
 			}
