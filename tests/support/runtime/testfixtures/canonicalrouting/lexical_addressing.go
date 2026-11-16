@@ -123,6 +123,44 @@ func BindCrossInstanceOuterKey(t testing.TB, root string) {
 	writeClosedVariantFile(t, root, "envelope/state.yaml", "envelope_id: text\n")
 }
 
+func CopyBoundCrossInstanceConnection(t testing.TB) string {
+	t.Helper()
+	inner := CopyCrossInstanceConnection(t, CrossInstanceNestedKeyless)
+	AddCrossInstanceKeylessIntermediate(t, inner)
+	root := copyWrappedLexicalAddressing(t, inner, crossInstanceConnectionRow(CrossInstanceNestedKeyless), false)
+	BindCrossInstanceOuterKey(t, root)
+	writeClosedVariantFile(t, root, "schema.yaml", `inputs: [group.opened, group.cross.requested]
+connect:
+  - {event: group.opened, from: ., to: envelope, resolution: select-or-create}
+  - {event: group.cross.requested, from: ., to: envelope, resolution: select}
+`)
+	groupEvents := `group.opened:
+  envelope_id: text
+  account_id: text
+  ticket_id: text
+group.cross.requested:
+  envelope_id: text
+  source_account_id: text
+  ticket_id: text
+  target_account_id: text
+`
+	writeClosedVariantFile(t, root, "events.yaml", groupEvents)
+	applyClosedReplacement(t, filepath.Join(root, "envelope/schema.yaml"), "inputs: [opened, root.audit, cross.requested]", "inputs: [opened, root.audit, cross.requested, group.opened, group.cross.requested]\noutputs: [opened, cross.requested]")
+	eventsPath := filepath.Join(root, "envelope/events.yaml")
+	raw, err := os.ReadFile(eventsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeClosedVariantFile(t, root, "envelope/events.yaml", string(raw)+groupEvents)
+	writeClosedVariantFile(t, root, "envelope/nodes.yaml", `forward:
+  group.opened:
+    emit: {event: opened, fields: {account_id: payload.account_id, ticket_id: payload.ticket_id}}
+  group.cross.requested:
+    emit: {event: cross.requested, fields: {source_account_id: payload.source_account_id, ticket_id: payload.ticket_id, target_account_id: payload.target_account_id}}
+`)
+	return root
+}
+
 func CopyLexicalAddressing(t testing.TB, crossAccount bool) string {
 	t.Helper()
 	root := t.TempDir()
