@@ -10,6 +10,10 @@ func debtReviewedExcludedFixture(finding authorityFinding) string {
 	}
 	var declaration, context, reason string
 	switch finding.File + "\x00" + finding.Enclosing {
+	case "internal/store/internal/startupownership/sqlite_possession_unsupported.go\x00inspectSQLiteCoordinate":
+		declaration = "declaration:9254b4cf8af987992cdcd31f3d9b798080e8e79fa5d6354c151ca8780c510f0e"
+		context = "3c5e606953002e8eabe1439f7b2f9d9e67367ad6dd1de14d9b543a69ffec84c8"
+		reason = "read-only coordinate delegates to the existing unsupported-platform typed refusal; no raw authority or executable coverage"
 	case "internal/serveapp/issue642_future_provider_test.go\x00TestIssue642FutureProviderConstructsAfterEmptyCatalogBothStores":
 		declaration = "declaration:931af522b4f0b9379a9842b13e9a28e01e907202547ed55a48a510783d324121"
 		if finding.Member == "declaration:a93689c088d0eac109b63733b72f50d2c90bacd48405c1eff84a8b6105cf1d5b" {
@@ -69,6 +73,9 @@ func debtClassifyReviewedExcludedFixtures(t *testing.T, findings []authorityFind
 		}
 		findings[i].Kind = "reviewed-excluded-source"
 		ruling := "#642/6202173993"
+		if finding.File == "internal/store/internal/startupownership/sqlite_possession_unsupported.go" {
+			ruling = "#3082/6928601913"
+		}
 		if finding.File == "internal/testutil/testprocess/process_darwin.go" || finding.File == "tests/support/testutil/testprocess/process_darwin.go" {
 			ruling = "#2903/6584235489"
 		}
