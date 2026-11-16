@@ -72,6 +72,7 @@ type Handler struct {
 	upgrader            websocket.Upgrader
 	subs                *SubscriptionRuntime
 	workOwner           *worklifetime.Process
+	verboseErrors       bool
 }
 
 type MethodHandler func(context.Context, Request) (any, error)
@@ -83,6 +84,7 @@ type Options struct {
 	Subscriptions       *SubscriptionRuntime
 	ProcessWorkOwner    *worklifetime.Process
 	OperatorPrincipalID string
+	VerboseErrors       bool
 }
 
 type Request struct {
@@ -179,6 +181,7 @@ func NewHandler(opts Options) (*Handler, error) {
 		upgrader:            websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }},
 		subs:                opts.Subscriptions.withDefaults(),
 		workOwner:           opts.ProcessWorkOwner,
+		verboseErrors:       opts.VerboseErrors,
 	}
 	if handler.subs != nil {
 		handler.subs.workOwner = opts.ProcessWorkOwner
@@ -327,13 +330,13 @@ func (h *Handler) responseFromResult(req Request, result any, err error) rpcResp
 			return rpcResponse{JSONRPC: jsonRPCVersion, ID: req.ID, Error: invalidParams(req.CorrelationID, paramsErr.Details)}
 		}
 		failure := runtimefailures.Normalize(err, "api", strings.TrimSpace(req.Method))
-		h.logInternalFallback(req, failure)
+		h.logInternalFallback(req, failure, err)
 		return rpcResponse{JSONRPC: jsonRPCVersion, ID: req.ID, Error: h.standardError(codeInternalError, "internal error", req.CorrelationID, map[string]any{"failure": failure})}
 	}
 	return rpcResponse{JSONRPC: jsonRPCVersion, ID: req.ID, Result: result}
 }
 
-func (h *Handler) logInternalFallback(req Request, failure runtimefailures.Envelope) {
+func (h *Handler) logInternalFallback(req Request, failure runtimefailures.Envelope, cause error) {
 	fields := []any{
 		"method", strings.TrimSpace(req.Method),
 		"correlation_id", strings.TrimSpace(req.CorrelationID),
@@ -345,6 +348,9 @@ func (h *Handler) logInternalFallback(req Request, failure runtimefailures.Envel
 		fields = append(fields, "request_id", fmt.Sprint(req.ID))
 	}
 	fields = append(fields, safeRequestIdentifierFields(req.Params)...)
+	if h.verboseErrors && failure.Class == runtimefailures.ClassInternalFailure && failure.Detail.Code == "unclassified_runtime_error" {
+		fields = append(fields, "error_diagnostics", renderInternalFailureDiagnostics(cause))
+	}
 	diaglog.ProcessLog(diaglog.LevelError, "api", "json-rpc internal error", fields...)
 }
 

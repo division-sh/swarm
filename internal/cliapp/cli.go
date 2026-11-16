@@ -363,7 +363,7 @@ func newServeCommand(ctx context.Context, root InvocationRoot, runServe ServeRun
 		}
 		return err
 	})
-	cmd.Flags().BoolVarP(&opts.Verbose, "verbose", "v", opts.Verbose, "Render the canonical serve boot sequence after startup succeeds or fails")
+	cmd.Flags().BoolVarP(&opts.Verbose, "verbose", "v", opts.Verbose, "Render the canonical serve boot sequence and full unclassified-error diagnostics; messages may contain secrets, and stacks show the reporting point, not the original failure")
 	cmd.Flags().BoolVar(&opts.NoFeed, "no-feed", opts.NoFeed, "Disable the development author story feed after readiness")
 	cmd.Flags().BoolVar(&opts.NoColor, "no-color", opts.NoColor, "Disable ANSI color in human-readable serve output")
 	return cmd
