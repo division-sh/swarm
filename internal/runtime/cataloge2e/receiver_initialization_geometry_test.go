@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/operatorread"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -257,7 +258,8 @@ func proveCrossInstanceStaleAncestor(t *testing.T, backend catalogRuntimeBackend
 	unblock := func() { release.Do(func() { close(resume) }) }
 	var turns atomic.Int32
 	var h *runtimeHarness
-	var changedPath, receiverPath string
+	var changedInstance pipeline.WorkflowInstance
+	var receiverPath string
 	observe := func(ctx context.Context, command pipeline.FanOutChunkCommand) {
 		if command.Claim.Key.RunID != catalogRuntimeRunID {
 			return
@@ -278,15 +280,7 @@ func proveCrossInstanceStaleAncestor(t *testing.T, backend catalogRuntimeBackend
 				first <- fmt.Errorf("stale-ancestor fixture did not select the final receiver: %+v", routes)
 				return
 			}
-			var selected any = h.pg
-			if h.sqlite != nil {
-				selected = h.sqlite
-			}
-			count, err := storetest.SetWorkflowProjectionDraining(ctx, selected, catalogRuntimeRunID, changedPath)
-			if err == nil && count != 1 {
-				err = fmt.Errorf("stale-ancestor fixture changed %d headers", count)
-			}
-			first <- err
+			first <- h.rt.Pipeline.MarkTerminated(ctx, catalogExactWorkflowRoute(changedInstance.StorageRef), identity.NormalizeEntityID(changedInstance.EntityID), time.Now().UTC())
 		case 2:
 			retry <- struct{}{}
 			select {
@@ -326,9 +320,9 @@ func proveCrossInstanceStaleAncestor(t *testing.T, backend catalogRuntimeBackend
 	if account.EntityID == "" || bridge.EntityID == "" || receiver.EntityID == "" {
 		t.Fatalf("stale-ancestor fixture lacks its native chain: account=%+v bridge=%+v receiver=%+v", account, bridge, receiver)
 	}
-	changedPath, receiverPath = account.StorageRef, receiver.StorageRef
+	changedInstance, receiverPath = account, receiver.StorageRef
 	if changed == "intermediate" {
-		changedPath = bridge.StorageRef
+		changedInstance = bridge
 	}
 	h.publishAndWait(catalogTriggerStep{Event: "cross.requested", eventID: uuid.NewString(), Payload: map[string]any{"source_account_id": "7", "ticket_id": "42", "target_account_id": "8", "targets": []any{"8"}}}, catalogRuntimePublishTimeout)
 	phase, cancel := context.WithTimeout(ctx, catalogRuntimePublishTimeout)
@@ -454,12 +448,22 @@ func proveOneKeyCrossInstanceDelivery(t *testing.T, backend catalogRuntimeBacken
 		t.Fatal(err)
 	}
 	var crossID string
+	var delivered eventtypes.DeliveryRoute
+	wantTargetEntity := receiver.EntityID
+	entityless := agent && shape == canonicalrouting.CrossInstanceNestedKeyless
+	if entityless {
+		wantTargetEntity = ""
+	}
 	for _, event := range public {
 		if !strings.HasSuffix(event.EventName, "/"+eventName) {
 			continue
 		}
-		if crossID != "" || event.SourceEventID != id || len(event.Deliveries) != 1 || event.Deliveries[0].Status != "delivered" || event.Deliveries[0].Route.Target.Route().FlowInstance != receiver.StorageRef || event.Deliveries[0].Route.Target.Route().EntityID != receiver.EntityID || event.Deliveries[0].Route.Recipient.IsAgent() != agent || len(event.DeadLetters) != 0 || event.NoDelivery != nil {
+		if crossID != "" || event.SourceEventID != id || len(event.Deliveries) != 1 || event.Deliveries[0].Status != "delivered" || event.Deliveries[0].Route.Target.Route().FlowInstance != receiver.StorageRef || event.Deliveries[0].Route.Target.Route().EntityID != wantTargetEntity || event.Deliveries[0].Route.Recipient.IsAgent() != agent || len(event.DeadLetters) != 0 || event.NoDelivery != nil {
 			t.Fatalf("one-key publication did not reach only its selected receiver: %+v", event)
+		}
+		delivered = event.Deliveries[0].Route
+		if delivered.Target.EntitylessReceiver() != entityless || agent && delivered.AgentIdentity.FlowInstance() != receiver.StorageRef || entityless && (delivered.Initialization.ConstructionTarget().Route().FlowInstance != receiver.StorageRef || delivered.Initialization.ConstructionTarget().Route().EntityID != receiver.EntityID) {
+			t.Fatalf("selected actor target lost its distinct exact construction: %+v", delivered)
 		}
 		crossID = event.EventID
 		var selected any = h.pg
@@ -481,7 +485,7 @@ func proveOneKeyCrossInstanceDelivery(t *testing.T, backend catalogRuntimeBacken
 		h.llm.mu.Lock()
 		calls := 0
 		for _, call := range h.llm.deliveryCalls {
-			if call.EventID == crossID && call.RunID == catalogRuntimeRunID && call.TargetEntityID == receiver.EntityID {
+			if call.EventID == crossID && call.RunID == catalogRuntimeRunID && call.TargetEntityID == wantTargetEntity && call.AgentIdentity == delivered.AgentIdentity.Normalize() {
 				calls++
 			}
 		}

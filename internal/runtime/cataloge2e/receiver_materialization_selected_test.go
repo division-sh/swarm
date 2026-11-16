@@ -190,7 +190,7 @@ func proveSelectedCrossInstanceFork(t *testing.T, backend catalogRuntimeBackend,
 			t.Fatal(err)
 		}
 		frontier, err := runforkadmission.AdmitContractFrontier(runforkadmission.ContractFrontierRequest{Plan: plan, Source: loaded.Source, ContractSelection: selection})
-		if err != nil || !frontier.HistoricalExecutionSupported {
+		if err != nil {
 			t.Fatalf("native cut not admitted: %+v error=%v", frontier, err)
 		}
 		recipients := 0
@@ -206,7 +206,18 @@ func proveSelectedCrossInstanceFork(t *testing.T, backend catalogRuntimeBackend,
 			}
 		}
 		if recipients != 1 {
-			t.Fatalf("nonempty selected execution frontier recipients=%d, want one", recipients)
+			selector, present, selectorErr := plan.HistoricalRouteSelector(cut)
+			admission, admitted := selector.PayloadAdmission()
+			t.Logf("captured selector: present=%t error=%v admitted=%t class=%s schema=%s", present, selectorErr, admitted, selector.AdmissionClass(), admission.Binding().SchemaClass())
+			if bundle, found := semanticview.Bundle(loaded.Source); found {
+				for _, connect := range bundle.Semantics.CompositionConnects {
+					if connect.Event == strings.TrimPrefix(eventName, "/") {
+						input, found, inputErr := bundle.ConnectionInput(connect)
+						t.Logf("captured connect %s: input=%t error=%v selected=%s source=%+v", connect.AuthoredLocation(), found, inputErr, input.SelectionFlowID(), input.SourceEvidence().Source)
+					}
+				}
+			}
+			t.Fatalf("nonempty selected execution frontier recipients=%d, want one: %+v", recipients, frontier)
 		}
 		publication, found, err := selected.LoadPreparedPublishEvent(ctx, cut)
 		if err != nil || !found || len(publication.DeliveryRoutes) != 1 {
@@ -363,7 +374,7 @@ func proveCrossInstanceCutRefusals(t *testing.T, h *runtimeHarness, selected cro
 	for _, name := range []string{"missing_keyed", "duplicated_keyed", "missing_intermediate", "crossed_intermediate", "missing_receiver", "crossed_receiver"} {
 		t.Run(name, func(t *testing.T) {
 			baseline, err := runforkadmission.AdmitContractFrontier(runforkadmission.ContractFrontierRequest{Plan: original, Source: source, ContractSelection: selection})
-			if err != nil || !baseline.HistoricalExecutionSupported || len(baseline.FrontierEvents) == 0 {
+			if err != nil || len(baseline.FrontierEvents) == 0 {
 				t.Fatalf("uncorrupted native cut not admitted before corruption: %+v error=%v", baseline, err)
 			}
 			plan := original

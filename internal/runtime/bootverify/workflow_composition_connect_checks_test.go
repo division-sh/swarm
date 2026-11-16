@@ -467,6 +467,16 @@ func TestCompositionSourceRejectsRetiredFanInGrammarBeforeBoot(t *testing.T) {
 }
 
 func TestRun_FailsClosedForInvalidParentCompositionConnect(t *testing.T) {
+	requireRefusal := func(t *testing.T, bundle *runtimecontracts.WorkflowContractBundle, want string) {
+		t.Helper()
+		report := Run(t.Context(), semanticview.Wrap(bundle), Options{})
+		for _, finding := range report.Errors() {
+			if finding.CheckID == "composition_connect_validation" && strings.Contains(finding.Location, "schema.yaml") && strings.Contains(finding.Message, want) {
+				return
+			}
+		}
+		t.Fatalf("composition refusal lost its owner, source location or teaching %q: %+v", want, report.Errors())
+	}
 	for _, tc := range []struct {
 		name, want string
 		shape      canonicalrouting.CrossInstanceConnectionShape
@@ -498,9 +508,16 @@ func TestRun_FailsClosedForInvalidParentCompositionConnect(t *testing.T) {
 			root := canonicalrouting.CopyCrossInstanceConnection(t, canonicalrouting.CrossInstanceNestedKeyless)
 			replaceCrossInstanceVerifySource(t, root, tc.label, tc.before, tc.after)
 			bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
-			if bundle != nil || err == nil || !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), "schema.yaml") {
-				t.Fatalf("source must refuse at the authored row with %q: bundle=%t err=%v", tc.want, bundle != nil, err)
+			if tc.name == "nested_intrinsic_select" {
+				if bundle != nil || err == nil || !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), "schema.yaml") {
+					t.Fatalf("source must refuse at the authored row with %q: bundle=%t err=%v", tc.want, bundle != nil, err)
+				}
+				return
 			}
+			if err != nil {
+				t.Fatalf("source did not reach composition validation: %v", err)
+			}
+			requireRefusal(t, bundle, tc.want)
 		})
 	}
 	for _, tc := range []struct {
@@ -517,6 +534,8 @@ func TestRun_FailsClosedForInvalidParentCompositionConnect(t *testing.T) {
 			writeBootverifyFixtureFile(t, filepath.Join(root, "account/audit/state.yaml"), tc.key+": text\ncross_count: 0\n")
 			if tc.levels == 3 {
 				replaceCrossInstanceVerifySource(t, root, "schema.yaml", "to: account/audit,", "to: account/audit/leaf,")
+				replaceCrossInstanceVerifySource(t, root, "account/audit/schema.yaml", "inputs: [ticket.done, root.audit, ticket.cross]", "inputs: [ticket.done, root.audit]")
+				writeBootverifyFixtureFile(t, filepath.Join(root, "account/audit/nodes.yaml"), "audit:\n  ticket.done: {}\n  root.audit: {}\n")
 				writeBootverifyFixtureFile(t, filepath.Join(root, "account/audit/leaf/manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 				writeBootverifyFixtureFile(t, filepath.Join(root, "account/audit/leaf/schema.yaml"), "instance: leaf_id\ninputs: [ticket.cross]\n")
 				writeBootverifyFixtureFile(t, filepath.Join(root, "account/audit/leaf/state.yaml"), "leaf_id: text\n")
@@ -524,9 +543,10 @@ func TestRun_FailsClosedForInvalidParentCompositionConnect(t *testing.T) {
 			}
 			bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 			want := fmt.Sprintf("connect can select only one keyed level below its owner; receiver %q requires %d", tc.receiver, tc.levels)
-			if bundle != nil || err == nil || !strings.Contains(err.Error(), want) {
-				t.Fatalf("multi-key cross-instance row admitted or lost teaching %q: bundle=%t err=%v", want, bundle != nil, err)
+			if err != nil {
+				t.Fatalf("multi-key source did not reach composition validation: %v", err)
 			}
+			requireRefusal(t, bundle, want)
 		})
 	}
 	tests := []struct {
