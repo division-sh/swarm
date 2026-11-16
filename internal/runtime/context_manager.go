@@ -343,6 +343,12 @@ type RuntimeContextManager struct {
 	mu                         sync.RWMutex
 	sourceSetMu                sync.Mutex
 	liveSelectionMu            sync.RWMutex
+	inboundPhaseMu             sync.RWMutex
+	inboundStopping            bool
+	inboundStoreOnly           bool
+	inboundReady               chan struct{}
+	inboundSealErr             error
+	inboundRequests            shutdownAdmission
 	availability               RunBundleAvailabilityReader
 	landingRuns                runtimerunlifecycle.LandingRunReader
 	contexts                   map[string]*runtimeContextEntry

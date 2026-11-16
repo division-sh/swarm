@@ -43,6 +43,7 @@ type InboundTarget struct {
 	RegisteredOperationID string
 	AdmissionPlan         providertriggers.InboundAdmissionPlan
 	registrationAdmission func(context.Context) error
+	storeOnly             bool
 }
 
 type InboundGateway struct {
@@ -130,7 +131,12 @@ func (g *InboundGateway) HandleResolvedWebhook(w http.ResponseWriter, r *http.Re
 }
 
 func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Request, target InboundTarget, source semanticview.Source) {
-	if g.beginAdmission != nil {
+	if target.storeOnly {
+		if err := r.Context().Err(); err != nil {
+			http.Error(w, "runtime shutting down", http.StatusServiceUnavailable)
+			return
+		}
+	} else if g.beginAdmission != nil {
 		admissionCtx, release, admitted := g.beginAdmission(r.Context())
 		if !admitted {
 			http.Error(w, "runtime shutting down", http.StatusServiceUnavailable)
@@ -426,7 +432,7 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 	var commitResult runtimeinbound.CommitResult
 	reconciled := make(map[string]struct{})
 	for {
-		batchPlan, err = g.prepareInboundDeliveryBatch(pubCtx, batch)
+		batchPlan, err = g.prepareInboundDeliveryBatch(pubCtx, batch, target.storeOnly)
 		if err != nil {
 			writeInboundPublicationError(w, g.logger, requestCtx, provider, target.FlowPath, providerEventID, err)
 			return
@@ -501,6 +507,30 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 			reportInboundCommittedCleanup(g.logger, requestCtx, provider, target.FlowPath, providerEventID, commitErr)
 		}
 		writeJSON(w, http.StatusOK, inboundPublicationResponse("duplicate", record, admitted.ProviderEventType()))
+		return
+	}
+	if target.storeOnly {
+		if len(prepared) != len(record.Events) {
+			_ = g.bus.AbandonInboundDeliveryPlan(context.WithoutCancel(pubCtx), batchPlan)
+			http.Error(w, "committed inbound publication does not match prepared batch", http.StatusServiceUnavailable)
+			return
+		}
+		for index, event := range record.Events {
+			if prepared[index].Event.ID() != event.EventID || string(prepared[index].Event.Type()) != event.EventName {
+				_ = g.bus.AbandonInboundDeliveryPlan(context.WithoutCancel(pubCtx), batchPlan)
+				http.Error(w, "committed inbound publication does not match prepared batch", http.StatusServiceUnavailable)
+				return
+			}
+		}
+		valid, cleanupErr := g.bus.CompleteStoredInboundDeliveryCommit(pubCtx, batchPlan, commitResult.Publications)
+		if !valid {
+			writeInboundCommitError(w, g.logger, requestCtx, provider, target.FlowPath, providerEventID, errors.Join(commitErr, cleanupErr))
+			return
+		}
+		if err := errors.Join(commitErr, cleanupErr); err != nil {
+			reportInboundCommittedCleanup(g.logger, requestCtx, provider, target.FlowPath, providerEventID, err)
+		}
+		writeJSON(w, http.StatusAccepted, inboundPublicationResponse("accepted", record, admitted.ProviderEventType()))
 		return
 	}
 	handoffCtx := pubCtx
@@ -629,7 +659,7 @@ func writeInboundCommitError(w http.ResponseWriter, logger *RuntimeLogger, reque
 	http.Error(w, message, status)
 }
 
-func (g *InboundGateway) prepareInboundDeliveryBatch(ctx context.Context, batch runtimebus.InboundDeliveryBatch) (plan runtimebus.InboundDeliveryPlan, err error) {
+func (g *InboundGateway) prepareInboundDeliveryBatch(ctx context.Context, batch runtimebus.InboundDeliveryBatch, storeOnly bool) (plan runtimebus.InboundDeliveryPlan, err error) {
 	diagnostic := inboundPayloadDiagnostic{active: true}
 	defer func() {
 		diagnostic.active = false
@@ -637,7 +667,11 @@ func (g *InboundGateway) prepareInboundDeliveryBatch(ctx context.Context, batch 
 			diagnostic.emit()
 		}
 	}()
-	return g.bus.PrepareInboundDeliveryBatch(context.WithValue(ctx, inboundPayloadDiagnosticKey{}, &diagnostic), batch)
+	ctx = context.WithValue(ctx, inboundPayloadDiagnosticKey{}, &diagnostic)
+	if storeOnly {
+		return g.bus.PrepareStoredInboundDeliveryBatch(ctx, batch)
+	}
+	return g.bus.PrepareInboundDeliveryBatch(ctx, batch)
 }
 
 func logInboundPublicationFailure(logger *RuntimeLogger, requestCtx context.Context, provider, flowPath, providerEventID string, err error) {

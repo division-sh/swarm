@@ -380,31 +380,31 @@ func (eb *EventBus) ApplyInboundDeliveryCommit(ctx context.Context, plan Inbound
 
 // CompleteStoredInboundDeliveryCommit checks acknowledged native evidence and
 // releases preparation custody without activation, readiness or handoff.
-func (eb *EventBus) CompleteStoredInboundDeliveryCommit(ctx context.Context, plan InboundDeliveryPlan, committed []CommittedPublication) (err error) {
+func (eb *EventBus) CompleteStoredInboundDeliveryCommit(ctx context.Context, plan InboundDeliveryPlan, committed []CommittedPublication) (valid bool, err error) {
 	if !plan.storeOnly {
-		return fmt.Errorf("stored inbound completion requires its store-only plan")
+		return false, fmt.Errorf("stored inbound completion requires its store-only plan")
 	}
 	defer func() { err = errors.Join(err, eb.AbandonInboundDeliveryPlan(context.WithoutCancel(ctx), plan)) }()
 	if len(committed) != len(plan.prepared) {
-		return fmt.Errorf("committed inbound publication evidence count differs from prepared batch")
+		return false, fmt.Errorf("committed inbound publication evidence count differs from prepared batch")
 	}
 	for index, evidence := range committed {
 		if err := evidence.Validate(); err != nil {
-			return err
+			return false, err
 		}
 		if !evidence.Acknowledged {
-			return fmt.Errorf("stored inbound publication lacks commit acknowledgement")
+			return false, fmt.Errorf("stored inbound publication lacks commit acknowledgement")
 		}
 		if _, err := plan.prepared[index].withAcceptedPublicationStage(evidence.AcceptedStage); err != nil {
-			return err
+			return false, err
 		}
 		for _, proof := range evidence.DeliveryHandoffs {
 			if proof.EventID() != plan.prepared[index].Event.ID() {
-				return fmt.Errorf("stored inbound handoff contradicts prepared event")
+				return false, fmt.Errorf("stored inbound handoff contradicts prepared event")
 			}
 		}
 	}
-	return nil
+	return true, nil
 }
 
 func preflightInboundDeliveryBatch(verifier ProviderOutputAuthorizationVerifier, batch InboundDeliveryBatch) (InboundDeliveryBatch, error) {
