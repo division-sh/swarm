@@ -483,6 +483,7 @@ type eventBusCommitPublishPlan struct {
 	stageFeedback         *runtimepipeline.WorkflowPublicationStageRequest
 	runProposal           runtimepipeline.FlowInstanceRunProposal
 	fanOutMember          *fanOutPublicationMember
+	storeOnly             bool
 }
 
 func (eb *EventBus) commitPublish(ctx context.Context, plan eventBusCommitPublishPlan) (PreparedPublish, bool, error) {
@@ -771,6 +772,7 @@ func (eb *EventBus) prepareClosedPublication(ctx context.Context, publication ev
 			prepared := PreparedPublish{
 				Event: evt, admitted: admitted, plan: routePlan,
 				settlement: durable.Settlement, publicationClaim: claim,
+				storeOnly: publication.storeOnly, dispatchQueued: publication.storeOnly,
 			}
 			request := prepared.CommitRequest()
 			return prepared, PublicationCommand{
@@ -931,6 +933,10 @@ func (eb *EventBus) prepareClosedPublicationDispatch(ctx context.Context, evt ev
 		prepared.dispatchQueued = true
 		prepared.queueReason = "startup_turn_cancellation_recovery"
 	}
+	if publication.storeOnly {
+		prepared.storeOnly = true
+		prepared.dispatchQueued = true
+	}
 	return nil
 }
 
@@ -982,6 +988,7 @@ type PreparedPublish struct {
 	plan                      RoutePlan
 	settlement                events.RouteSettlement
 	exactDuplicate            bool
+	storeOnly                 bool
 	targetFailure             bool
 	dispatchQueued            bool
 	queueReason               string
@@ -1611,6 +1618,9 @@ func (eb *EventBus) dispatchPreparedPublishWithCompletion(ctx context.Context, p
 }
 
 func (eb *EventBus) dispatchPreparedPublishBody(ctx context.Context, prepared PreparedPublish) error {
+	if prepared.storeOnly {
+		return worklifetime.ErrAdmissionFenced
+	}
 	if prepared.exactDuplicate {
 		return nil
 	}
@@ -2984,6 +2994,17 @@ func (eb *EventBus) CheckAPIEventPublishRecipientPlan(
 // RecoverPersistedPipeline replays the complete pipeline for an event whose
 // terminal pipeline receipt was never written.
 func (eb *EventBus) RecoverPersistedPipeline(ctx context.Context, work runtimepipelineobligation.ClaimedWork, recipients []string) (runtimepipelineobligation.ExecutionOutcome, error) {
+	if err := eb.pipelineSweepMu.acquire(ctx); err != nil {
+		return runtimepipelineobligation.ExecutionOutcome{}, err
+	}
+	defer eb.pipelineSweepMu.release()
+	if eb.pipelineRecoveryClosed {
+		return runtimepipelineobligation.ExecutionOutcome{}, worklifetime.ErrAdmissionFenced
+	}
+	return eb.recoverPersistedPipeline(ctx, work, recipients)
+}
+
+func (eb *EventBus) recoverPersistedPipeline(ctx context.Context, work runtimepipelineobligation.ClaimedWork, recipients []string) (runtimepipelineobligation.ExecutionOutcome, error) {
 	dispatchRecipients := true
 	if owner := eb.DeliveryContinuationOwner(); owner != nil && owner.OwnsPersistedRecovery() {
 		dispatchRecipients = false
