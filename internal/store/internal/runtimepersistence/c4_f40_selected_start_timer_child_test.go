@@ -329,6 +329,18 @@ func TestC4F40SelectedStartTimerChildBothStores(t *testing.T) {
 				t.Fatalf("native activation lost exact typed-start completion: operation=%+v found=%t err=%v validate_err=%v result=%+v expected_point=%+v expected_bundle=%q expected_child=%q expected_operation=%q expected_executed=%d", activatedOperation, found, err, activatedOperation.Validate(), activatedOperation.Result, sourcePlan.ForkPoint, bundleHash, staged.ForkRunID, materializedOperation.Request.OperationID, activated.ExecutedEventCount)
 			}
 			feed, err := ReadFanOutPublishedOutcomeStorageForTest(ctx, selected, staged.ForkRunID)
+			wait := time.NewTimer(10 * time.Second)
+			defer wait.Stop()
+			tick := time.NewTicker(10 * time.Millisecond)
+			defer tick.Stop()
+			for err == nil && len(feed) == 0 {
+				select {
+				case <-wait.C:
+					t.Fatalf("child imported ordinal-zero emission did not commit within hang bound: %+v err=%v", feed, err)
+				case <-tick.C:
+					feed, err = ReadFanOutPublishedOutcomeStorageForTest(ctx, selected, staged.ForkRunID)
+				}
+			}
 			if err != nil || len(feed) != 1 || feed[0].Ordinal != 0 || feed[0].Kind != "committed" || feed[0].EventID == "" {
 				t.Fatalf("selected start lost its single imported feed emission: %+v err=%v", feed, err)
 			}
