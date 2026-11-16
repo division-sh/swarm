@@ -2,7 +2,7 @@ package runtimepersistence
 
 import (
 	"context"
-	"database/sql"
+	"fmt"
 
 	"github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence"
 )
@@ -14,14 +14,12 @@ func ReadSelectedForkReceiverExecutionProofForTest(ctx context.Context, selected
 	if err := validateChannelObservationOwner(selected); err != nil {
 		return SelectedForkReceiverExecutionProof{}, err
 	}
-	var out SelectedForkReceiverExecutionProof
-	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		var err error
-		out, err = runforkpersistence.ReadSelectedForkReceiverExecutionProofTx(ctx, tx, req)
-		return err
-	})
-	if err != nil {
-		return SelectedForkReceiverExecutionProof{}, err
+	switch owner := selected.(type) {
+	case *PostgresStore:
+		return owner.runForkPostgresOwner.ReadSelectedForkReceiverExecutionProofForTest(ctx, req)
+	case *SQLiteRuntimeStore:
+		return owner.runForkSQLiteOwner.ReadSelectedForkReceiverExecutionProofForTest(ctx, req)
+	default:
+		return SelectedForkReceiverExecutionProof{}, fmt.Errorf("storage observation requires the original selected owner, got %T", selected)
 	}
-	return out, nil
 }
