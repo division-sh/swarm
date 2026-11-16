@@ -410,6 +410,20 @@ func joinLiveForkFixtureClock(t *testing.T, ctx context.Context, rt *rootruntime
 	}
 }
 
+func joinLiveForkFixtureClockCallback(t *testing.T, ctx context.Context, rt *rootruntime.Runtime, sourceRunID string, fired genericschedule.Activation) {
+	t.Helper()
+	if fired.Command.RunID != sourceRunID || fired.Status != genericschedule.StatusFired || rt == nil || rt.WorkOccurrence() == nil {
+		t.Fatalf("original source clock has no matching runtime callback owner: source=%s activation=%+v", sourceRunID, fired)
+	}
+	wait, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	release, err := rt.WorkOccurrence().BeginRunTransition(wait, sourceRunID)
+	if err != nil {
+		t.Fatalf("join original source clock callback: %v", err)
+	}
+	release()
+}
+
 func nestedDeadlineArm(t *testing.T, ctx context.Context, owner SelectedContractExecutionOwner, row replycontext.Record) joinruntime.Activation {
 	t.Helper()
 	instance, found, err := owner.ports.workflow.LoadWorkflowInstance(ctx, flowidentity.RunScopedFlowInstance{RunID: row.RunID,
