@@ -632,9 +632,13 @@ func selectedDeploymentRequirePauseRevisionProvenance(t *testing.T, facts map[in
 					case "intent":
 						allowed = knownIntents[fact.key] && fact.value["origin_kind"] == "deployment" && fact.value["cardinality"] == float64(100) && fact.value["cursor"] == float64(100)
 					case "outcome":
-						eventID, _ := fact.value["source_event_id"].(string)
+						eventID, _ := fact.value["event_id"].(string)
 						_, issued := eventsAtCut[eventID]
-						allowed = issued && fact.value["origin_kind"] == "deployment"
+						sourceEventID, _ := fact.value["source_event_id"].(string)
+						_, inherited := eventsAtCut[sourceEventID]
+						ordinal, ordinalOK := fact.value["ordinal"].(float64)
+						allowed = issued && (sourceEventID == "" || inherited) && fact.value["origin_kind"] == "deployment" &&
+							fact.value["outcome_kind"] == "committed" && ordinalOK && ordinal >= 0 && ordinal < 100
 					}
 				}
 			}
