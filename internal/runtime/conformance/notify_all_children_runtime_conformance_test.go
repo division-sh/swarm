@@ -389,6 +389,37 @@ type notifyAllChildrenAgentGateEntry struct {
 	once    sync.Once
 }
 
+type notifyAllChildrenIssuanceProbe struct {
+	mu          sync.Mutex
+	eventType   string
+	expected    int
+	ids         map[string]struct{}
+	done        chan struct{}
+	hundredthAt time.Time
+}
+
+func (p *notifyAllChildrenIssuanceProbe) NotifyLifecycle(_ context.Context, signal runtimelifecycleprobe.Signal) {
+	if signal.Kind != runtimelifecycleprobe.EventPersisted || signal.EventType != p.eventType || signal.EventID == "" {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if len(p.ids) == p.expected {
+		return
+	}
+	p.ids[signal.EventID] = struct{}{}
+	if len(p.ids) == p.expected {
+		p.hundredthAt = time.Now()
+		close(p.done)
+	}
+}
+
+func (p *notifyAllChildrenIssuanceProbe) count() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return len(p.ids)
+}
+
 type gatedNotifyAllChildrenAgent struct {
 	runtimemanager.Agent
 	flowInstance string
@@ -517,13 +548,22 @@ func TestFanOutDeliveryBarrierCompletesThroughRealEventBusAndPublicReadbackOnBot
 				}
 				source := notifyallchildren.LoadSource(t, notifyallchildren.Options{FanOutDeliveryBarrier: true, InitialMembership: &accountIDs})
 				gate := newNotifyAllChildrenAgentGate()
+				opts := notifyAllChildrenRuntimeOptions{enableGenericSchedules: true, realMockAgents: cardinality == 100, agentGate: gate}
+				var issuance *notifyAllChildrenIssuanceProbe
+				if cardinality == 100 {
+					issuance = &notifyAllChildrenIssuanceProbe{
+						eventType: source.ResolveFlowEventReference(notifyallchildren.OwnerFlowID, notifyallchildren.Event),
+						expected:  cardinality, ids: make(map[string]struct{}, cardinality), done: make(chan struct{}),
+					}
+					opts.testLifecycleProbe = issuance
+				}
 				runtime := newNotifyAllChildrenRuntime(
 					t,
 					selected,
 					db,
 					source,
 					time.Now,
-					notifyAllChildrenRuntimeOptions{enableGenericSchedules: true, realMockAgents: cardinality == 100, agentGate: gate},
+					opts,
 				)
 
 				if err := runNotifyAllChildrenManager(managedConformanceExecutionContextForBundle(t, ctx, "fan-out-delivery-barrier", runtime.sourceArtifactFact), runtime.bus, runtime.manager); err != nil {
@@ -556,22 +596,28 @@ func TestFanOutDeliveryBarrierCompletesThroughRealEventBusAndPublicReadbackOnBot
 					}
 					gate.block(held)
 				}
+				var issuanceStarted time.Time
+				var issuanceTimer *time.Timer
+				if issuance != nil {
+					issuanceStarted = time.Now()
+					issuanceTimer = time.NewTimer(300 * time.Second)
+					defer issuanceTimer.Stop()
+				}
 				notifyID := publishNotifyAllChildrenEventAsync(t, ctx, runtime, source, runID, "portfolio.notify.requested", map[string]any{
 					"portfolio_id": "portfolio-main",
 					"command":      "barrier-proof",
 				})
 				if held != "" {
 					gate.waitStarted(t, held)
-					deadline := time.Now().Add(20 * time.Second)
-					for {
-						issued := loadNotifyAllChildrenItemEvents(t, ctx, selected, runID, notifyID)
-						if len(issued) == cardinality {
-							break
-						}
-						if !time.Now().Before(deadline) {
-							t.Fatalf("issuance did not reach hundred-item cut: %d (held_account=%q held_instance=%q expected=%d)", len(issued), heldKey, held, cardinality)
-						}
-						time.Sleep(10 * time.Millisecond)
+					select {
+					case <-issuance.done:
+						t.Logf("fan_out_issuance_span start=before_publication committed_items=%d elapsed=%s", cardinality, issuance.hundredthAt.Sub(issuanceStarted))
+					case <-issuanceTimer.C:
+						t.Fatalf("issuance wait exceeded 300s: observed_items=%d (held_account=%q held_instance=%q expected=%d)", issuance.count(), heldKey, held, cardinality)
+					}
+					issued := loadNotifyAllChildrenItemEvents(t, ctx, selected, runID, notifyID)
+					if len(issued) != cardinality {
+						t.Fatalf("issuance did not reach hundred-item cut: %d (held_account=%q held_instance=%q expected=%d)", len(issued), heldKey, held, cardinality)
 					}
 					settlement, err := selected.ReadFanOutSettlement(ctx, runID, time.Now().UTC())
 					if err != nil || settlement.Unsettled == 0 || settlement.BarrierArmed == 0 {
