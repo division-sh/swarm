@@ -343,6 +343,10 @@ type RuntimeContextManager struct {
 	mu                         sync.RWMutex
 	sourceSetMu                sync.Mutex
 	liveSelectionMu            sync.RWMutex
+	liveSelectionStateMu       sync.Mutex
+	liveSelectionEpoch         chan struct{}
+	liveSelectionDone          chan struct{}
+	liveSelectionWriters       uint64
 	inboundPhaseMu             sync.RWMutex
 	inboundStopping            bool
 	inboundStoreOnly           bool
@@ -2105,8 +2109,23 @@ func (p *PreparedRuntimeSourceSetTransition) publishCommittedVisibility() error 
 
 // Fork preparation and selection are exclusive with inbound publication.
 func (m *RuntimeContextManager) BeginLiveRunSelection() func() {
+	m.liveSelectionStateMu.Lock()
+	if m.liveSelectionWriters == 0 {
+		m.liveSelectionDone = make(chan struct{})
+	}
+	m.liveSelectionWriters++
+	m.liveSelectionEpoch = make(chan struct{})
+	m.liveSelectionStateMu.Unlock()
 	m.liveSelectionMu.Lock()
-	return m.liveSelectionMu.Unlock
+	return func() {
+		m.liveSelectionMu.Unlock()
+		m.liveSelectionStateMu.Lock()
+		m.liveSelectionWriters--
+		if m.liveSelectionWriters == 0 {
+			close(m.liveSelectionDone)
+		}
+		m.liveSelectionStateMu.Unlock()
+	}
 }
 
 func (m *RuntimeContextManager) AcquireRun(ctx context.Context, runID string) (*RuntimeContextUse, RuntimeContextLookup, runbundle.Availability, error) {
@@ -2139,16 +2158,18 @@ func (m *RuntimeContextManager) AcquireIngress(ctx context.Context, alias, provi
 	if m == nil {
 		return nil, RuntimeIngressContextLookup{State: RuntimeContextStateUnloaded, Cause: RuntimeContextCauseNotLoaded}, nil
 	}
-	m.liveSelectionMu.RLock()
+	lookup, err := m.loadSelectedIngressLanding(ctx, alias, provider)
+	if err != nil {
+		return nil, lookup, err
+	}
 	releaseSelection := true
 	defer func() {
 		if releaseSelection {
 			m.liveSelectionMu.RUnlock()
 		}
 	}()
-	lookup, err := m.loadIngressLanding(ctx, alias, provider)
-	if err != nil || !lookup.Loaded() {
-		return nil, lookup, err
+	if !lookup.Loaded() {
+		return nil, lookup, nil
 	}
 	m.inboundPhaseMu.RLock()
 	defer m.inboundPhaseMu.RUnlock()
@@ -2175,6 +2196,45 @@ func (m *RuntimeContextManager) AcquireIngress(ctx context.Context, alias, provi
 	}
 	releaseSelection = false
 	return use, lookup, nil
+}
+
+// Only a stable observation acquires shared publication exclusion. Writers
+// announce before taking the exclusive lock, so this final RLock cannot wait.
+func (m *RuntimeContextManager) loadSelectedIngressLanding(ctx context.Context, alias, provider string) (RuntimeIngressContextLookup, error) {
+	for {
+		m.liveSelectionStateMu.Lock()
+		if err := ctx.Err(); err != nil {
+			m.liveSelectionStateMu.Unlock()
+			return RuntimeIngressContextLookup{}, err
+		}
+		if m.liveSelectionWriters != 0 {
+			done := m.liveSelectionDone
+			m.liveSelectionStateMu.Unlock()
+			select {
+			case <-ctx.Done():
+				return RuntimeIngressContextLookup{}, ctx.Err()
+			case <-done:
+				continue
+			}
+		}
+		epoch := m.liveSelectionEpoch
+		m.liveSelectionStateMu.Unlock()
+		lookup, err := m.loadIngressLanding(ctx, alias, provider)
+		if err != nil {
+			return lookup, err
+		}
+		m.liveSelectionStateMu.Lock()
+		if err := ctx.Err(); err != nil {
+			m.liveSelectionStateMu.Unlock()
+			return lookup, err
+		}
+		if m.liveSelectionWriters == 0 && m.liveSelectionEpoch == epoch {
+			m.liveSelectionMu.RLock()
+			m.liveSelectionStateMu.Unlock()
+			return lookup, nil
+		}
+		m.liveSelectionStateMu.Unlock()
+	}
 }
 
 func (m *RuntimeContextManager) loadIngressLanding(ctx context.Context, alias, provider string) (RuntimeIngressContextLookup, error) {
