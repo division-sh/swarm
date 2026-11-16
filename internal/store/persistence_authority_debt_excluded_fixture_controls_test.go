@@ -29,6 +29,50 @@ func debtExcludedFixtureControlSource(t *testing.T, path, source string) *ast.Fi
 
 func TestPersistenceAuthorityDebtReviewedExcludedExactDelta(t *testing.T) {
 	root := persistenceAuthorityRepoRoot(t)
+	t.Run("boot-check-typed-refusal", func(t *testing.T) {
+		const path = "internal/store/internal/startupownership/sqlite_possession_unsupported.go"
+		data, err := os.ReadFile(filepath.Join(root, path))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var exact []authorityFinding
+		for _, finding := range debtExcludedSourceUncertainty(t, path, debtExcludedFixtureControlSource(t, path, string(data)), &types.Info{}) {
+			if finding.Enclosing == "inspectSQLiteCoordinate" {
+				exact = append(exact, finding)
+			}
+		}
+		if len(exact) != 1 || exact[0].RawSQL || debtReviewedExcludedFixture(exact[0]) == "" {
+			t.Fatalf("missing unique exact refusal source: %+v", exact)
+		}
+		for _, field := range []string{"exact", "kind", "raw", "path", "declaration", "body", "context", "duplicate"} {
+			t.Run(field, func(t *testing.T) {
+				changed := exact[0]
+				switch field {
+				case "kind":
+					changed.Kind += "Other"
+				case "raw":
+					changed.RawSQL = true
+				case "path":
+					changed.File += "Other"
+				case "declaration":
+					changed.Enclosing += "Other"
+				case "body":
+					changed.Member += "Other"
+				case "context":
+					changed.Resolved += "Other"
+				}
+				input := []authorityFinding{changed}
+				if field == "duplicate" {
+					input = append(input, changed)
+				}
+				for _, observed := range debtClassifyReviewedExcludedFixtures(t, input) {
+					if (observed.Kind == "reviewed-excluded-source") != (field == "exact") {
+						t.Fatalf("classification accepted %s: %+v", field, observed)
+					}
+				}
+			})
+		}
+	})
 	classified := 0
 	for _, path := range []string{"internal/serveapp/issue642_future_provider_test.go", "internal/serveapp/lifecycle_template_race_enabled_test.go", "internal/testutil/testprocess/process_darwin.go", "tests/support/testutil/testprocess/process_darwin.go"} {
 		current := path
