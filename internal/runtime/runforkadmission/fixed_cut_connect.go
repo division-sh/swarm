@@ -79,7 +79,13 @@ func fixedCutConnectTargets(source semanticview.Source, cut runfork.RunForkPlan,
 		return nil, false, err
 	}
 	bundle, _ := semanticview.Bundle(source)
-	contract, err := receiver.ReceiverTemplate(bundle)
+	selectionFlow := receiver.SelectionFlowID()
+	var contract contracts.TemplateInstanceContract
+	if selectionFlow == readback.Receiver.FlowID {
+		contract, err = receiver.ReceiverTemplate(bundle)
+	} else {
+		contract, err = bundle.ResolveFlowTemplateInstance(selectionFlow)
+	}
 	if err != nil {
 		return nil, false, err
 	}
@@ -95,13 +101,13 @@ func fixedCutConnectTargets(source semanticview.Source, cut runfork.RunForkPlan,
 	if err != nil {
 		return nil, false, err
 	}
-	lookup, err := pipeline.NewDeclaredFlowInstanceLookup(source, fact, cut.SourceRunID, readback.Receiver.FlowID, parent, keys)
+	lookup, err := pipeline.NewDeclaredFlowInstanceLookup(source, fact, cut.SourceRunID, selectionFlow, parent, keys)
 	if err != nil {
 		return nil, false, err
 	}
 	parentRoute := flowidentity.ParentRoute{FlowID: parent.TemplateID, FlowInstance: parent.InstancePath, EntityID: parent.EntityID}
 	var matches []flowidentity.Instance
-	for _, constructor := range constructors.byFlow[readback.Receiver.FlowID] {
+	for _, constructor := range constructors.byFlow[selectionFlow] {
 		instance, evidence := constructor.instance, constructor.evidence
 		if instance.ParentRoute != parentRoute {
 			continue
@@ -130,10 +136,27 @@ func fixedCutConnectTargets(source semanticview.Source, cut runfork.RunForkPlan,
 	default:
 		return nil, false, fmt.Errorf("selected captured receiver has unsupported key resolution mode")
 	}
-	// This is the lifecycle owner's selector-only leaf: exact keys plus stored
-	// construction and parent. The generic descriptor materializer infers a
-	// single-level scope from the path, which cannot describe nested constructors.
-	return []events.RouteIdentity{receiver.ReceiverRoute(matches[0].InstancePath, matches[0].EntityID)}, true, nil
+	selected := matches[0]
+	if selectionFlow != readback.Receiver.FlowID {
+		view, found := bundle.FlowViewByID(readback.Receiver.FlowID)
+		if !found {
+			return nil, false, fmt.Errorf("fixed receiver lacks structural parent")
+		}
+		var descendants []string
+		for cursor := view; cursor.Paths.FlowPath != selectionFlow; cursor = cursor.Parent {
+			if cursor.Parent == nil {
+				return nil, false, fmt.Errorf("fixed receiver lies outside selected lexical constructor")
+			}
+			descendants = append(descendants, cursor.Paths.FlowPath)
+		}
+		selected, err = fixedCutKeylessDescendants(source, constructors, selected, descendants)
+		if err != nil {
+			return nil, false, err
+		}
+	}
+	// Selection and every descendant come from the captured construction tree,
+	// never a fresh lookup of the source run's current instances.
+	return []events.RouteIdentity{receiver.ReceiverRoute(selected.InstancePath, selected.EntityID)}, true, nil
 }
 
 // Walk only captured ancestry and canonical keyless descendants. A keyed
@@ -143,7 +166,7 @@ func fixedCutConnectParent(source semanticview.Source, cut runfork.RunForkPlan, 
 	if !found {
 		return flowidentity.Instance{}, fmt.Errorf("fixed receiver requires admitted construction tree")
 	}
-	view, found := bundle.FlowViewByID(receiver.ReceiverEndpoint().Readback().FlowID)
+	view, found := bundle.FlowViewByID(receiver.SelectionFlowID())
 	if !found || view.Parent == nil {
 		return flowidentity.Instance{}, fmt.Errorf("fixed receiver lacks structural parent")
 	}
@@ -178,12 +201,16 @@ func fixedCutConnectParent(source semanticview.Source, cut runfork.RunForkPlan, 
 		}
 		descendants = append(descendants, cursor.Paths.FlowPath)
 	}
+	return fixedCutKeylessDescendants(source, constructors, owner, descendants)
+}
+
+func fixedCutKeylessDescendants(source semanticview.Source, constructors fixedCutConstructionIndex, owner flowidentity.Instance, descendants []string) (flowidentity.Instance, error) {
 	for i := len(descendants) - 1; i >= 0; i-- {
 		child, err := flowidentity.KeylessChild(source, owner, descendants[i])
 		if err != nil {
 			return flowidentity.Instance{}, err
 		}
-		entry, found := owners[child.InstancePath]
+		entry, found := constructors.byPath[child.InstancePath]
 		stored := entry.instance
 		if !found || stored != child {
 			return flowidentity.Instance{}, fmt.Errorf("fixed receiver lacks exact keyless ancestor")
