@@ -32,6 +32,7 @@ type transactionRunner func(context.Context, func(context.Context, *sql.Tx) erro
 // Backend differences stop at transaction and placeholder syntax.
 type Owner struct {
 	dialect            dialect
+	sqlite             *sqlitebackend.Backend
 	runTransaction     transactionRunner
 	runReadTransaction transactionRunner
 	requireCurrent     func() error
@@ -57,7 +58,7 @@ func NewSQLite(backend *sqlitebackend.Backend, requireCurrent func() error, now 
 		now = time.Now
 	}
 	return &Owner{
-		dialect: dialectSQLite, requireCurrent: requireCurrent, now: now,
+		dialect: dialectSQLite, sqlite: backend, requireCurrent: requireCurrent, now: now,
 		runTransaction: func(ctx context.Context, operation func(context.Context, *sql.Tx) error) error {
 			return backend.RunTransaction(ctx, "durable data mutation", operation)
 		},
