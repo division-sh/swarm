@@ -134,7 +134,7 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 						var detail map[string]any
 						requireServedJSONRPCResult(t, h.rpcEndpoint(), "mailbox.get", map[string]any{"mailbox_id": card}, &detail)
 						postChannelSourceControl(t, callback, signing, card, token, messageID)
-						waitChannelAnchorDecision(t, db, card)
+						waitMailboxCardDecision(t, h.rpcEndpoint(), card)
 					} else {
 						h.stop(t)
 						h.start(t)
@@ -149,7 +149,7 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 						callback, signing, _ = h.provider.Registration()
 						if operation == "new_process_equal" {
 							postChannelSourceControl(t, callback, signing, card, token, messageID)
-							waitChannelAnchorDecision(t, db, card)
+							waitMailboxCardDecision(t, h.rpcEndpoint(), card)
 						} else if postChannelSourceControl(t, callback, signing, card, token, messageID) == http.StatusAccepted {
 							waitChannelRejectedCallback(t, db, token)
 						}
@@ -438,7 +438,7 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 						t.Fatal("normal run lost decision control")
 					}
 					postChannelSourceControl(t, callback, signing, ordinaryCard, ordinaryToken, ordinaryMessage)
-					waitChannelAnchorDecision(t, db, ordinaryCard)
+					waitMailboxCardDecision(t, h.rpcEndpoint(), ordinaryCard)
 					waitChannelDeliverySendsSettled(t, db, backend)
 					h.stop(t)
 					h.start(t)

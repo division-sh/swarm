@@ -2,20 +2,18 @@ package serveapp
 
 import (
 	"cmp"
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/apiv1"
+	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
-	"github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/servedparity"
@@ -30,13 +28,13 @@ func TestMailboxUnchangedGateUpgradeAnswerBothStores(t *testing.T) {
 		for _, transport := range []string{"api", "cli"} {
 			t.Run(string(backend)+"/"+transport, func(t *testing.T) {
 				root := canonicalrouting.CopyMailboxNoticeCompletion(t)
-				rt, owner, restart := newRetainedMailboxCompletionRuntime(t, backend, root)
-				f := mailboxCompletionFixtureInRuntime(t, rt, owner)
+				rt, restart := newMailboxGateEpoch(t, backend, root)
+				base := rt.Base
 				until := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
 				var deferred, draft map[string]any
-				requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.defer", map[string]any{"card_id": f.base.CardID, "until": until.Format(time.RFC3339), "idempotency_key": uuid.NewString()}, &deferred)
-				requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.begin_input", map[string]any{"card_id": f.base.CardID, "verdict": "reject", "observed_content_hash": f.base.CardContentHash, "idempotency_key": uuid.NewString()}, &draft)
-				before, err := owner.GetDecisionCard(f.ctx, f.base.CardID)
+				requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.defer", map[string]any{"card_id": base.CardID, "until": until.Format(time.RFC3339), "idempotency_key": uuid.NewString()}, &deferred)
+				requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.begin_input", map[string]any{"card_id": base.CardID, "verdict": "reject", "observed_content_hash": base.CardContentHash, "idempotency_key": uuid.NewString()}, &draft)
+				before, err := rt.Card(base.CardID)
 				if err != nil || !before.DeferredUntil.Equal(until) || draft["input_draft_id"] == nil {
 					t.Fatalf("pending card setup: %+v draft=%v err=%v", before, draft, err)
 				}
@@ -45,14 +43,6 @@ func TestMailboxUnchangedGateUpgradeAnswerBothStores(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				var capture struct {
-					sync.Mutex
-					calls  int
-					result any
-					err    error
-					domain gateCompletionDomain
-					cardID string
-				}
 				upgrade := func(wantHash, wantStatus string) {
 					t.Helper()
 					body = append(body, []byte("\n# immutable source changes; offered contract does not\n")...)
@@ -60,28 +50,11 @@ func TestMailboxUnchangedGateUpgradeAnswerBothStores(t *testing.T) {
 						t.Fatal(err)
 					}
 					previous := rt.BundleHash
-					captured := captureSelectedResetSupervisor(t)
-					rt, owner = restart()
-					supervisor := <-captured
-					supervisor.mu.Lock()
-					original := supervisor.execution["mailbox.decide"]
-					if original == nil {
-						supervisor.mu.Unlock()
-						t.Fatal("restarted supervisor has no mailbox.decide handler")
+					oldCard := rt.Card
+					rt = restart()
+					if _, err := oldCard(base.CardID); err == nil {
+						t.Fatal("old observation followed restart")
 					}
-					supervisor.execution["mailbox.decide"] = func(ctx context.Context, req apiv1.Request) (any, error) {
-						key, _ := req.Params["idempotency_key"].(string)
-						cardID, _ := req.Params["card_id"].(string)
-						domain := gateCompletionDomain{Method: req.Method, Actor: req.OperatorPrincipalID, Key: key, Hash: req.RequestHash}
-						result, err := original(ctx, req)
-						capture.Lock()
-						capture.calls++
-						capture.result, capture.err = result, err
-						capture.domain, capture.cardID = domain, cardID
-						capture.Unlock()
-						return result, err
-					}
-					supervisor.mu.Unlock()
 					if rt.BundleHash == previous {
 						t.Fatal("restart did not admit the new source")
 					}
@@ -92,27 +65,23 @@ func TestMailboxUnchangedGateUpgradeAnswerBothStores(t *testing.T) {
 							Status     string `json:"status"`
 						} `json:"run"`
 					}
-					requireServedJSONRPCResult(t, rt.Endpoint, "run.get", map[string]any{"run_id": f.base.RunID}, &header)
+					requireServedJSONRPCResult(t, rt.Endpoint, "run.get", map[string]any{"run_id": base.RunID}, &header)
 					if header.Run.BundleHash != wantHash || header.Run.Status != wantStatus {
 						t.Fatalf("restart run header=%+v want_hash=%s want_status=%s new_primary=%s", header.Run, wantHash, wantStatus, rt.BundleHash)
 					}
 					if wantStatus == "completed" {
-						lookup, availability, err := supervisor.runtimeContexts.LookupRunStatus(t.Context(), f.base.RunID)
-						if err != nil || lookup.Loaded() || availability.Status != "completed" || availability.BundleHash != wantHash {
-							t.Fatalf("completed replay fixture is not exact/unloaded: lookup=%+v availability=%+v error=%v", lookup, availability, err)
-						}
+						rt.Unloaded(base.RunID, wantHash)
 					}
 				}
 				upgrade("", "running")
-				ctx := servedControlProofAuthorActivityContext(t, rt)
-				after, err := owner.GetDecisionCard(ctx, f.base.CardID)
+				after, err := rt.Card(base.CardID)
 				if err != nil || !reflect.DeepEqual(before, after) {
 					t.Fatalf("equal upgrade changed issuance or defer: %v", err)
 				}
 				requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.defer", map[string]any{"card_id": before.CardID, "until": until.Format(time.RFC3339), "idempotency_key": uuid.NewString()}, &deferred)
 				var canceled map[string]any
-				requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.cancel_input", map[string]any{"card_id": f.base.CardID, "input_draft_id": draft["input_draft_id"], "idempotency_key": uuid.NewString()}, &canceled)
-				params := map[string]any{"card_id": f.base.CardID, "verdict": "approve", "observed_content_hash": before.CardContentHash, "idempotency_key": uuid.NewString()}
+				requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.cancel_input", map[string]any{"card_id": base.CardID, "input_draft_id": draft["input_draft_id"], "idempotency_key": uuid.NewString()}, &canceled)
+				params := map[string]any{"card_id": base.CardID, "verdict": "approve", "observed_content_hash": before.CardContentHash, "idempotency_key": uuid.NewString()}
 				config := writeMockAgentRuntimeConfig(t, "sqlite", filepath.Join(t.TempDir(), "unused.sqlite"))
 				tokenFile := filepath.Join(t.TempDir(), "api-token")
 				if err := os.WriteFile(tokenFile, []byte(apiv1.DefaultLoopbackAPIToken), 0o600); err != nil {
@@ -120,12 +89,11 @@ func TestMailboxUnchangedGateUpgradeAnswerBothStores(t *testing.T) {
 				}
 				retainOriginalReturn := func() {
 					t.Helper()
-					capture.Lock()
-					calls, result, cause, domain, cardID := capture.calls, capture.result, capture.err, capture.domain, capture.cardID
-					capture.Unlock()
+					captured := rt.Capture()
+					calls, result, cause, domain, cardID := captured.Calls, captured.Result, captured.Err, captured.Domain, captured.CardID
 					t.Logf("GATE_UPGRADE_ORIGINAL_RETURN calls=%d result=%#v error_type=%T error=%v domain=%+v card_id=%s", calls, result, cause, cause, domain, cardID)
 					logGateUpgradeCauseTree(t, cause)
-					gateCompletionRead(t, rt, "original_error_sequential_readback", before.RunID, cardID, domain)
+					rt.Observe("original_error_sequential_readback", before.RunID, cardID, domain)
 				}
 				answer := func() {
 					t.Helper()
@@ -148,21 +116,18 @@ func TestMailboxUnchangedGateUpgradeAnswerBothStores(t *testing.T) {
 						t.Fatalf("current-run CLI answer exit=%d out=%s err=%s", code, out.String(), errOut.String())
 					}
 				}
-				answerSource, answerRuntime := rt.BundleHash, rt.Runtime.Options.RuntimeInstanceID
+				answerSource, answerRuntime := rt.BundleHash, rt.RuntimeInstanceID
 				answer()
-				capture.Lock()
-				domain := capture.domain
-				capture.Unlock()
-				requireServedEventPublishEntityState(t, rt.DB, rt.Backend, before.RunID, "", "done")
-				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, before.RunID)
-				decided, err := owner.GetDecisionCard(ctx, before.CardID)
+				domain := rt.Capture().Domain
+				rt.WaitStage(before.RunID, "done")
+				rt.WaitDeliveries(before.RunID)
+				decided, err := rt.Card(before.CardID)
 				if err != nil || decided.Status != decisioncard.StatusDecided || decided.DecisionEventID == "" || decided.BundleHash != before.BundleHash || decided.CardContentHash != before.CardContentHash || !reflect.DeepEqual(decided.Snapshot, before.Snapshot) {
 					t.Fatalf("current execution rewrote issuance or failed continuation: %+v %v", decided, err)
 				}
 				assertAttribution := func() {
 					t.Helper()
-					ctx := servedControlProofAuthorActivityContext(t, rt)
-					page, err := owner.(authoractivity.Reader).ListAuthorActivity(ctx, authoractivity.ListOptions{RunID: before.RunID, Limit: 100})
+					page, err := rt.Activity(authoractivity.ListOptions{RunID: before.RunID, Limit: 100})
 					if err != nil || len(page.Occurrences) == 100 {
 						t.Fatalf("complete bounded activity readback: %v", err)
 					}
@@ -188,12 +153,12 @@ func TestMailboxUnchangedGateUpgradeAnswerBothStores(t *testing.T) {
 					if decisions != 1 || deferrals != 2 || continuations != 1 || answerSource == before.BundleHash {
 						t.Fatalf("target/current execution counts: decisions=%d deferrals=%d continuations=%d source=%s issued=%s", decisions, deferrals, continuations, answerSource, before.BundleHash)
 					}
-					event, found, err := owner.(bus.PreparedPublishEventReader).LoadPreparedPublishEvent(ctx, decided.DecisionEventID)
+					event, found, err := rt.Prepared(decided.DecisionEventID)
 					payload, admitted := event.Event.Event().PayloadAdmission()
 					if err != nil || !found || !admitted || payload.Binding().BundleHash() != answerSource {
 						t.Fatalf("answer publication did not use current source: found=%t admitted=%t source=%s err=%v", found, admitted, payload.Binding().BundleHash(), err)
 					}
-					snapshot := gateCompletionRead(t, rt, "target_story_current_execution", before.RunID, before.CardID, domain)
+					snapshot := rt.Observe("target_story_current_execution", before.RunID, before.CardID, domain)
 					completions := 0
 					for _, row := range snapshot.API {
 						if row.Key != domain.Key {
@@ -212,9 +177,8 @@ func TestMailboxUnchangedGateUpgradeAnswerBothStores(t *testing.T) {
 				assertAttribution()
 				upgrade(answerSource, "completed")
 				answer()
-				capture.Lock()
-				calls, reply := capture.calls, capture.result
-				capture.Unlock()
+				captured := rt.Capture()
+				calls, reply := captured.Calls, captured.Result
 				wantCalls := 1
 				if transport == "api" {
 					wantCalls = 2
@@ -232,7 +196,7 @@ func TestMailboxUnchangedGateUpgradeAnswerBothStores(t *testing.T) {
 						t.Fatalf("API did not replay retained completion: %s error=%v", raw, err)
 					}
 					delete(replay, "idempotency_replayed")
-					snapshot := gateCompletionRead(t, rt, "exact_replay_response", before.RunID, before.CardID, domain)
+					snapshot := rt.Observe("exact_replay_response", before.RunID, before.CardID, domain)
 					for _, row := range snapshot.API {
 						if row.Method == domain.Method && row.Actor == domain.Actor && row.Key == domain.Key && row.Hash == domain.Hash && row.ResourceID == before.CardID {
 							if err := json.Unmarshal([]byte(row.Response), &original); err != nil {
@@ -245,15 +209,30 @@ func TestMailboxUnchangedGateUpgradeAnswerBothStores(t *testing.T) {
 					}
 				}
 				assertAttribution()
-				var count int
-				if err := rt.DB.QueryRow(`SELECT count(*) FROM events WHERE run_id=$1 AND event_name='mailbox.card_decided'`, before.RunID).Scan(&count); err != nil || count != 1 {
-					t.Fatalf("exact replay published another answer: count=%d err=%v", count, err)
+				seen := map[string]bool{}
+				query := map[string]any{"filter": map[string]any{"run_id": before.RunID, "event_name": "mailbox.card_decided"}, "limit": 100}
+				for {
+					var page operatorread.OperatorEventListResult
+					requireServedJSONRPCResult(t, rt.Endpoint, "event.list", query, &page)
+					for _, event := range page.Events {
+						if event.RunID != before.RunID || event.EventName != "mailbox.card_decided" || seen[event.EventID] {
+							t.Fatalf("wrong/duplicate decision event: %+v", event)
+						}
+						seen[event.EventID] = true
+					}
+					if page.NextCursor == "" {
+						break
+					}
+					query["cursor"] = page.NextCursor
+				}
+				if len(seen) != 1 {
+					t.Fatalf("exact replay published another answer: events=%v", seen)
 				}
 				params["idempotency_key"] = uuid.NewString()
 				if result := requestServedJSONRPC(t, rt.Endpoint, "mailbox.decide", params); result.Error == nil {
 					t.Fatal("fresh request answered the completed wait")
 				}
-				rt.joinAndAssertExit()
+				rt.Join()
 			})
 		}
 	}
