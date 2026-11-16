@@ -5102,7 +5102,7 @@ handler_specification:
           provider_connector HTTP activities and only through `tool_model.managed_credential_store`.
           Static and managed credential values must not appear in logs, result payloads, readback, capability output, or
           errors. The sole exception is an unclassified internal failure reported under explicit `swarm serve --verbose`
-          or `-v`: its process-log diagnostic includes each wrapped/joined error's full message, which may contain
+          or `-v`. Its process-log diagnostic includes each wrapped/joined error's full message, which may contain
           credential values. This does not authorize an independent request, header, payload or credential-store dump,
           and does not relax ordinary logging, caller responses, result/error payloads, readback or capability output.
       http_execution:
