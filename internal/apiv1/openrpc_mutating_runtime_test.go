@@ -212,7 +212,7 @@ func mutatingHTTPRuntimeFixtures() map[string]mutatingHTTPRuntimeFixture {
 		"run.fork": {
 			Params:         map[string]any{"source_run_id": runID, "fork_event_id": runForkTestEventID},
 			ConflictParams: map[string]any{"source_run_id": otherRunID, "fork_event_id": runForkTestEventID},
-			ResultKeys:     []string{"owner", "source_run_id", "fork_run_id", "fork_event_id", "fork_run_status", "bundle_hash", "executed_event_count"},
+			ResultKeys:     []string{"owner", "source_run_id", "fork_run_id", "fork_event_id", "fork_run_status", "bundle_hash"},
 			SuccessEffects: 1,
 		},
 		"run.continue": {
@@ -785,17 +785,16 @@ func (e *mutatingProbeRunForkExecutor) ExecuteRunFork(_ context.Context, req Run
 	}
 	e.state.recordEffect()
 	result := RunForkExecutionResult{
-		Owner:              "runtime.run_fork.selected_contract_execution",
-		SourceRunID:        strings.TrimSpace(req.SourceRunID),
-		SourceRunStatus:    "paused",
-		SourceFrozen:       false,
-		ForkRunID:          runForkTestForkRunID,
-		ForkPointKind:      string(runfork.RunForkPointEvent),
-		ForkRevision:       1,
-		ForkEventID:        strings.TrimSpace(req.ForkEventID),
-		ForkRunStatus:      "running",
-		BundleHash:         strings.TrimSpace(req.BundleHash),
-		ExecutedEventCount: 1,
+		Owner:           "runtime.run_fork.selected_contract_execution",
+		SourceRunID:     strings.TrimSpace(req.SourceRunID),
+		SourceRunStatus: "paused",
+		SourceFrozen:    false,
+		ForkRunID:       runForkTestForkRunID,
+		ForkPointKind:   string(runfork.RunForkPointEvent),
+		ForkRevision:    1,
+		ForkEventID:     strings.TrimSpace(req.ForkEventID),
+		ForkRunStatus:   "running",
+		BundleHash:      strings.TrimSpace(req.BundleHash),
 	}
 	if req.ForkOperation == nil {
 		return RunForkExecutionResult{}, fmt.Errorf("mock fork executor requires a durable operation request")

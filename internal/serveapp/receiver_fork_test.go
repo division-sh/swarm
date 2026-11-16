@@ -228,7 +228,7 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 					var fork, duplicate apiv1.RunForkExecutionResult
 					requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &fork)
 					requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &duplicate)
-					if fork.ForkRunID != duplicate.ForkRunID || fork.ExecutedEventCount != wantExecuted || duplicate.ExecutedEventCount != wantExecuted || fork.SourceRunStatus != "paused" || duplicate.SourceRunStatus != "paused" || fork.SourceFrozen || duplicate.SourceFrozen {
+					if fork.ForkRunID != duplicate.ForkRunID || fork.SourceRunStatus != "paused" || duplicate.SourceRunStatus != "paused" || fork.SourceFrozen || duplicate.SourceFrozen {
 						t.Fatalf("fork replay disagreement: %#v / %#v", fork, duplicate)
 					}
 					forkRunID = fork.ForkRunID

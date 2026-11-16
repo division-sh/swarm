@@ -317,8 +317,7 @@ func TestIssue642ArmedArrivalTimeoutContinuesExactDeliveryBothStores(t *testing.
 			if err != nil {
 				t.Fatal(err)
 			}
-			probe := &ForkCancelProbe{}
-			result, err := ExecuteSelectedContractRunFork(WithForkCancelProbe(ctx, probe), SelectedContractExecutionRequest{
+			result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 				SourceRunID: sourceRun, At: marker, Owner: owner, ForkOperation: &operation,
 				LiveRuntime: liveRuntime, LiveContexts: liveContexts, LiveRuns: selected.(runlifecycle.LiveRunReader),
 				SourceLoader: loader, ContractSelection: selection,
@@ -326,7 +325,7 @@ func TestIssue642ArmedArrivalTimeoutContinuesExactDeliveryBothStores(t *testing.
 			})
 			// The source callback is held; only the selected child may fire this arm.
 			if err != nil || !result.Activation.Activated {
-				t.Fatalf("selected armed arrival activation must succeed: %+v err=%v\ncancellation probe:\n%s", result, err, probe.Snapshot())
+				t.Fatalf("selected armed arrival activation must succeed: %+v err=%v", result, err)
 			}
 			child := result.Materialization.ForkRunID
 			operations := selected.(interface {

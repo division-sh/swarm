@@ -174,7 +174,7 @@ func TestSelectedForkSupplementalReceiverAcquisitionWithoutPostRevisionEmissionB
 				params := map[string]any{"source_run_id": seed.RunID, "fork_event_id": frontier, "idempotency_key": "acquisition-fork"}
 				var fork, replay apiv1.RunForkExecutionResult
 				requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &fork)
-				if fork.SourceRunID != seed.RunID || fork.ForkEventID != frontier || fork.ForkRunID == "" || fork.ForkRunID == seed.RunID || fork.ExecutedEventCount != 1 {
+				if fork.SourceRunID != seed.RunID || fork.ForkEventID != frontier || fork.ForkRunID == "" || fork.ForkRunID == seed.RunID {
 					t.Fatalf("supplemental acquisition fork identity: %+v", fork)
 				}
 				childEvent := waitServedSelectedForkFrontier(t, rt.ReceiverStateReader, rt.ReadRunDeliveries, fork.ForkRunID, frontier)

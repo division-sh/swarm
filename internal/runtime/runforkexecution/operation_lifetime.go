@@ -28,8 +28,6 @@ type selectedContractOperation struct {
 	stop          func()
 	selected      *worklifetime.SelectedForkOccurrence
 	use           *worklifetime.Lease
-	cancelProbe   *ForkCancelProbe
-	cancelProbeID uint64
 }
 
 type selectedOperationContextKey struct{}
@@ -50,13 +48,6 @@ func beginSelectedContractOperation(ctx context.Context) (*selectedContractOpera
 	}
 	preparing, cancel := context.WithCancelCause(ctx)
 	owned, cancelOwned := context.WithCancelCause(lease.Context())
-	probe := forkCancelProbeFromContext(ctx)
-	var probeID uint64
-	if probe != nil {
-		probeID = probe.bindOperation(ctx, lease.Context(), preparing, owned)
-		cancel = probe.wrap(fmt.Sprintf("preparing/op%d", probeID), preparing, cancel)
-		cancelOwned = probe.wrap(fmt.Sprintf("owned/op%d", probeID), owned, cancelOwned)
-	}
 	bridgeDone := make(chan struct{})
 	stop := context.AfterFunc(lease.Context(), func() {
 		defer close(bridgeDone)
@@ -67,7 +58,7 @@ func beginSelectedContractOperation(ctx context.Context) (*selectedContractOpera
 			<-bridgeDone
 		}
 	}
-	op := &selectedContractOperation{process: process, preparation: lease, cancel: cancel, cancelOwned: cancelOwned, stop: stopAndJoin, cancelProbe: probe, cancelProbeID: probeID}
+	op := &selectedContractOperation{process: process, preparation: lease, cancel: cancel, cancelOwned: cancelOwned, stop: stopAndJoin}
 	op.preparing = context.WithValue(preparing, selectedOperationContextKey{}, op)
 	op.owned = context.WithValue(owned, selectedOperationContextKey{}, op)
 	op.grantIssuance = op.owned
