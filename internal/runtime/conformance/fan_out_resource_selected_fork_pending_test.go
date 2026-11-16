@@ -565,8 +565,8 @@ func selectedDeploymentPauseRevisionFacts(t *testing.T, f *deploymentResourceFix
 		if err := json.Unmarshal(row["revision"].Value, &revision); err != nil {
 			t.Fatal(err)
 		}
-		var present bool
-		if err := json.Unmarshal(row["present"].Value, &present); err != nil {
+		present, err := selectedDeploymentPresentPhysical(row["present"])
+		if err != nil {
 			t.Fatal(err)
 		}
 		var value map[string]any
@@ -578,6 +578,53 @@ func selectedDeploymentPauseRevisionFacts(t *testing.T, f *deploymentResourceFix
 		})
 	}
 	return facts
+}
+
+func selectedDeploymentPresentPhysical(cell storetest.SelectedForkSnapshotCell) (bool, error) {
+	switch cell.Type {
+	case "bool":
+		var present bool
+		if err := json.Unmarshal(cell.Value, &present); err != nil {
+			return false, err
+		}
+		return present, nil
+	case "int64":
+		var present int64
+		if err := json.Unmarshal(cell.Value, &present); err != nil {
+			return false, err
+		}
+		if present != 0 && present != 1 {
+			return false, fmt.Errorf("physical present value %d is not 0 or 1", present)
+		}
+		return present == 1, nil
+	default:
+		return false, fmt.Errorf("physical present has unsupported type %q", cell.Type)
+	}
+}
+
+func TestSelectedDeploymentPresentPhysical(t *testing.T) {
+	for _, test := range []struct {
+		name, physicalType, value string
+		want                      bool
+		wantError                 bool
+	}{
+		{name: "bool_true", physicalType: "bool", value: "true", want: true},
+		{name: "bool_false", physicalType: "bool", value: "false"},
+		{name: "sqlite_true", physicalType: "int64", value: "1", want: true},
+		{name: "sqlite_false", physicalType: "int64", value: "0"},
+		{name: "non_boolean_integer", physicalType: "int64", value: "2", wantError: true},
+		{name: "wrong_physical_type", physicalType: "string", value: `"1"`, wantError: true},
+		{name: "wrong_boolean_value", physicalType: "bool", value: "1", wantError: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := selectedDeploymentPresentPhysical(storetest.SelectedForkSnapshotCell{
+				Column: "present", Type: test.physicalType, Value: json.RawMessage(test.value),
+			})
+			if (err != nil) != test.wantError || (err == nil && got != test.want) {
+				t.Fatalf("physical present = %t, %v, want %t, error=%t", got, err, test.want, test.wantError)
+			}
+		})
+	}
 }
 
 func selectedDeploymentPauseRevisionProvenance(facts map[int64][]selectedDeploymentRevisionFact, paused, planned int64, cut operatorread.OperatorEventListResult) error {

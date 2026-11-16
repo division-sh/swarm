@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -1131,7 +1132,18 @@ func TestLifecyclePreparationAcknowledgementControlsOccurrenceSettlement(t *test
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, err = lifecycle.fire(correlation.WithSourceArtifactFact(context.Background(), fact), wakeup)
+			runOwner, _ := instanceRecoveryWorkOwner(t, activation.Command.RunID)
+			ctx := correlation.WithSourceArtifactFact(correlation.WithRunID(t.Context(), activation.Command.RunID), fact)
+			standing, err := runOwner.BeginStanding(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() {
+				if err := standing.Done(); err != nil {
+					t.Error(err)
+				}
+			}()
+			_, err = lifecycle.fire(worklifetime.WithOccurrence(standing.Context(), runOwner), wakeup)
 			want := 0
 			if acknowledged {
 				want = 1
