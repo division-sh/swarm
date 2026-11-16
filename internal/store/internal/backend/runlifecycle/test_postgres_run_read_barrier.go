@@ -29,7 +29,10 @@ func (s *RunLifecyclePostgresOwner) HoldPostgresRunTableReadBarrierForTest(ctx c
 	rollback := errors.New("run read barrier released")
 	go func() {
 		err := s.backend.RunTransaction(ctx, func(sqlctx context.Context, tx *sql.Tx) error {
-			if err := HoldPostgresRunTableReadBarrierTx(sqlctx, tx); err != nil {
+			if _, err := tx.ExecContext(sqlctx, `SET LOCAL lock_timeout='5s'`); err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(sqlctx, `LOCK TABLE runs IN ACCESS EXCLUSIVE MODE`); err != nil {
 				return err
 			}
 			close(ready)
@@ -61,9 +64,12 @@ func (s *RunLifecyclePostgresOwner) HoldPostgresRunTableReadBarrierForTest(ctx c
 func (s *RunLifecyclePostgresOwner) ReadPostgresRunOriginLockCountForTest(ctx context.Context) (int, error) {
 	var count int
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		var err error
-		count, err = ReadPostgresRunOriginLockCountTx(ctx, tx)
-		return err
+		return tx.QueryRowContext(ctx, `
+SELECT count(*) FROM pg_stat_activity
+WHERE datname=current_database() AND pid<>pg_backend_pid() AND wait_event_type='Lock'
+  AND btrim(regexp_replace(query, '[[:space:]]+', ' ', 'g'))
+      LIKE 'SELECT r.run_id::text, lower(r.status), r.bundle_hash, r.source_root_directory, r.origin_kind,%'
+`).Scan(&count)
 	})
 	if err != nil {
 		return 0, err
@@ -74,9 +80,7 @@ func (s *RunLifecyclePostgresOwner) ReadPostgresRunOriginLockCountForTest(ctx co
 func (s *RunLifecyclePostgresOwner) ReadPostgresDatabaseLockCountForTest(ctx context.Context) (int, error) {
 	var count int
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		var err error
-		count, err = ReadPostgresDatabaseLockCountTx(ctx, tx)
-		return err
+		return tx.QueryRowContext(ctx, `SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid() AND wait_event_type='Lock'`).Scan(&count)
 	})
 	if err != nil {
 		return 0, err

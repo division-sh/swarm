@@ -25,7 +25,6 @@ import (
 	storerunfork "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
 	storeoperatorsurface "github.com/division-sh/swarm/internal/store/internal/operatorsurface"
-	runlifecyclefixture "github.com/division-sh/swarm/tests/support/testutil/runlifecyclefixture"
 )
 
 type rowQueryer interface {
@@ -99,24 +98,6 @@ func mustTestDeliveryAdapter(dialect storedelivery.Dialect) *storedelivery.Adapt
 		panic(err)
 	}
 	return adapter
-}
-
-func requestPostgresCompletionCandidateTx(ctx context.Context, tx *sql.Tx, runID string, dueAt *time.Time, force bool) (runtimerunlifecycle.CandidateRequestResult, error) {
-	if force {
-		if err := runlifecyclefixture.ForcePostgresCompletionCandidateRevision(ctx, tx, runID); err != nil {
-			return runtimerunlifecycle.CandidateRequestResult{}, err
-		}
-	}
-	return storerunlifecycle.RequestPostgresCompletionCandidateTx(ctx, tx, runID, dueAt)
-}
-
-func requestSQLiteCompletionCandidateTx(ctx context.Context, tx *sql.Tx, runID string, dueAt *time.Time, now time.Time, force bool) (runtimerunlifecycle.CandidateRequestResult, error) {
-	if force {
-		if err := runlifecyclefixture.ForceSQLiteCompletionCandidateRevision(ctx, tx, runID); err != nil {
-			return runtimerunlifecycle.CandidateRequestResult{}, err
-		}
-	}
-	return storerunlifecycle.RequestSQLiteCompletionCandidateTx(ctx, tx, runID, dueAt, now)
 }
 
 type eventCommitTxStore interface {

@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
+	storerunlifecycle "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
 	"github.com/division-sh/swarm/tests/support/testutil"
 	"github.com/division-sh/swarm/tests/support/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
@@ -265,12 +266,12 @@ func forceRunLifecycleCandidateParity(
 	switch store := fixture.store.(type) {
 	case *PostgresStore:
 		err = store.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, _ *privateauthoractivity.Mutation) error {
-			result, err = requestPostgresCompletionCandidateTx(txctx, tx, runID, &dueAt, true)
+			result, err = storerunlifecycle.ForcePostgresCompletionCandidateForTest(txctx, tx, runID, &dueAt)
 			return err
 		})
 	case *SQLiteRuntimeStore:
 		err = store.runPrivateAuthorActivityMutation(ctx, "test force sqlite completion candidate revision", func(txctx context.Context, tx *sql.Tx, _ *privateauthoractivity.Mutation) error {
-			result, err = requestSQLiteCompletionCandidateTx(txctx, tx, runID, &dueAt, store.now(), true)
+			result, err = storerunlifecycle.ForceSQLiteCompletionCandidateForTest(txctx, tx, runID, &dueAt, store.now())
 			return err
 		})
 	default:

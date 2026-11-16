@@ -27,10 +27,10 @@ import (
 	deliveryadapter "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
+	nativerunlifecycle "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/internal/backend/scenarioexecutionpersistence"
 
 	"github.com/division-sh/swarm/tests/support/testutil"
-	"github.com/division-sh/swarm/tests/support/testutil/runlifecyclefixture"
 	"github.com/division-sh/swarm/tests/support/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 	"github.com/lib/pq"
@@ -857,9 +857,9 @@ func TestRunForkMaterializer_ReplaysExactAndFailsClosedOnUnsupportedBlockers(t *
 	if first.ForkRunID == "" {
 		t.Fatal("first ForkRunID is empty")
 	}
-	runlifecyclefixture.CorruptPostgresOrigin(
-		t, ctx, db, first.ForkRunID, storerunlifecycle.ScenarioSetupRunOrigin(),
-	)
+	if err := nativerunlifecycle.CorruptPostgresOriginForTest(ctx, db, first.ForkRunID, storerunlifecycle.ScenarioSetupRunOrigin()); err != nil {
+		t.Fatalf("corrupt PostgreSQL run origin %s: %v", first.ForkRunID, err)
+	}
 	if _, err := pg.RequireMaterializedRunFork(ctx, first.ForkRunID, runfork.RunForkMaterializeRequest{
 		SourceRunID:   sourceRunID,
 		At:            clearEventID,

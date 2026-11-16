@@ -11,6 +11,20 @@ import (
 type ReplyContextStorageCounts = replycontextstore.ReplyContextStorageCounts
 type FirstReplyContextStorage = replycontextstore.FirstReplyContextStorage
 
+func insertReplyConstraintForTest(ctx context.Context, selected any, record replycontext.Record, requireInserted bool) (bool, error) {
+	switch store := selected.(type) {
+	case *PostgresStore:
+		if store != nil && store.backend != nil {
+			return store.replyPostgresOwner.InsertConstraintFixtureForTest(ctx, record, requireInserted)
+		}
+	case *SQLiteRuntimeStore:
+		if store != nil && store.backend != nil {
+			return store.replySQLiteOwner.InsertConstraintFixtureForTest(ctx, record, requireInserted)
+		}
+	}
+	return false, fmt.Errorf("reply constraint fixture requires its original native owner")
+}
+
 func ReadReplyContextRecordsForTest(ctx context.Context, selected any, run string) ([]replycontext.Record, error) {
 	if err := validateChannelObservationOwner(selected); err != nil {
 		return nil, err
