@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -11,10 +12,12 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/runtime/bootverify"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/destructivereset"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
@@ -92,6 +95,33 @@ func newVerifyCompositionBootStore(t *testing.T, backend, root string, schema st
 }
 
 func TestVerifyPublicListenerSetMatchesBootAndReleasesBindings(t *testing.T) {
+	t.Run("borrowed_api_handle", func(t *testing.T) {
+		listener, err := ListenServeHTTPListener("api", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer listener.Close()
+		address := listener.Addr().String()
+		if err := inspectBorrowedAPIListener(address, listener); err != nil {
+			t.Fatal(err)
+		}
+		if err := inspectBorrowedAPIListener("0.0.0.0:1", listener); err == nil {
+			t.Fatal("borrowed handle bypassed exact address admission")
+		}
+		if err := listener.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if err := inspectBorrowedAPIListener(address, listener); err == nil {
+			t.Fatal("closed borrowed handle was admitted")
+		}
+		reclaimed, err := ListenServeHTTPListener("api", address)
+		if err != nil {
+			t.Fatalf("borrowed-handle inspection retained its socket: %v", err)
+		}
+		if err := reclaimed.Close(); err != nil {
+			t.Fatal(err)
+		}
+	})
 	for _, mode := range []string{"same_fixed", "wildcard_specific", "specific_wildcard", "distinct_fixed", "ephemeral"} {
 		t.Run(mode, func(t *testing.T) {
 			isolateCLIAPIConfigEnv(t)
@@ -349,6 +379,36 @@ func TestVerifyPublicExistingStoreReportsDeploymentPreparationBothStores(t *test
 				storetest.RequireRun(t, original, owner, storetest.RunFixture{
 					RunID: runID, Origin: storetest.ScenarioSetupOrigin(), Artifact: bundle.SourceArtifact,
 				})
+				reader := owner.(destructivereset.InventoryReader)
+				operation, err := destructivereset.NewOperation(destructivereset.Request{
+					OperationID: uuid.NewString(), ActorTokenID: "operator", RequestHash: "phase-aware-checks", RequestedAt: time.Now().UTC(), IncludeSourceArtifactsSet: true,
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				plan, err := (destructivereset.InventoryPlanner{Reader: reader}).BuildPlan(ctx, operation.Request)
+				if err != nil {
+					t.Fatal(err)
+				}
+				operation.Phase, operation.Revision = destructivereset.PhasePlanned, 2
+				operation.Plan = &destructivereset.Result{OperationName: destructivereset.DefaultOperationName, PlannedAt: operation.Request.RequestedAt, Plan: plan}
+				if _, err := inspectServeResetDiscard(ctx, reader, operation); err != nil {
+					t.Fatalf("unchanged pre-cleanup population refused: %v", err)
+				}
+				storetest.RequireRun(t, original, owner, storetest.RunFixture{
+					RunID: uuid.NewString(), Origin: storetest.ScenarioSetupOrigin(), Artifact: bundle.SourceArtifact,
+				})
+				if _, err := inspectServeResetDiscard(ctx, reader, operation); !errors.Is(err, destructivereset.ErrOperationChanged) {
+					t.Fatalf("pre-cleanup new membership was accepted: %v", err)
+				}
+				operation.Phase, operation.Revision = destructivereset.PhaseCleanupCommitted, 4
+				operation.Quiescence = &destructivereset.QuiescenceResult{OperationName: destructivereset.DefaultOperationName}
+				operation.Cleanup = &destructivereset.CleanupResult{OperationName: destructivereset.DefaultOperationName}
+				beforeOperation := operation
+				discard, err := inspectServeResetDiscard(ctx, reader, operation)
+				if err != nil || len(discard.CleanupRuns) != 0 || !reflect.DeepEqual(beforeOperation, operation) {
+					t.Fatalf("committed cleanup was reapplied or hid current survivors: %+v, %v", discard, err)
+				}
 				if err := process.Release(ctx); err != nil {
 					t.Fatal(err)
 				}

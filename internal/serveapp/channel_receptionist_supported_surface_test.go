@@ -353,6 +353,13 @@ func (p *receptionistAnthropicDouble) ServeHTTP(w http.ResponseWriter, request *
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
+	if len(body.Messages) == 1 && content == "Startup validation probe. Do not call any tools. Reply with the exact text ok." {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"model": "claude-test", "stop_reason": "end_turn", "usage": map[string]int{"input_tokens": 1, "output_tokens": 1},
+			"content": []any{map[string]any{"type": "text", "text": "ok"}},
+		})
+		return
+	}
 	if content == "ok" {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"model": "claude-test", "usage": map[string]int{"input_tokens": 8, "output_tokens": 2},

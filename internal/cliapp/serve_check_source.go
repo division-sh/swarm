@@ -49,6 +49,7 @@ func inspectServeCheckSource(ctx context.Context, in ServeCheckStageRequest, roo
 		if err != nil {
 			return nil, nil, err
 		}
+		request.CheckTarget = in.construction
 		schema, err := serveCheckPlatformSchema()
 		if err != nil {
 			return nil, nil, err

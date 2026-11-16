@@ -1049,6 +1049,8 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 		presenter.fail(3, "runtime_composition", fmt.Errorf("command execution purpose is required"))
 		return 2
 	}
+	presenter.recordStoreSelection(storeSelection)
+	presenter.recordStartupContext(req)
 	tlsSettings := cfg.Serve.PublicWebhook
 	if publicIngressMode != runtimepublicingress.ModeNativeTLS {
 		tlsSettings = nil
@@ -1116,6 +1118,10 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 		return 1
 	}
 	if stage != nil {
+		if len(stage.Result.Validation.BootReport.Observations) == 0 {
+			presenter.fail(5, "local_preflight", errors.Join(errors.New("native construction did not complete the serve check stage"), stores.CloseUnactivated()))
+			return 3
+		}
 		req.BootChecks, req.BootCheckInput = &stage.Result, &stage.Input
 		req.AdmittedBundle, apiAuth = stage.Result.Bundle, stage.Result.APIAuth
 	}

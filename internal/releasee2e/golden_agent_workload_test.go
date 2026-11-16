@@ -163,8 +163,8 @@ func TestGoldenSQLitePossessionServeJourney(t *testing.T) {
 				t.Fatalf("persistent possession coordinate after teardown %s: info=%v err=%v", test.possessionPath, info, err)
 			}
 			if !test.dev {
-				assertReleaseDeploymentAdmission(t, runReleaseCommand(t, goldenStartupTimeout, root, env, "", binaryPath,
-					"verify", contracts, "--config", configPath, "--json"))
+				assertReleaseDryRunAdmission(t, runReleaseCommand(t, goldenStartupTimeout, root, env, "", binaryPath,
+					"serve", contracts, "--config", configPath, "--dry-run", "--api-listen-addr", "127.0.0.1:0", "--mcp-listen-addr", "127.0.0.1:0"))
 			}
 		})
 	}

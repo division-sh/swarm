@@ -111,7 +111,7 @@ func openInspectionStore(ctx context.Context, req AuthorityRequest) (admissionIn
 	case storebackend.BackendSQLite:
 		selected, err = storeconstruction.OpenSQLiteRuntimeReadOnly(req.Selection.SQLitePath)
 	case storebackend.BackendPostgres:
-		selected, err = storeconstruction.OpenPostgresReadOnly(req.PostgresDSN)
+		selected, err = storeconstruction.OpenPostgresReadOnly(req.PostgresDSN, req.CheckTarget)
 	default:
 		return nil, errors.New("selected store backend is required")
 	}

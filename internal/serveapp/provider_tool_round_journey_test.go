@@ -62,7 +62,7 @@ func TestChannelOneBotOpenAICompatibleReasoningToolRound(t *testing.T) {
 			const reply = "Swarm heard: round customer"
 			waitUncertainCopyDelivery(t, h, 0, reply)
 			requireReceptionistReplies(t, h, map[string]string{reply: "2001"})
-			if len(llmapi.ActorRequests(provider.Requests())) != 2 || len(provider.Requests()) != 3 {
+			if len(llmapi.ActorRequests(provider.Requests())) != 2 || business.Load() != 2 {
 				t.Fatalf("requests=%d, want one non-emit tool round", len(provider.Requests()))
 			}
 			next := postResponsesChannelUpdate(t, callback, signing, map[string]any{
@@ -77,7 +77,7 @@ func TestChannelOneBotOpenAICompatibleReasoningToolRound(t *testing.T) {
 			const nextReply = "Swarm heard: remembered customer"
 			waitUncertainCopyDelivery(t, h, 1, nextReply)
 			requireReceptionistReplies(t, h, map[string]string{reply: "2001", nextReply: "2001"})
-			if len(llmapi.ActorRequests(provider.Requests())) != 3 || len(provider.Requests()) != 4 {
+			if len(llmapi.ActorRequests(provider.Requests())) != 3 || business.Load() != 3 {
 				t.Fatalf("requests=%d, want completed round plus one new user request", len(provider.Requests()))
 			}
 		})
@@ -154,7 +154,7 @@ func TestChannelOneBotAnthropicToolRound(t *testing.T) {
 			const reply = "Swarm heard: Anthropic customer"
 			waitUncertainCopyDelivery(t, h, 0, reply)
 			requireReceptionistReplies(t, h, map[string]string{reply: "2001"})
-			if len(llmapi.ActorRequests(provider.Requests())) != 2 || len(provider.Requests()) != 3 {
+			if len(llmapi.ActorRequests(provider.Requests())) != 2 || business.Load() != 2 {
 				t.Fatalf("Anthropic requests=%d, want one exact non-emit round", len(provider.Requests()))
 			}
 		})
