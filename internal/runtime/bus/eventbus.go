@@ -91,6 +91,7 @@ type EventBus struct {
 	outboxSweeperActive         bool
 	outboxSweeperDone           chan struct{}
 	pipelineSweepMu             pipelineSweepLock
+	pipelineRecoveryClosed      bool
 	pipelineScans               map[runtimepipelineobligation.ScanRequest]*pipelineSweepScan
 	workOwner                   worklifetime.Occurrence
 	receiverExecution           eventreceiver.ExecutionVariant
