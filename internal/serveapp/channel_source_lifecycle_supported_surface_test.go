@@ -1005,6 +1005,7 @@ func channelHistoryWithoutResetRenders(beforeHistory, afterHistory string, cards
 }
 
 func TestChannelSourceLifecycleHistoryPreservation(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	t.Run("post_reset_settlement", func(t *testing.T) {
 		originals := map[string]string{"original-plan": "original-card"}
 		for name, mutate := range map[string]func(*storetest.ChannelResetSettlement){
