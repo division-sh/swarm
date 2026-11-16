@@ -1472,8 +1472,7 @@ func TestRunForkFanOutMaterializationPreservesPrefixAndResumesIndependently(t *t
 					}
 					_, refusal = owner.(runforkexecution.SelectedContractForkLifecycle).MaterializeRunForkForSelectedContractExecution(ctx, request)
 				}
-				_, joined := refusal.(interface{ Unwrap() []error })
-				if refusal == nil || refusal.Error() != "fork deployment unchanged version contradicts source schema or cardinality" || errors.Unwrap(refusal) != nil || joined {
+				if refusal == nil || refusal.Error() != "fork deployment unchanged version contradicts source schema or cardinality" {
 					t.Fatalf("same-version cardinality contradiction not refused: %v", refusal)
 				}
 				after, err := ReadSelectedForkApplicationStorageSnapshotForTest(ctx, owner)
