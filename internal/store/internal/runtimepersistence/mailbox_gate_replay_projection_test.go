@@ -37,6 +37,7 @@ func TestMailboxGateReplayProjectionBothStores(t *testing.T) {
 			f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, map[string]string{
 				"schema.yaml": "# fixture: native gate replay\nstages:\n  awaiting_review:\n    gate:\n      decision: root_review\n      outcomes:\n        approve:\n          advances_to: done\n          emit: test.node_emitted\n  done: {final: true}\n",
 				"events.yaml": "test.node_emitted:\n",
+				"state.yaml":  "result: text\n",
 			}, nil)
 			selected := f.store.(workflowTestSelectedStore)
 			persistence := pipeline.NewWorkflowPersistence(f.store.(pipeline.WorkflowPersistenceOwner))
