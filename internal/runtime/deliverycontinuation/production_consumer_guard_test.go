@@ -174,7 +174,7 @@ func TestExecutableDeliveryContinuationHasClosedProductionConsumers(t *testing.T
 func containsRetiredDeliveryDialect(path, source, forbidden string) bool {
 	if forbidden == "retry_eligible" {
 		switch path {
-		case "internal/store/internal/backend/delivery/adapter.go", "internal/store/internal/backend/delivery/test_retry_eligibility.go", "internal/store/internal/backend/runforkrevision/projection.go":
+		case "internal/store/internal/backend/delivery/adapter.go", "internal/store/internal/backend/delivery/test_manager_delivery_faults.go", "internal/store/internal/backend/runforkrevision/projection.go":
 			// #2592/6192759467 admits this committed-outcome column, not
 			// the retired dispatch event or another eligibility interpreter.
 			source = regexp.MustCompile(`\bretry_eligible_at\b`).ReplaceAllString(source, "")
@@ -184,7 +184,7 @@ func containsRetiredDeliveryDialect(path, source, forbidden string) bool {
 }
 
 func TestRetiredDeliveryDialectStillRejectsRetryDispatchRestoration(t *testing.T) {
-	for _, path := range []string{"internal/store/internal/backend/delivery/adapter.go", "internal/store/internal/backend/delivery/test_retry_eligibility.go", "internal/store/internal/backend/runforkrevision/projection.go"} {
+	for _, path := range []string{"internal/store/internal/backend/delivery/adapter.go", "internal/store/internal/backend/delivery/test_manager_delivery_faults.go", "internal/store/internal/backend/runforkrevision/projection.go"} {
 		for _, cell := range []struct {
 			source    string
 			forbidden string
@@ -204,7 +204,7 @@ func TestRetiredDeliveryDialectStillRejectsRetryDispatchRestoration(t *testing.T
 			}
 		}
 	}
-	for _, path := range []string{"internal/runtime/deliverycontinuation/coordinator.go", "internal/runtime/manager/runtime.go", "internal/runtime/pipeline/coordinator.go", "other/adapter.go", "openrpc.json"} {
+	for _, path := range []string{"internal/runtime/deliverycontinuation/coordinator.go", "internal/runtime/manager/runtime.go", "internal/runtime/pipeline/coordinator.go", "other/adapter.go", "openrpc.json", "internal/store/internal/backend/delivery/test_retry_eligibility.go", "internal/store/internal/backend/delivery/test_manager_delivery_faults_other.go"} {
 		if !containsRetiredDeliveryDialect(path, "retry_eligible_at", "retry_eligible") {
 			t.Fatalf("column spelling granted another retry owner: %s", path)
 		}
