@@ -158,7 +158,7 @@ func TestServedCompiledGateFrozenTransitionEvidenceOnBothStores(t *testing.T) {
 			params := lifecycleGateDecisionParams(t, rt, seed.RunID, "approve")
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 			before := lifecycleStoredSnapshot(t, rt, seed.RunID)
-			originalEvidence := readLifecycleGateRestartEvidence(t, rt, seed.RunID)
+			originalEvidence := readLifecycleGateRestartEvidence(t, rt.GateRestartReadback, seed.RunID)
 			prefix := originalEvidence.Instance.TransitionHistory
 			if len(originalEvidence.Cards) != 1 || len(originalEvidence.Timers) != 1 || originalEvidence.Timers[0].Status != "active" || len(prefix) != 1 || prefix[0].From != "waiting" || prefix[0].To != "review" {
 				t.Fatalf("positive pending card, active timer and completed transition setup: %+v", originalEvidence)
@@ -167,79 +167,84 @@ func TestServedCompiledGateFrozenTransitionEvidenceOnBothStores(t *testing.T) {
 				t.Fatalf("first stop=%d", code)
 			}
 			setServeRuntimeRecovery(t, opts.ConfigPath, false, true)
-			second, rt := start()
-			if got := lifecycleStoredSnapshot(t, rt, seed.RunID); got != before {
-				t.Fatalf("same-source pending restart changed whole snapshot: before=%s after=%s", before, got)
-			}
-			if code := second.stop(); code != 0 {
-				t.Fatalf("same-source pending stop=%d", code)
-			}
-			opts.SourceRoot = sourceB
-			captured := captureSelectedResetSupervisor(t)
-			second, rt = start()
-			supervisor := <-captured
-			supervisor.mu.Lock()
-			original := supervisor.execution["mailbox.decide"]
-			if original == nil {
-				supervisor.mu.Unlock()
-				t.Fatal("restarted supervisor has no mailbox.decide handler")
-			}
-			supervisor.execution["mailbox.decide"] = func(ctx context.Context, req apiv1.Request) (any, error) {
-				result, err := original(ctx, req)
-				text := fmt.Sprintf("%#v", result)
-				truncated := len(text) > 1024
-				if truncated {
-					text = text[:1024]
+			var second *serveRuntimeTestProcess
+			var captured <-chan *processLifecycleSupervisor
+			pendingEvidence := originalEvidence
+			for phase, root := range []string{sourceA, sourceB, sourceA} {
+				opts.SourceRoot = root
+				if phase == 1 {
+					captured = captureSelectedResetSupervisor(t)
 				}
-				t.Logf("MISSING_PIN_ORIGINAL result_type=%T result=%s text_truncated=%t error_type=%T", result, text, truncated, err)
-				logGateUpgradeCauseTree(t, err)
-				return result, err
+				second, rt = start()
+				currentSnapshot := lifecycleStoredSnapshot(t, rt, seed.RunID)
+				if phase == 0 {
+					if currentSnapshot != before {
+						t.Fatalf("same-source pending restart changed whole snapshot: before=%s after=%s", before, currentSnapshot)
+					}
+					if code := second.stop(); code != 0 {
+						t.Fatalf("same-source pending stop=%d", code)
+					}
+					continue
+				}
+				pendingEvidence = requireLifecycleGateRestartReplacement(t, rt.GateRestartReadback, rt.Runtime.Options.WorkflowModule.SemanticSource(), rt.BundleHash, seed.RunID, pendingEvidence)
+				if phase == 1 {
+					supervisor := <-captured
+					supervisor.mu.Lock()
+					original := supervisor.execution["mailbox.decide"]
+					if original == nil {
+						supervisor.mu.Unlock()
+						t.Fatal("restarted supervisor has no mailbox.decide handler")
+					}
+					supervisor.execution["mailbox.decide"] = func(ctx context.Context, req apiv1.Request) (any, error) {
+						result, err := original(ctx, req)
+						text := fmt.Sprintf("%#v", result)
+						truncated := len(text) > 1024
+						if truncated {
+							text = text[:1024]
+						}
+						t.Logf("MISSING_PIN_ORIGINAL result_type=%T result=%s text_truncated=%t error_type=%T", result, text, truncated, err)
+						logGateUpgradeCauseTree(t, err)
+						return result, err
+					}
+					supervisor.mu.Unlock()
+					withdrawn := originalEvidence.Cards[params["card_id"].(string)]
+					out, errOut := &lockedBuffer{}, &lockedBuffer{}
+					if code := executeCLI(t.Context(), []string{"--config", opts.ConfigPath, "mailbox", "view", withdrawn.CardID, "--api-server", strings.TrimSuffix(rt.Endpoint, "/v1/rpc"), "--api-token-file", tokenFile}, out, errOut, nil); code != 0 || !strings.Contains(out.String(), "\nReplaced by a new card after an update. No action was taken.\n") {
+						t.Fatalf("withdrawn card renderer: code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+					}
+					missingPin := requireServedJSONRPCError(t, rt.Endpoint, "mailbox.decide", params)
+					supervisor.mu.Lock()
+					supervisor.execution["mailbox.decide"] = original
+					supervisor.mu.Unlock()
+					if missingPin.Data["code"] != "MAILBOX_CARD_SUPERSEDED" {
+						t.Fatalf("missing pin=%#v", missingPin)
+					}
+				} else {
+					pending := lifecycleGateDecisionParams(t, rt, seed.RunID, "approve")
+					if pendingEvidence.Cards[pending["card_id"].(string)].CardID == "" || pending["card_id"] == params["card_id"] {
+						t.Fatalf("A-B-A lost distinct third identity: original=%v pending=%v cards=%+v", params, pending, pendingEvidence.Cards)
+					}
+					params["idempotency_key"] = "withdrawn-after-return"
+					if refused := requireServedJSONRPCError(t, rt.Endpoint, "mailbox.decide", params); refused.Data["code"] != "MAILBOX_CARD_SUPERSEDED" {
+						t.Fatalf("original action revived: error=%+v", refused)
+					}
+					requireLifecycleGateRestartMembers(t, "old A after return no-write", pendingEvidence, readLifecycleGateRestartEvidence(t, rt.GateRestartReadback, seed.RunID))
+					params = pending
+					params["idempotency_key"] = "replacement-decision"
+					stale := map[string]any{"card_id": params["card_id"], "verdict": "approve", "observed_content_hash": strings.Repeat("0", len(params["observed_content_hash"].(string))), "idempotency_key": "stale-decision"}
+					requireServedJSONRPCError(t, rt.Endpoint, "mailbox.decide", stale)
+				}
+				if got := lifecycleStoredSnapshot(t, rt, seed.RunID); got != currentSnapshot {
+					t.Fatalf("phase %d refused action mutated lifecycle: before=%s after=%s", phase, currentSnapshot, got)
+				}
+				requireLifecycleGateRestartMembers(t, fmt.Sprintf("phase %d refusal no-write", phase), pendingEvidence, readLifecycleGateRestartEvidence(t, rt.GateRestartReadback, seed.RunID))
+				if phase == 1 {
+					if code := second.stop(); code != 0 {
+						t.Fatalf("unpinned stop=%d", code)
+					}
+				}
 			}
-			supervisor.mu.Unlock()
-			changed := requireLifecycleGateRestartReplacement(t, rt, seed.RunID, originalEvidence)
-			withdrawn := originalEvidence.Cards[params["card_id"].(string)]
-			out, errOut := &lockedBuffer{}, &lockedBuffer{}
-			if code := executeCLI(t.Context(), []string{"--config", opts.ConfigPath, "mailbox", "view", withdrawn.CardID, "--api-server", strings.TrimSuffix(rt.Endpoint, "/v1/rpc"), "--api-token-file", tokenFile}, out, errOut, nil); code != 0 || !strings.Contains(out.String(), "\nReplaced by a new card after an update. No action was taken.\n") {
-				t.Fatalf("withdrawn card renderer: code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
-			}
-			changedSnapshot := lifecycleStoredSnapshot(t, rt, seed.RunID)
-			missingPin := requireServedJSONRPCError(t, rt.Endpoint, "mailbox.decide", params)
-			supervisor.mu.Lock()
-			supervisor.execution["mailbox.decide"] = original
-			supervisor.mu.Unlock()
-			if missingPin.Data["code"] != "MAILBOX_CARD_SUPERSEDED" {
-				t.Fatalf("missing pin=%#v", missingPin)
-			}
-			if got := lifecycleStoredSnapshot(t, rt, seed.RunID); got != changedSnapshot {
-				t.Fatalf("withdrawn action mutated replacement: before=%s after=%s", changedSnapshot, got)
-			}
-			requireLifecycleGateRestartMembers(t, "withdrawn action no-write", changed, readLifecycleGateRestartEvidence(t, rt, seed.RunID))
-			if code := second.stop(); code != 0 {
-				t.Fatalf("unpinned stop=%d", code)
-			}
-			// A return is another replacement, never revival of a withdrawn action.
-			opts.SourceRoot = sourceA
-			second, rt = start()
-			returned := requireLifecycleGateRestartReplacement(t, rt, seed.RunID, changed)
-			pending := lifecycleGateDecisionParams(t, rt, seed.RunID, "approve")
-			if returned.Cards[pending["card_id"].(string)].CardID == "" || pending["card_id"] == params["card_id"] {
-				t.Fatalf("A-B-A lost distinct third identity: original=%v pending=%v cards=%+v", params, pending, returned.Cards)
-			}
-			before = lifecycleStoredSnapshot(t, rt, seed.RunID)
-			params["idempotency_key"] = "withdrawn-after-return"
-			if refused := requireServedJSONRPCError(t, rt.Endpoint, "mailbox.decide", params); refused.Data["code"] != "MAILBOX_CARD_SUPERSEDED" {
-				t.Fatalf("original action revived: error=%+v", refused)
-			}
-			requireLifecycleGateRestartMembers(t, "old A after return no-write", returned, readLifecycleGateRestartEvidence(t, rt, seed.RunID))
-			params = pending
-			params["idempotency_key"] = "replacement-decision"
 			var decided map[string]any
-			stale := map[string]any{"card_id": params["card_id"], "verdict": "approve", "observed_content_hash": strings.Repeat("0", len(params["observed_content_hash"].(string))), "idempotency_key": "stale-decision"}
-			requireServedJSONRPCError(t, rt.Endpoint, "mailbox.decide", stale)
-			if got := lifecycleStoredSnapshot(t, rt, seed.RunID); got != before {
-				t.Fatalf("stale/withdrawn refusal changed pending gate: before=%s after=%s", before, got)
-			}
-			requireLifecycleGateRestartMembers(t, "current pending stale-hash no-write", returned, readLifecycleGateRestartEvidence(t, rt, seed.RunID))
 			requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.decide", params, &decided)
 			requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, "done")
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
@@ -265,13 +270,13 @@ func TestServedCompiledGateFrozenTransitionEvidenceOnBothStores(t *testing.T) {
 			requireLifecycleEventCount(t, rt, seed.RunID, "work.completed", 1)
 			requireLifecycleEventCount(t, rt, seed.RunID, "work.changed", 0)
 			settled := lifecycleStoredSnapshot(t, rt, seed.RunID)
-			settledEvidence := readLifecycleGateRestartEvidence(t, rt, seed.RunID)
+			settledEvidence := readLifecycleGateRestartEvidence(t, rt.GateRestartReadback, seed.RunID)
 			conflict := map[string]any{"card_id": params["card_id"], "verdict": "reject", "observed_content_hash": params["observed_content_hash"], "idempotency_key": "contradictory-decision"}
 			requireServedJSONRPCError(t, rt.Endpoint, "mailbox.decide", conflict)
 			if got := lifecycleStoredSnapshot(t, rt, seed.RunID); got != settled {
 				t.Fatalf("contradictory verdict changed answered successor: before=%s after=%s", settled, got)
 			}
-			requireLifecycleGateRestartMembers(t, "answered successor contradiction no-write", settledEvidence, readLifecycleGateRestartEvidence(t, rt, seed.RunID))
+			requireLifecycleGateRestartMembers(t, "answered successor contradiction no-write", settledEvidence, readLifecycleGateRestartEvidence(t, rt.GateRestartReadback, seed.RunID))
 			if code := second.stop(); code != 0 {
 				t.Fatalf("second stop=%d", code)
 			}
@@ -284,7 +289,7 @@ func TestServedCompiledGateFrozenTransitionEvidenceOnBothStores(t *testing.T) {
 			if got := lifecycleStoredSnapshot(t, rt, seed.RunID); got != settled {
 				t.Fatalf("terminal restart/replay changed evidence: before=%s after=%s", settled, got)
 			}
-			requireLifecycleGateRestartMembers(t, "answered successor replay no-write", settledEvidence, readLifecycleGateRestartEvidence(t, rt, seed.RunID))
+			requireLifecycleGateRestartMembers(t, "answered successor replay no-write", settledEvidence, readLifecycleGateRestartEvidence(t, rt.GateRestartReadback, seed.RunID))
 			requireLifecycleEventCount(t, rt, seed.RunID, "work.completed", 1)
 			requireLifecycleEventCount(t, rt, seed.RunID, "work.changed", 0)
 			if code := third.stop(); code != 0 {
