@@ -384,7 +384,15 @@ func proveCrossInstanceNativeBoundary(t *testing.T, backend, name string, shape 
 			instance.InstanceKind = "template"
 		}
 		if entity, present := entityruntime.ResolveForFlow(source, flow); present {
-			constructor, err := runtimepipeline.CompileFlowConstructor(source, flow, "")
+			input := ""
+			if !schema.Instance.Empty() {
+				pin, found := source.FlowInputEventPin(flow, "opened")
+				if !found {
+					t.Fatalf("keyed fixture flow %s lacks its declared opened input", flow)
+				}
+				input = string(pin.EventType())
+			}
+			constructor, err := runtimepipeline.CompileFlowConstructor(source, flow, input)
 			if err != nil {
 				t.Fatal(err)
 			}
