@@ -100,7 +100,11 @@ func (g *SQLiteConstructionGuard) PrepareDatabase(ctx context.Context) error {
 	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	return prepareSQLiteConstructionDatabase(ctx, g.possession)
+	preparer, ok := g.possession.(interface{ prepareDatabase(context.Context) error })
+	if !ok {
+		return errors.New("SQLite construction possession is required")
+	}
+	return preparer.prepareDatabase(ctx)
 }
 
 func (g *SQLiteConstructionGuard) Release() error {
