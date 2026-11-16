@@ -138,8 +138,8 @@ func TestSelectedForkPendingInputMixedCompletionBothStores(t *testing.T) {
 			}
 			once.Do(func() { close(release) })
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
-			requirePendingInputStateCount(t, rt, seed.RunID, "done", 2)
-			requirePendingInputStateCount(t, rt, seed.RunID, "archived", 1)
+			requirePendingInputStateCount(t, rt.ReceiverStateReader.ListWorkflowInstances, seed.RunID, "done", 2)
+			requirePendingInputStateCount(t, rt.ReceiverStateReader.ListWorkflowInstances, seed.RunID, "archived", 1)
 		})
 	}
 }
