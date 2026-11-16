@@ -16,9 +16,9 @@ func ReadSelectedForkReceiverExecutionProofForTest(ctx context.Context, selected
 	}
 	switch owner := selected.(type) {
 	case *PostgresStore:
-		return owner.runForkPostgresOwner.ReadSelectedForkReceiverExecutionProofForTest(ctx, req)
+		return runforkpersistence.ReadPostgresSelectedForkReceiverExecutionProofForTest(ctx, owner.backend, req)
 	case *SQLiteRuntimeStore:
-		return owner.runForkSQLiteOwner.ReadSelectedForkReceiverExecutionProofForTest(ctx, req)
+		return runforkpersistence.ReadSQLiteSelectedForkReceiverExecutionProofForTest(ctx, owner.backend, req)
 	default:
 		return SelectedForkReceiverExecutionProof{}, fmt.Errorf("storage observation requires the original selected owner, got %T", selected)
 	}

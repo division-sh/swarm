@@ -11,11 +11,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence"
+	"github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
 	"github.com/division-sh/swarm/internal/store/internal/schemastore"
 )
 
-type SelectedForkStorageTableSnapshot = runforkpersistence.SelectedForkStorageTableSnapshot
+type SelectedForkStorageTableSnapshot = pipelinepersistence.SelectedForkStorageTableSnapshot
 
 type SelectedForkSnapshotCell struct {
 	Column string
@@ -126,9 +126,9 @@ func ReadSelectedForkRecoveredStorageSnapshotForTest(ctx context.Context, select
 	}
 	switch owner := selected.(type) {
 	case *PostgresStore:
-		return owner.runForkPostgresOwner.ReadSelectedForkRecoveredStorageSnapshotForTest(ctx, runID)
+		return owner.pipelinePostgresOwner.ReadSelectedForkRecoveredStorageSnapshotForTest(ctx, runID)
 	case *SQLiteRuntimeStore:
-		return owner.runForkSQLiteOwner.ReadSelectedForkRecoveredStorageSnapshotForTest(ctx, runID)
+		return owner.pipelineSQLiteOwner.ReadSelectedForkRecoveredStorageSnapshotForTest(ctx, runID)
 	default:
 		return nil, fmt.Errorf("storage observation requires the original selected owner, got %T", selected)
 	}
@@ -240,5 +240,5 @@ func encodeSelectedForkSnapshotRow(rows *sql.Rows, columns []string) (string, er
 }
 
 func encodeSelectedForkSnapshotValues(columns []string, values []any) (string, error) {
-	return runforkpersistence.EncodeSelectedForkSnapshotValues(columns, values)
+	return pipelinepersistence.EncodeSelectedForkSnapshotValues(columns, values)
 }
