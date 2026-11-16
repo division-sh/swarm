@@ -13,7 +13,6 @@ import (
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres"
 	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/sqlite"
 	"github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
-	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 )
 
 type SemanticEventFixtureEvidence struct {
@@ -76,7 +75,8 @@ func readSemanticEventFixtureEvidenceTx(ctx context.Context, tx *sql.Tx, postgre
 		if err := readSemanticEventFacts(ctx, tx, postgres, runID, eventID, &evidence); err != nil {
 			return err
 		}
-		count, err := runforkrevision.CountActivityJournalRevisionsForTest(ctx, tx, runID)
+		var count int64
+		err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_fork_revisions WHERE run_id=$1`, runID).Scan(&count)
 		if err != nil {
 			return err
 		}
