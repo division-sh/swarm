@@ -40,7 +40,7 @@ func waitMailboxCardDecision(t *testing.T, endpoint, cardID string) {
 				Status, Verdict string
 			} `json:"decision_card"`
 		}
-		requireServedJSONRPCResult(t, endpoint, "mailbox.get", map[string]any{"card_id": cardID}, &detail)
+		requireServedJSONRPCResult(t, endpoint, "mailbox.get", map[string]any{"mailbox_id": cardID}, &detail)
 		if detail.Card.CardID != cardID {
 			t.Fatalf("mailbox returned another card: %+v", detail)
 		}
@@ -73,7 +73,7 @@ type mailboxGateEpoch struct {
 	WaitStage                               func(string, string)
 	Unloaded                                func(string, string)
 	Capture                                 func() mailboxGateReturn
-	Join                                    func()
+	Join                                    func() bool
 }
 
 func newMailboxGateEpoch(t *testing.T, backend servedparity.Backend, root string) (mailboxGateEpoch, func() mailboxGateEpoch) {
@@ -116,14 +116,14 @@ func newMailboxGateEpoch(t *testing.T, backend servedparity.Backend, root string
 		}
 	})
 	var process *serveRuntimeTestProcess
-	var join func()
+	var join func() bool
 	var capture struct {
 		sync.Mutex
 		value mailboxGateReturn
 	}
 	start := func() mailboxGateEpoch {
-		if join != nil {
-			join()
+		if join != nil && !join() {
+			t.Fatal("refuse restart after failed predecessor exit")
 		}
 		captured := captureSelectedResetSupervisor(t)
 		process = startRuntimeTestProcessWithRunner(t, repoRootForTest(), opts, func(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
@@ -166,17 +166,20 @@ func newMailboxGateEpoch(t *testing.T, backend servedparity.Backend, root string
 		}
 		scope := servedRuntimeProofAuthorActivityContext(t, rt, rt.Options.SourceArtifactFact.BundleHash())
 		epoch := mailboxGateEpoch{Endpoint: "http://" + serveRuntimeAPIListenerFromOutput(t, current.outputString()) + "/v1/rpc", BundleHash: rt.Options.SourceArtifactFact.BundleHash(), RuntimeInstanceID: rt.Options.RuntimeInstanceID}
-		epoch.Join = func() {
+		joinedOK := true
+		epoch.Join = func() bool {
 			if !active {
-				return
+				return joinedOK
 			}
 			active = false
 			if code := current.stop(); code != 0 {
+				joinedOK = false
 				t.Errorf("joined mailbox runtime exit=%d\n%s", code, current.outputString())
 			}
+			return joinedOK
 		}
 		join = epoch.Join
-		t.Cleanup(epoch.Join)
+		t.Cleanup(func() { epoch.Join() })
 		epoch.Card = func(id string) (decisioncard.Card, error) {
 			if err := guard(); err != nil {
 				return decisioncard.Card{}, err
@@ -227,12 +230,14 @@ func newMailboxGateEpoch(t *testing.T, backend servedparity.Backend, root string
 			for deadline := time.Now().Add(15 * time.Second); time.Now().Before(deadline); {
 				requireServedJSONRPCResult(t, epoch.Endpoint, "run.diagnose", map[string]any{"run_id": run}, &last)
 				matches := 0
+				stage := ""
 				for _, instance := range last.Instances {
-					if instance.FlowInstance == run && instance.Stage == want {
+					if instance.FlowInstance == run {
 						matches++
+						stage = instance.Stage
 					}
 				}
-				if matches == 1 {
+				if matches == 1 && stage == want {
 					return
 				}
 				if matches > 1 {
@@ -284,6 +289,7 @@ func newMailboxGateEpoch(t *testing.T, backend servedparity.Backend, root string
 	first.WaitStage(runID, "review")
 	first.WaitDeliveries(runID)
 	params := map[string]any{"status": "pending", "limit": 100}
+	cursors := map[string]bool{}
 	var id string
 	for {
 		var page servedEntityFilterList
@@ -299,6 +305,10 @@ func newMailboxGateEpoch(t *testing.T, backend servedparity.Backend, root string
 		if page.NextCursor == "" {
 			break
 		}
+		if cursors[page.NextCursor] {
+			t.Fatal("mailbox cursor repeated or cycled")
+		}
+		cursors[page.NextCursor] = true
 		params["cursor"] = page.NextCursor
 	}
 	if id == "" {
