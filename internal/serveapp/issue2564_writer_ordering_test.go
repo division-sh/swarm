@@ -212,6 +212,7 @@ func TestIssue2564ServedM33NonterminalDeadlineLateResultBothStores(t *testing.T)
 			p := newIssue2564Provider(t, "a")
 			p.scripts["a"] = []*issue2564ProviderStep{
 				newIssue2564Step(issue2564Call{"emit_hub_result", map[string]any{"hub_id": "late", "value": "late"}}),
+				newIssue2564Step(),
 			}
 			timer := make(chan struct{})
 			var once sync.Once
