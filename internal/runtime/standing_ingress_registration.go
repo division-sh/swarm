@@ -19,17 +19,22 @@ func admitPublicIngressTarget(rt *Runtime, ownedContext BundleContext, target In
 	if rt == nil || ownedContext.BundleHash() != target.BundleHash {
 		return InboundTarget{}, false, fmt.Errorf("ingress registration requires its exact runtime context")
 	}
-	found := false
-	for _, owned := range ownedContext.StandingTargets {
-		if sameDeclaredIngressTarget(target, owned) && target.RunID == owned.RunID {
-			found = true
-			break
-		}
-	}
-	if !found {
+	if !ownsInboundTarget(ownedContext, target) {
 		return InboundTarget{}, false, fmt.Errorf("public ingress target is not owned by the acquired context")
 	}
 	return rt.admitPublicIngressBinding(ownedContext.DeclaredChannelPublication, target)
+}
+
+func ownsInboundTarget(ownedContext BundleContext, target InboundTarget) bool {
+	if ownedContext.BundleHash() != target.BundleHash {
+		return false
+	}
+	for _, owned := range ownedContext.StandingTargets {
+		if sameDeclaredIngressTarget(target, owned) && target.RunID == owned.RunID {
+			return true
+		}
+	}
+	return false
 }
 
 // Binding classification reads only the existing declaration and frozen
