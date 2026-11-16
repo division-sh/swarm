@@ -507,6 +507,8 @@ func TestHandlerLogsInternalFallbackErrors(t *testing.T) {
 	if strings.Contains(logOutput, "do-not-log") || strings.Contains(logOutput, "secret") {
 		t.Fatalf("log output leaked payload data: %q", logOutput)
 	}
+	t.Run("verbose_diagnostics", proveVerboseInternalFailureDiagnostics)
+	t.Run("diagnostic_bounds", proveInternalFailureDiagnosticBounds)
 }
 
 func TestHandlerCanonicalizesMalformedTypedFallbackFailure(t *testing.T) {
