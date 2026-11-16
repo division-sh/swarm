@@ -154,11 +154,13 @@ func (m *RuntimeContextManager) AcquireInboundPublication(ctx context.Context, a
 			return nil, RuntimeIngressContextLookup{}, err
 		}
 		m.inboundPhaseMu.RUnlock()
-		m.liveSelectionMu.RLock()
-		lookup, err := m.loadIngressLanding(ctx, alias, provider)
-		if err != nil || !lookup.Loaded() {
-			m.liveSelectionMu.RUnlock()
+		lookup, err := m.loadSelectedIngressLanding(ctx, alias, provider)
+		if err != nil {
 			return nil, lookup, err
+		}
+		if !lookup.Loaded() {
+			m.liveSelectionMu.RUnlock()
+			return nil, lookup, nil
 		}
 		m.inboundPhaseMu.RLock()
 		if m.inboundReady != nil {
