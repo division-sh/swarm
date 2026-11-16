@@ -164,22 +164,29 @@ func selectLiveForkSource(ctx context.Context, req *SelectedContractExecutionReq
 		return runlifecycle.LiveRun{}, false, nil, err
 	}
 	var releaseSelection func()
+	transferred := false
+	defer func() {
+		if releaseSelection != nil && !transferred {
+			releaseSelection()
+		}
+	}()
 	if found && paused.predecessor == nil && !req.liveSelectionHeld {
 		releaseSelection = req.LiveContexts.BeginLiveRunSelection()
 		req.liveSelectionHeld = true
 		live, found, err = req.LiveRuns.LoadLiveRun(ctx, scope)
 		if err != nil {
-			return runlifecycle.LiveRun{}, false, releaseSelection, err
+			return runlifecycle.LiveRun{}, false, nil, err
 		}
 	}
 	if paused.predecessor != nil {
 		if found {
-			return runlifecycle.LiveRun{}, false, releaseSelection, fmt.Errorf("live fork source changed after pause: source=%s live=%s", paused.predecessor.RunID, live.RunID)
+			return runlifecycle.LiveRun{}, false, nil, fmt.Errorf("live fork source changed after pause: source=%s live=%s", paused.predecessor.RunID, live.RunID)
 		}
 		live, found = *paused.predecessor, true
 	} else if req.Recovery == nil && found && live.RunID == current.plan.SourceRunID {
-		return runlifecycle.LiveRun{}, false, releaseSelection, fmt.Errorf("paused fork source %s became live before materialization", live.RunID)
+		return runlifecycle.LiveRun{}, false, nil, fmt.Errorf("paused fork source %s became live before materialization", live.RunID)
 	}
+	transferred = true
 	return live, found, releaseSelection, nil
 }
 
