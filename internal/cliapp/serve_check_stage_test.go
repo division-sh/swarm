@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/bootverify"
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/sourceartifact"
@@ -83,9 +84,17 @@ func (serveCheckAnswerRuntime) ObserveStartupAnswer(ctx context.Context, _ llmse
 func renderServeChecksForTest(t testing.TB, ctx context.Context, repo, source, configPath, format string, out, diagnostic io.Writer, selectedOptions ...ServeOptions) int {
 	t.Helper()
 	stage, err := serveChecksForTest(t, ctx, repo, source, configPath, selectedOptions...)
-	if err != nil && stage.Bundle == nil && format != "json" {
+	if err != nil && stage.Bundle == nil {
 		_, _ = io.WriteString(diagnostic, FormatCLIAPIError(err)+"\n")
-		return CLIExitValidation
+		if format != "json" {
+			return CLIExitValidation
+		}
+		if len(stage.Validation.BootReport.Observations) == 0 {
+			stage.Validation.BootReport.Purpose = bootverify.ExecutionValidation
+			verifyDeploymentObservation(ctx, &stage.Validation, "serve_check_preparation", "serveChecksForTest", "source:"+source, failures.ClassSchemaInvalid, func(context.Context) error {
+				return err
+			})
+		}
 	}
 	decision := stage.Decision()
 	var inventory packInventoryReadback
