@@ -827,7 +827,7 @@ func TestPersistenceAuthorityDebtRunFixtureCollectorTransitionIsPinned(t *testin
 			{debtPortableAgentFixtureCollectorTo, debtW2DeliveryEvidenceCollectorTo},
 			{debtW2DeliveryEvidenceCollectorTo, debtChannelCrashPreparationCollectorTo},
 			{debtR241CollectorTo, debtChannelObservationCollectorTo},
-			{debtR241CollectorTo, debtR130ProviderBindingCollectorTo},
+			{debtChannelObservationCollectorTo, debtR130ProviderBindingCollectorTo},
 		} {
 			t.Run(edge[0], func(t *testing.T) {
 				for _, mutation := range []string{"exact", "foreign-base", "trusted-collector", "foreign-current", "head-collector", "unreviewed", "foreign-review", "reverse", "bootstrap", "remove-site", "add-site", "multiplicity", "replace-site"} {

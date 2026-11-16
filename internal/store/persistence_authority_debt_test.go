@@ -2940,7 +2940,7 @@ func debtValidateCollectorIdentity(base, current string, trusted, head authority
 		debtR241BaselineTransition(trusted.Sites, head.Sites) {
 		return nil // R241/#3078: exactly 23 named keys, +32 occurrences; no other baseline change.
 	}
-	if base == debtR241CollectorTo && trusted.Collector == base &&
+	if base == debtChannelObservationCollectorTo && trusted.Collector == base &&
 		current == debtR130ProviderBindingCollectorTo && reviewedTransition == current && head.Collector == current &&
 		debtSitesEqual(head.Sites, trusted.Sites) {
 		return nil // #2338/6840391584: exact facts-only signatures and unsupported refusals; baseline unchanged.
