@@ -9,7 +9,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/tests/support/testutil/runtimepipelinefixture"
 )
 
 func TestR7DirectoryReadsOwnSnapshotAndFreshCommittedHeadersBothStores(t *testing.T) {
@@ -36,7 +35,8 @@ func TestR7DirectoryReadsOwnSnapshotAndFreshCommittedHeadersBothStores(t *testin
 			if _, err := tx.ExecContext(f.ctx, `UPDATE flow_instances SET revision=revision+10 WHERE run_id=$1 AND instance_path=$2`, owner.RunID, owner.Route.InstancePath); err != nil {
 				t.Fatal(err)
 			}
-			borrowed := runtimepipelinefixture.WithSQLTx(f.ctx, tx)
+			// Keep the real foreign transaction open; the index owns its snapshot.
+			borrowed := f.ctx
 			if observed, found, err := index.LookupFlowInstance(borrowed, request); err != nil || !found || observed.HeaderRevision() != first.HeaderRevision() {
 				t.Fatalf("index borrowed an ambient uncommitted transaction: %+v found=%t err=%v", observed, found, err)
 			}

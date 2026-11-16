@@ -18,7 +18,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	nativefork "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence"
-	nativerunlifecycle "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
 	artifactstore "github.com/division-sh/swarm/internal/store/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/tests/support/testutil"
@@ -340,11 +339,7 @@ func (f selectedRootedSourceFixture) corruptChildRevision(t *testing.T, revision
 	if err != nil {
 		t.Fatal(err)
 	}
-	if f.postgres {
-		err = nativerunlifecycle.CorruptPostgresOriginForTest(context.Background(), f.db, f.childID, origin)
-	} else {
-		err = nativerunlifecycle.CorruptSQLiteOriginForTest(context.Background(), f.db, f.childID, origin)
-	}
+	err = storetest.CorruptRunOrigin(context.Background(), f.owner, f.childID, origin)
 	if err != nil {
 		t.Fatalf("corrupt run origin %s (postgres=%t): %v", f.childID, f.postgres, err)
 	}

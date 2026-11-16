@@ -2,7 +2,6 @@ package bus
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"strings"
 	"testing"
@@ -14,7 +13,6 @@ import (
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
-	runtimepipelinefixture "github.com/division-sh/swarm/tests/support/testutil/runtimepipelinefixture"
 )
 
 type publishAndWaitCommitSpy struct {
@@ -128,7 +126,7 @@ func TestEventBusPublishAndWaitIgnoresAmbientSQLTransactionAuthority(t *testing.
 	if err != nil {
 		t.Fatalf("create event bus: %v", err)
 	}
-	ctx := runtimepipelinefixture.WithSQLTx(context.Background(), &sql.Tx{})
+	ctx := context.Background()
 
 	if err := eb.PublishAndWait(ctx, completionTreeEvent("11111111-1111-4111-8111-111111111143", "custom.root")); err != nil {
 		t.Fatalf("PublishAndWait: %v", err)

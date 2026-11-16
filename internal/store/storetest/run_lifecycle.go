@@ -13,6 +13,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/sourceartifact"
+	private "github.com/division-sh/swarm/internal/store/internal/runtimepersistence"
 	"github.com/division-sh/swarm/tests/support/testutil/sourceartifactfixture"
 )
 
@@ -24,6 +25,10 @@ const semanticFixtureRuntimeInstanceID = "00000000-0000-4000-8000-000000000001"
 type RunFixtureStore interface {
 	runtimerunlifecycle.OperationOwner
 	runtimerunlifecycle.CandidateStore
+}
+
+func CorruptRunOrigin(ctx context.Context, selected any, runID string, origin runtimerunlifecycle.RunOrigin) error {
+	return private.CorruptRunOriginForTest(ctx, selected, runID, origin)
 }
 
 type RunFixture struct {

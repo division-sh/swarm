@@ -2,30 +2,37 @@ package runlifecycle
 
 import (
 	"context"
-	"database/sql"
 	"strings"
 	"time"
 
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 )
 
-func CorruptPostgresOriginForTest(ctx context.Context, db *sql.DB, runID string, origin runtimerunlifecycle.RunOrigin) error {
-	return corruptOriginForTest(ctx, db, true, runID, origin)
+func (s *RunLifecyclePostgresOwner) CorruptOriginForTest(ctx context.Context, runID string, origin runtimerunlifecycle.RunOrigin) error {
+	query, args, err := corruptOriginStatementForTest(true, runID, origin)
+	if err != nil {
+		return err
+	}
+	_, err = s.backend.ExecContext(ctx, query, args...)
+	return err
 }
 
-func CorruptSQLiteOriginForTest(ctx context.Context, db *sql.DB, runID string, origin runtimerunlifecycle.RunOrigin) error {
-	return corruptOriginForTest(ctx, db, false, runID, origin)
+func (s *RunLifecycleSQLiteOwner) CorruptOriginForTest(ctx context.Context, runID string, origin runtimerunlifecycle.RunOrigin) error {
+	query, args, err := corruptOriginStatementForTest(false, runID, origin)
+	if err != nil {
+		return err
+	}
+	_, err = s.backend.ExecContext(ctx, query, args...)
+	return err
 }
 
-func corruptOriginForTest(
-	ctx context.Context,
-	db *sql.DB,
+func corruptOriginStatementForTest(
 	postgres bool,
 	runID string,
 	origin runtimerunlifecycle.RunOrigin,
-) error {
+) (string, []any, error) {
 	if err := origin.Validate(); err != nil {
-		return err
+		return "", nil, err
 	}
 	query := `
 		UPDATE runs
@@ -59,16 +66,15 @@ func corruptOriginForTest(
 			origin.SourceRunID(), origin.ForkPointKind(), origin.ForkRevision(), origin.SourceEventID(),
 		}
 	}
-	_, err := db.ExecContext(ctx, query, args...)
-	return err
+	return query, args, nil
 }
 
-func CorruptSQLiteStateForTest(ctx context.Context, db *sql.DB, runID, state string, endedAt time.Time) error {
+func (s *RunLifecycleSQLiteOwner) CorruptStateForTest(ctx context.Context, runID, state string, endedAt time.Time) error {
 	var end any
 	if !endedAt.IsZero() {
 		end = endedAt.UTC()
 	}
-	_, err := db.ExecContext(ctx, `
+	_, err := s.backend.ExecContext(ctx, `
   UPDATE runs
   SET status = ?, ended_at = ?
   WHERE run_id = ?
