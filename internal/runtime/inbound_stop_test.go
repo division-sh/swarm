@@ -21,6 +21,23 @@ type heldInboundLandingRuns struct {
 	once    sync.Once
 }
 
+func TestStoredInboundFinalSetRejectsLateRuntimeRegistration(t *testing.T) {
+	catalog, source := runtimeAdmissionTestCatalog(t, "stop-set", "first")
+	first := runtimeAdmissionTestContext(t, source, catalog, eventtest.UUID(t.Name()))
+	manager, err := newTestRuntimeContextManager(t, nil, first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.SealInboundExecution(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	catalog, source = runtimeAdmissionTestCatalog(t, "stop-late", "second")
+	late := runtimeAdmissionTestContext(t, source, catalog, eventtest.UUID(t.Name()+"-late"))
+	if err := manager.Register(late); !errors.Is(err, worklifetime.ErrAdmissionFenced) {
+		t.Fatalf("sealed intake accepted a late runtime: %v", err)
+	}
+}
+
 func (r *heldInboundLandingRuns) LoadLandingRun(ctx context.Context, scope runlifecycle.LiveRunScope) (runlifecycle.LandingRun, bool, error) {
 	landing, found, err := r.LandingRunReader.LoadLandingRun(ctx, scope)
 	r.once.Do(func() { close(r.entered) })
