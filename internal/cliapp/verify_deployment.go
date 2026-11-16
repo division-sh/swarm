@@ -381,8 +381,15 @@ func inspectVerifyListeners(ctx context.Context, repo string, cfg RuntimeConfigL
 	if intent.PublicWebhookListener != nil {
 		held = append(held, verifyListenerBinding{subject: "public-webhook:" + intent.PublicWebhookListener.Addr().String(), listener: intent.PublicWebhookListener, borrowed: true})
 	}
+	if intent.APIListener != nil {
+		held = append(held, verifyListenerBinding{subject: "api:" + intent.APIListener.Addr().String(), listener: intent.APIListener, borrowed: true})
+	}
 	for _, binding := range bindings {
-		if binding.name == "public-webhook" && intent.PublicWebhookListener != nil {
+		if binding.name == "api" && intent.APIListener != nil {
+			verifyDeploymentObservation(ctx, result, "listener_availability", "internal/cliapp.inspectBorrowedAPIListener", binding.name+":"+api, failures.ClassDependencyUnavailable, func(context.Context) error {
+				return inspectBorrowedAPIListener(api, intent.APIListener)
+			})
+		} else if binding.name == "public-webhook" && intent.PublicWebhookListener != nil {
 			verifyDeploymentObservation(ctx, result, "listener_availability", "net.TCPListener.SyscallConn", binding.name+":"+intent.PublicWebhookListener.Addr().String(), failures.ClassDependencyUnavailable, func(context.Context) error {
 				connection, err := intent.PublicWebhookListener.SyscallConn()
 				if err != nil {

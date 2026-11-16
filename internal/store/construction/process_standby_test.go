@@ -9,12 +9,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/bootverify"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store"
-	"github.com/division-sh/swarm/internal/store/backendselection"
 	"github.com/division-sh/swarm/internal/store/construction"
-	"github.com/division-sh/swarm/internal/store/selected"
 	"github.com/division-sh/swarm/tests/support/testutil"
 	"github.com/google/uuid"
 )
@@ -39,11 +38,64 @@ func TestRuntimeConstructorWaitsBeforeBootstrapBothStores(t *testing.T) {
 				Close() error
 			}
 			var open func(context.Context) (runtimeStore, *sql.DB, error)
-			var request selected.RuntimeRequest
 			query := `SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'`
 			if backend == "sqlite" {
 				path := filepath.Join(t.TempDir(), "runtime.db")
-				request.Selection = backendselection.Selection{Backend: backendselection.BackendSQLite, SQLitePath: path}
+				t.Run("checks_before_writable_open", func(t *testing.T) {
+					refusal := errors.New("exact prewrite refusal")
+					calls := 0
+					checks := constructionChecksForTest{inspect: func(target bootverify.ConstructionTarget) error {
+						calls++
+						expected, err := bootverify.SQLiteConstructionTarget(path)
+						if err != nil || target != expected {
+							t.Fatalf("native target: %+v, %v", target, err)
+						}
+						if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+							t.Fatalf("checks followed a writable database open: %v", err)
+						}
+						if _, err := os.Stat(path + ".possession"); err != nil {
+							t.Fatalf("checks preceded native coordinate acquisition: %v", err)
+						}
+						return refusal
+					}}
+					owner, handle, err := construction.OpenSQLiteRuntimeWithChecks(t.Context(), path, checks)
+					if owner != nil || handle != nil || !errors.Is(err, refusal) || calls != 1 {
+						t.Fatalf("refusal changed/constructed/replayed: owner=%v handle=%v calls=%d err=%v", owner, handle, calls, err)
+					}
+					if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+						t.Fatalf("refused checks created a database: %v", err)
+					}
+					original, _, err := construction.OpenSQLiteRuntimeForServing(t.Context(), path)
+					if err != nil {
+						t.Fatalf("refused stage retained its coordinate: %v", err)
+					}
+					if err := original.Close(); err != nil {
+						t.Fatal(err)
+					}
+					for _, replaced := range []string{path, path + ".possession"} {
+						t.Run(filepath.Base(replaced), func(t *testing.T) {
+							input, err := construction.CaptureSQLiteInspectionInput(t.Context(), path)
+							if err != nil {
+								t.Fatal(err)
+							}
+							if err := os.Rename(replaced, replaced+".original"); err != nil {
+								t.Fatal(err)
+							}
+							defer func() {
+								if err := errors.Join(os.Remove(replaced), os.Rename(replaced+".original", replaced)); err != nil {
+									t.Error(err)
+								}
+							}()
+							if err := os.WriteFile(replaced, []byte("replacement"), 0600); err != nil {
+								t.Fatal(err)
+							}
+							if owner, _, err := construction.OpenSQLiteRuntimeForServing(t.Context(), path, input); err == nil {
+								_ = owner.Close()
+								t.Fatal("native construction accepted a replaced observed identity")
+							}
+						})
+					}
+				})
 				t.Run("appeared_before_native_construction", func(t *testing.T) {
 					other := filepath.Join(t.TempDir(), "fresh.db")
 					input, err := construction.CaptureSQLiteInspectionInput(t.Context(), other)
@@ -71,7 +123,30 @@ func TestRuntimeConstructorWaitsBeforeBootstrapBothStores(t *testing.T) {
 				}
 			} else {
 				dsn, _, _ := testutil.StartEmptyPostgres(t)
-				request.Selection.Backend, request.PostgresDSN = backendselection.BackendPostgres, dsn
+				t.Run("checks_under_native_possession", func(t *testing.T) {
+					refusal := errors.New("exact prewrite refusal")
+					calls := 0
+					checks := constructionChecksForTest{inspect: func(target bootverify.ConstructionTarget) error {
+						calls++
+						other, err := construction.OpenPostgresReadOnly(dsn)
+						if err != nil {
+							return err
+						}
+						observed, err := other.ProbePossession(t.Context())
+						if closeErr := other.Close(); err != nil || closeErr != nil || observed.Available {
+							t.Fatalf("checks did not retain native exclusion: %+v, %v, %v", observed, err, closeErr)
+						}
+						expected, err := construction.PostgresCheckTarget(dsn)
+						if err != nil || target != expected {
+							t.Fatalf("native target: %+v, %v", target, err)
+						}
+						return refusal
+					}}
+					owner, handle, err := construction.OpenPostgresRuntime(t.Context(), dsn, checks)
+					if owner != nil || handle != nil || !errors.Is(err, refusal) || calls != 1 {
+						t.Fatalf("refusal changed/constructed/replayed: owner=%v handle=%v calls=%d err=%v", owner, handle, calls, err)
+					}
+				})
 				open = func(ctx context.Context) (runtimeStore, *sql.DB, error) {
 					owner, db, err := construction.OpenPostgresRuntime(ctx, dsn)
 					if err != nil {
@@ -86,18 +161,6 @@ func TestRuntimeConstructorWaitsBeforeBootstrapBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer holder.Close()
-			inspection, err := selected.OpenAdmissionInspection(t.Context(), selected.AuthorityRequest{Selection: request.Selection, PostgresDSN: request.PostgresDSN})
-			if err != nil {
-				t.Fatal(err)
-			}
-			_, err = inspection.Inspect(t.Context(), schema, func(snapshot *selected.AdmissionSnapshot) error {
-				var err error
-				request.BootCheckInput, err = snapshot.CaptureBootInput(t.Context())
-				return err
-			})
-			if err := errors.Join(err, inspection.Close()); err != nil {
-				t.Fatal(err)
-			}
 			type result struct {
 				owner runtimeStore
 				err   error
@@ -133,13 +196,6 @@ func TestRuntimeConstructorWaitsBeforeBootstrapBothStores(t *testing.T) {
 			case <-time.After(3 * time.Second):
 				t.Fatal("construction waiter did not join")
 			}
-			checked, err := selected.OpenRuntime(t.Context(), request)
-			if err != nil {
-				t.Fatalf("unchanged inspected state refused under native exclusion: %v", err)
-			}
-			if err := checked.CloseUnactivated(); err != nil {
-				t.Fatal(err)
-			}
 			owner, _, err := open(context.Background())
 			if err != nil {
 				t.Fatal(err)
@@ -163,10 +219,14 @@ func TestRuntimeConstructorWaitsBeforeBootstrapBothStores(t *testing.T) {
 			if err := owner.Close(); err != nil {
 				t.Fatal(err)
 			}
-			if stale, err := selected.OpenRuntime(t.Context(), request); err == nil {
-				_ = stale.CloseUnactivated()
-				t.Fatal("changed schema/generation reused the pre-bootstrap inspection")
-			}
 		})
 	}
+}
+
+type constructionChecksForTest struct {
+	inspect func(bootverify.ConstructionTarget) error
+}
+
+func (c constructionChecksForTest) InspectConstruction(_ context.Context, target bootverify.ConstructionTarget) (bootverify.Report, error) {
+	return bootverify.Report{}, c.inspect(target)
 }

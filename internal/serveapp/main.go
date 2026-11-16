@@ -892,65 +892,13 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 		storeSelection = scratch.Selection
 	}
 	checkInput := cliapp.ServeCheckStageRequest{Repo: repo, Paths: resolvedPaths, Config: cfgResult, Options: opts, Selection: storeSelection, PackBases: platformPackBases}
-	checks, err := cliapp.InspectServeCheckStage(ctx, checkInput)
-	if failure := errors.Join(err, checks.Failure()); failure != nil {
-		checks.Write(opts.Output, opts.ErrorOutput)
-		if code := presentServeCheckSourceRefusal(presenter, checks); code != 0 {
-			return code
-		}
-		presenter.fail(5, "local_preflight", failure)
-		if runtimestartuprecovery.IsDataIntegrityError(failure) {
-			return serveExitDataIntegrity
-		}
-		if err != nil {
-			return 1
-		}
-		return checks.ExitCode()
-	}
 	if opts.DryRun {
+		checks, err := cliapp.InspectServeCheckStage(ctx, checkInput)
+		if failure := errors.Join(err, checks.Failure()); failure != nil {
+			return presentServeStageFailure(presenter, opts, checks, failure)
+		}
 		checks.Write(opts.Output, opts.ErrorOutput)
 		return checks.ExitCode()
-	}
-	if err := checks.Revalidate(ctx, checkInput); err != nil {
-		presenter.fail(5, "local_preflight", err)
-		return 3
-	}
-	apiAuth = checks.APIAuth
-	var scratchAuthority *devscratch.EpochAuthority
-	var scratchRegistrationGrant devscratch.RegistrationGrant
-	if opts.Dev && !opts.LocalRun {
-		scratch, err := cliapp.ResolveDevScratch(localState)
-		if err != nil {
-			presenter.fail(2, "serve_admission", err)
-			return 3
-		}
-		storeSelection = scratch.Selection
-		scratchAuthority, err = devscratch.Acquire(scratch.Coordinate)
-		if err != nil {
-			presenter.fail(2, "serve_admission", err)
-			return 3
-		}
-		defer func() {
-			if scratchAuthority != nil {
-				_ = scratchAuthority.AbortBeforeStoreOpen()
-			}
-		}()
-		scratchRegistrationGrant, err = scratchAuthority.RegistrationGrant()
-		if err != nil {
-			presenter.fail(2, "serve_admission", err)
-			return 3
-		}
-	}
-	projectContextRegistration, err := cliapp.PrepareServeProjectContextRegistration(invocationRoot, opts, resolvedPaths, scratchRegistrationGrant)
-	if err != nil {
-		presenter.fail(2, "serve_admission", err)
-		return 3
-	}
-	if scratchAuthority != nil {
-		if err := scratchAuthority.PrepareFreshStore(); err != nil {
-			presenter.fail(3, "db_connection", err)
-			return 3
-		}
 	}
 	managedCredentials, err := cliapp.BuildManagedCredentialStore()
 	if err != nil {
@@ -968,21 +916,31 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 		return 1
 	}
 	composition := runtimeCompositionRequest{
-		BootChecks: &checks, BootCheckInput: checkInput, AdmittedBundle: checks.Bundle,
-		Purpose: executionposture.Live, ProviderIngress: true,
+		BootCheckInput: &checkInput,
+		Purpose:        executionposture.Live, ProviderIngress: true,
 		Repo: repo, Options: opts, Config: cfgResult, ResolvedPaths: resolvedPaths,
 		LocalState: localState, SwarmDir: swarmDir, StoreSelection: storeSelection,
 		WorkspacePreference: workspaceBackendPreference, MountSources: mountSources,
 		PlatformPackBase: platformPackBase, PlatformPackBases: platformPackBases,
 		APIAuth: apiAuth, PublicIngressMode: publicIngressMode, PublicIngressEnabled: publicIngressEnabled,
-		Registration: projectContextRegistration, ScratchAuthority: scratchAuthority,
 		Credentials: credentials, ManagedCredentials: managedCredentials, ProviderCredentials: providerCredentials,
 		Presenter: presenter, NoticePresentation: noticePresentation, Cancel: cancelServe,
 		BootStartedAt: bootStartedAt, RuntimeInstanceID: runtimeInstanceID,
 	}
-	scratchAuthority = nil // The common constructor now owns abort-or-joined-close.
-	publicListener = nil   // Listener ownership follows the admitted composition request.
+	publicListener = nil // Listener ownership follows the admitted composition request.
 	return buildRuntimeComposition(ctx, composition)
+}
+
+func presentServeStageFailure(presenter *serveLifecyclePresenter, opts cliapp.ServeOptions, checks cliapp.ServeCheckStageResult, failure error) int {
+	checks.Write(opts.Output, opts.ErrorOutput)
+	if code := presentServeCheckSourceRefusal(presenter, checks); code != 0 {
+		return code
+	}
+	presenter.fail(5, "local_preflight", failure)
+	if runtimestartuprecovery.IsDataIntegrityError(failure) {
+		return serveExitDataIntegrity
+	}
+	return max(1, checks.ExitCode())
 }
 
 func presentServeCheckSourceRefusal(presenter *serveLifecyclePresenter, checks cliapp.ServeCheckStageResult) int {
@@ -1009,7 +967,7 @@ func presentServeCheckSourceRefusal(presenter *serveLifecyclePresenter, checks c
 // internal to the composition root, not a public runtime mode/configuration API.
 type runtimeCompositionRequest struct {
 	BootChecks           *cliapp.ServeCheckStageResult
-	BootCheckInput       cliapp.ServeCheckStageRequest
+	BootCheckInput       *cliapp.ServeCheckStageRequest
 	Purpose              executionposture.Posture
 	ProviderIngress      bool
 	Repo                 string
@@ -1130,15 +1088,25 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 	}
 	presenter.recordStandby(standbyReadout(ctx))
 	var bootStoreInput *storeselected.BootCheckInput
-	if req.BootChecks != nil {
-		bootStoreInput = req.BootChecks.BootStoreInput()
-		if bootStoreInput == nil && !(opts.Dev && !opts.LocalRun) {
-			presenter.fail(3, "db_connection", errors.New("selected store boot inspection is required"))
-			return 3
+	var stage *cliapp.ServeConstructionChecks
+	if req.BootCheckInput != nil {
+		input := *req.BootCheckInput
+		input.Options.APIListener = apiListener
+		stage = &cliapp.ServeConstructionChecks{Input: input}
+		if opts.Dev && !opts.LocalRun {
+			scratchAuthority, projectContextRegistration, err = prepareCheckedServeScratch(ctx, req, stage)
+			if err != nil {
+				return presentServeStageFailure(presenter, opts, stage.Result, err)
+			}
+		} else {
+			bootStoreInput = storeselected.ConstructionCheckInput(stage)
 		}
 	}
 	stores, err := buildStoresForServe(ctx, storeSelection, cfg, bootStoreInput)
 	if err != nil {
+		if stage != nil && stage.Failure != nil {
+			return presentServeStageFailure(presenter, opts, stage.Result, err)
+		}
 		var acquisitionErr *runtimestartupownership.AcquisitionError
 		if errors.As(err, &acquisitionErr) {
 			presenter.fail(3, "startup_ownership_lease", err)
@@ -1146,6 +1114,10 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 		}
 		presenter.fail(3, "db_connection", err)
 		return 1
+	}
+	if stage != nil {
+		req.BootChecks, req.BootCheckInput = &stage.Result, &stage.Input
+		req.AdmittedBundle, apiAuth = stage.Result.Bundle, stage.Result.APIAuth
 	}
 	storeLifetime := selectedStoreLifecycle(stores)
 	if scratchAuthority != nil {
@@ -1171,6 +1143,16 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 			exitCode = max(exitCode, 1)
 		}
 	}()
+	if stage != nil && projectContextRegistration == nil {
+		root, err := cliapp.NewInvocationRoot(repo)
+		if err == nil {
+			projectContextRegistration, err = cliapp.PrepareServeProjectContextRegistration(root, opts, resolvedPaths, devscratch.RegistrationGrant{})
+		}
+		if err != nil {
+			presenter.fail(2, "serve_admission", err)
+			return 3
+		}
+	}
 	_, err = cliapp.EmbeddedPlatformSpecPath()
 	if err != nil {
 		presenter.fail(4, "bundle_load", err)
@@ -1312,7 +1294,7 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 		return 3
 	}
 	if req.BootChecks != nil {
-		if err := req.BootChecks.Revalidate(ctx, req.BootCheckInput); err != nil {
+		if err := req.BootChecks.Revalidate(ctx, *req.BootCheckInput); err != nil {
 			presenter.fail(5, "local_preflight", err)
 			return 3
 		}
