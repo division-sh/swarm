@@ -218,7 +218,7 @@ func TestServedForkConnectedRecipientAuthorityOnBothStores(t *testing.T) {
 			params := map[string]any{"source_run_id": seed.RunID, "fork_event_id": plan.ForkPoint.EventID, "idempotency_key": "recipient-fork"}
 			var fork, replay apiv1.RunForkExecutionResult
 			requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &fork)
-			if fork.SourceRunID != seed.RunID || fork.ForkRunID == "" || fork.ForkRunID == seed.RunID || fork.ForkEventID != plan.ForkPoint.EventID || fork.ExecutedEventCount != 1 {
+			if fork.SourceRunID != seed.RunID || fork.ForkRunID == "" || fork.ForkRunID == seed.RunID || fork.ForkEventID != plan.ForkPoint.EventID {
 				t.Fatalf("fork lost exact source/child work identity: %+v", fork)
 			}
 			childEvent := waitServedSelectedForkFrontier(t, rt.ReceiverStateReader, rt.ReadRunDeliveries, fork.ForkRunID, plan.ForkPoint.EventID)

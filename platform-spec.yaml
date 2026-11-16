@@ -33737,7 +33737,7 @@ api_specification:
         oneOf:
         - type: object
           additionalProperties: false
-          required: [owner, source_run_id, source_run_status, source_frozen, fork_run_id, fork_point_kind, fork_revision, fork_event_id, fork_run_status, bundle_hash, executed_event_count, data_pins]
+          required: [owner, source_run_id, source_run_status, source_frozen, fork_run_id, fork_point_kind, fork_revision, fork_event_id, fork_run_status, bundle_hash, data_pins]
           properties:
             source_label: {type: string, description: Display-only label derived from exact stored artifact bytes.}
             owner:
@@ -33756,13 +33756,12 @@ api_specification:
               description: Exact source event selected as this fork point.
             fork_run_status: {$ref: '#/components/schemas/RunStatus'}
             bundle_hash: {$ref: '#/components/schemas/BundleHash'}
-            executed_event_count: {type: integer, minimum: 0}
             data_pins:
               type: array
               items: {$ref: '#/components/schemas/ResourcePin'}
         - type: object
           additionalProperties: false
-          required: [owner, source_run_id, source_run_status, source_frozen, fork_run_id, fork_point_kind, fork_revision, fork_run_status, bundle_hash, executed_event_count, data_pins]
+          required: [owner, source_run_id, source_run_status, source_frozen, fork_run_id, fork_point_kind, fork_revision, fork_run_status, bundle_hash, data_pins]
           properties:
             source_label: {type: string, description: Display-only label derived from exact stored artifact bytes.}
             owner:
@@ -33778,7 +33777,6 @@ api_specification:
             fork_revision: {type: integer, minimum: 1}
             fork_run_status: {$ref: '#/components/schemas/RunStatus'}
             bundle_hash: {$ref: '#/components/schemas/BundleHash'}
-            executed_event_count: {type: integer, minimum: 0}
             data_pins:
               type: array
               items: {$ref: '#/components/schemas/ResourcePin'}

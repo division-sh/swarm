@@ -57,7 +57,6 @@ type RunForkExecutionResult struct {
 	ForkEventID            string            `json:"fork_event_id,omitempty"`
 	ForkRunStatus          string            `json:"fork_run_status"`
 	BundleHash             string            `json:"bundle_hash"`
-	ExecutedEventCount     int               `json:"executed_event_count"`
 	DataPins               []durabledata.Pin `json:"data_pins"`
 	activationAcknowledged bool
 }
@@ -149,7 +148,6 @@ func selectedRunForkResult(req RunForkExecutionRequest, result runtimerunforkexe
 		ForkEventID:            strings.TrimSpace(result.Materialization.ForkPoint.EventID),
 		ForkRunStatus:          status,
 		BundleHash:             strings.TrimSpace(req.BundleHash),
-		ExecutedEventCount:     result.ExecutedEventCount,
 		DataPins:               pins,
 		activationAcknowledged: acknowledged,
 	}, err
@@ -364,7 +362,7 @@ func projectForkOperationResult(ctx context.Context, artifacts sourceartifact.Re
 		SourceRunID: r.SourceRunID, SourceRunStatus: r.SourceRunStatus, SourceFrozen: r.SourceFrozen,
 		ForkRunID: r.ForkRunID, ForkPointKind: string(r.ForkPoint.Kind), ForkRevision: r.ForkPoint.Revision,
 		ForkEventID: r.ForkPoint.EventID, ForkRunStatus: r.ForkRunStatus,
-		BundleHash: r.BundleHash, ExecutedEventCount: r.ExecutedEventCount, DataPins: pins,
+		BundleHash: r.BundleHash, DataPins: pins,
 		activationAcknowledged: true,
 	}
 	if err := validateRunForkExecutionResult(result); err != nil {

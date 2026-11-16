@@ -118,7 +118,7 @@ func TestRunServeRuntimeDevScratchRunForkLifecycleSQLite(t *testing.T) {
 	if err := json.Unmarshal(forkResponse.Result, &fork); err != nil {
 		t.Fatalf("decode run.fork result: %v\n%s", err, forkResponse.Result)
 	}
-	if fork.SourceRunID != started.RunID || fork.ForkEventID != published.EventID || fork.ForkRunID == "" || fork.SourceFrozen || fork.SourceRunStatus != "paused" || fork.ExecutedEventCount != 1 {
+	if fork.SourceRunID != started.RunID || fork.ForkEventID != published.EventID || fork.ForkRunID == "" || fork.SourceFrozen || fork.SourceRunStatus != "paused" {
 		t.Fatalf("run.fork result = %#v", fork)
 	}
 	waitServedEventPublishedLog(t, endpoint, fork.ForkRunID, activityidentity.ForkLineageEventID(fork.ForkRunID, published.EventID))

@@ -316,7 +316,7 @@ func TestC4F40SelectedStartTimerChildBothStores(t *testing.T) {
 			caller = authoractivity.WithScope(caller, authoractivity.BundleScope(ordinary.Options.RuntimeInstanceID, bundleHash))
 			activated, err := runforkexecution.ExecuteSelectedContractRunFork(caller, executionRequest)
 			if err != nil || !activated.Activation.Activated || activated.Materialization.ForkRunID != staged.ForkRunID ||
-				activated.Activation.ForkPoint != sourcePlan.ForkPoint || activated.ExecutedEventCount != 1 || len(activated.ForkEvents) != 0 ||
+				activated.Activation.ForkPoint != sourcePlan.ForkPoint || len(activated.ForkEvents) != 0 ||
 				activated.ForkLocalRuntimeContainer == nil || activated.ForkLocalRuntimeContainer.RuntimeExecutionID == "" ||
 				activated.ForkLocalRuntimeContainer.ForkEventID != "" || activated.ForkLocalRuntimeContainer.ForkPoint != sourcePlan.ForkPoint || len(activated.ForkLocalRuntimeContainer.SourceEventIDs) != 0 {
 				t.Fatalf("real owner failed pending exact-start timer activation: %+v err=%v", activated, err)

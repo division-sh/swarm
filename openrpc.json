@@ -22652,10 +22652,6 @@
                 },
                 "type": "array"
               },
-              "executed_event_count": {
-                "minimum": 0,
-                "type": "integer"
-              },
               "fork_event_id": {
                 "$ref": "#/components/schemas/OpaqueId",
                 "description": "Exact source event selected as this fork point."
@@ -22704,7 +22700,6 @@
               "fork_event_id",
               "fork_run_status",
               "bundle_hash",
-              "executed_event_count",
               "data_pins"
             ],
             "type": "object"
@@ -22720,10 +22715,6 @@
                   "$ref": "#/components/schemas/ResourcePin"
                 },
                 "type": "array"
-              },
-              "executed_event_count": {
-                "minimum": 0,
-                "type": "integer"
               },
               "fork_point_kind": {
                 "enum": [
@@ -22772,7 +22763,6 @@
               "fork_revision",
               "fork_run_status",
               "bundle_hash",
-              "executed_event_count",
               "data_pins"
             ],
             "type": "object"

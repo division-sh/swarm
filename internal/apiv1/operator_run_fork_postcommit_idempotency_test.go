@@ -163,9 +163,10 @@ func TestOperatorRunForkActivatedPostCommitErrorReplaysWithoutReexecution(t *tes
 		t.Fatalf("durable replay: first=%#v replay=%#v err=%v execution=%d availability=%d", first, replay, err, selectedCalls, availability.calls)
 	}
 	result, ok := replay.(RunForkExecutionResult)
-	if !ok || result.ForkRunID != runForkTestForkRunID || result.ExecutedEventCount != 2 || !result.activationAcknowledged {
+	if !ok || result.ForkRunID != runForkTestForkRunID || !result.activationAcknowledged {
 		t.Fatalf("durable replay lost acknowledged activation: %#v", replay)
 	}
+	requireRunForkPublicCountAbsent(t, result)
 }
 
 func TestSelectedForkEventlessRevisionAcknowledgementRequiresExactPoint(t *testing.T) {
@@ -356,6 +357,5 @@ func runForkActivatedTestResult() RunForkExecutionResult {
 		SourceFrozen: false, ForkRunID: runForkTestForkRunID,
 		ForkPointKind: string(runfork.RunForkPointEvent), ForkRevision: 1, ForkEventID: runForkTestEventID,
 		ForkRunStatus: runfork.RunForkActivatedStatus, BundleHash: runForkTestBundleHash,
-		ExecutedEventCount: 1,
 	}
 }

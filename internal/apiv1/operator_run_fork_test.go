@@ -441,7 +441,7 @@ func (o *recordingRunForkOperations) activate(request runfork.ForkOperationReque
 		Result: &runfork.ForkOperationResult{
 			SourceRunID: result.SourceRunID, SourceRunStatus: result.SourceRunStatus, SourceFrozen: result.SourceFrozen,
 			ForkRunID: result.ForkRunID, ForkEventID: result.ForkEventID, ForkPoint: point, ForkRunStatus: result.ForkRunStatus,
-			BundleHash: result.BundleHash, ExecutedEventCount: result.ExecutedEventCount, DataPins: result.DataPins,
+			BundleHash: result.BundleHash, DataPins: result.DataPins,
 		},
 	}
 	if err := record.Validate(); err != nil {

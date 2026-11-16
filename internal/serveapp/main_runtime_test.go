@@ -1468,7 +1468,7 @@ func runServedRunForkBackendProof(t *testing.T, backend servedparity.Backend) {
 	if err := json.Unmarshal([]byte(stdout), &fork); err != nil {
 		t.Fatalf("decode swarm run fork result: %v\n%s", err, stdout)
 	}
-	if fork.SourceRunID != started.RunID || fork.ForkEventID != published.EventID || fork.ForkRunID == "" || fork.SourceFrozen || fork.SourceRunStatus != "paused" || fork.ForkRunStatus != "live" || fork.ExecutedEventCount != 1 {
+	if fork.SourceRunID != started.RunID || fork.ForkEventID != published.EventID || fork.ForkRunID == "" || fork.SourceFrozen || fork.SourceRunStatus != "paused" || fork.ForkRunStatus != "live" {
 		t.Fatalf("run.fork result = %#v", fork)
 	}
 	var replay apiv1.RunForkExecutionResult
