@@ -6,8 +6,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
+	"github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -116,7 +116,11 @@ func requireLifecycleGateRestartReplacement(t *testing.T, reader lifecycleGateRe
 	if !found {
 		t.Fatal("current admitted source lost its exact gate")
 	}
-	activations, err := gateruntime.List(before.Instance.StateBuckets)
+	carrier, err := engine.StateCarrierFromPersisted(before.Instance.Fields, before.Instance.Bookkeeping, before.Instance.StateBuckets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	activations, err := gateruntime.List(carrier.StateBuckets)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,19 +139,15 @@ func requireLifecycleGateRestartReplacement(t *testing.T, reader lifecycleGateRe
 		t.Fatalf("successor differs from current admitted full offer: card=%+v err=%v", successor, err)
 	}
 	expected := before.Instance
-	cloned, err := canonicaljson.CloneRuntimeValue(expected.StateBuckets)
-	if err != nil {
-		t.Fatal(err)
-	}
-	expected.StateBuckets = cloned.(map[string]any)
 	if !predecessor.Supersede(decisioncard.SupersededByUpdate, successor.CreatedAt) {
 		t.Fatal("expected predecessor was not an open wait")
 	}
 	for _, activation := range []gateruntime.Activation{predecessor, replacement} {
-		if err := gateruntime.Store(expected.StateBuckets, activation); err != nil {
+		if err := gateruntime.Store(carrier.StateBuckets, activation); err != nil {
 			t.Fatal(err)
 		}
 	}
+	expected.StateBuckets = carrier.PersistedStateBuckets()
 	expected.Revision++
 	expected.UpdatedAt = successor.CreatedAt
 	requireLifecycleGateRestartMembers(t, "instance", expected, after.Instance)
