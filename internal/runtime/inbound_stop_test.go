@@ -22,12 +22,13 @@ type heldInboundLandingRuns struct {
 }
 
 func (r *heldInboundLandingRuns) LoadLandingRun(ctx context.Context, scope runlifecycle.LiveRunScope) (runlifecycle.LandingRun, bool, error) {
+	landing, found, err := r.LandingRunReader.LoadLandingRun(ctx, scope)
 	r.once.Do(func() { close(r.entered) })
 	select {
 	case <-ctx.Done():
 		return runlifecycle.LandingRun{}, false, ctx.Err()
 	case <-r.release:
-		return r.LandingRunReader.LoadLandingRun(ctx, scope)
+		return landing, found, err
 	}
 }
 
@@ -42,10 +43,12 @@ func TestStoredInboundSelectionRechecksStopAfterNativeLandingRead(t *testing.T) 
 	manager.landingRuns = reader
 	requestCtx, cancel := context.WithCancel(t.Context())
 	defer cancel()
+	target := definition.StandingTargets[0]
+	nextRunID := eventtest.UUID(t.Name() + "-next-landing")
+	selected := make(chan struct{})
 	result := make(chan *InboundPublicationUse, 1)
 	publicationErr := make(chan error, 1)
 	go func() {
-		target := definition.StandingTargets[0]
 		use, _, err := manager.AcquireInboundPublication(requestCtx, target.Alias, target.Provider)
 		publicationErr <- err
 		result <- use
@@ -63,18 +66,33 @@ func TestStoredInboundSelectionRechecksStopAfterNativeLandingRead(t *testing.T) 
 			t.Errorf("held read did not switch to publication-only custody: %v", use)
 		}
 		if use != nil {
+			if use.context.StandingTargets[0].RunID != nextRunID {
+				t.Errorf("held read minted stale landing custody: got %s want %s", use.context.StandingTargets[0].RunID, nextRunID)
+			}
+			if manager.liveSelectionMu.TryLock() {
+				manager.liveSelectionMu.Unlock()
+				t.Error("admitted publication no longer excludes live selection")
+			}
 			if err := use.Done(); err != nil {
 				t.Error(err)
 			}
 		}
+		<-selected
 	}()
 	<-reader.entered
-	prepared := make(chan struct{})
-	go func() { manager.PrepareInboundStop(); close(prepared) }()
+	go func() {
+		release := manager.BeginLiveRunSelection()
+		landing := reader.LandingRunReader.(runtimeTestLandingRuns)[target.FlowPath]
+		landing.RunID = nextRunID
+		reader.LandingRunReader.(runtimeTestLandingRuns)[target.FlowPath] = landing
+		manager.PrepareInboundStop()
+		release()
+		close(selected)
+	}()
 	select {
-	case <-prepared:
+	case <-selected:
 	case <-time.After(5 * time.Second):
-		t.Fatal("stop preparation waited for a native landing read")
+		t.Fatal("exclusive live selection waited for an unadmitted native landing read")
 	}
 	if err := manager.SealInboundExecution(t.Context()); err != nil {
 		t.Fatal(err)
