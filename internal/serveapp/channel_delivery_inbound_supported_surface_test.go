@@ -1163,7 +1163,7 @@ func proveUnheldNonOperatorIsolation(t *testing.T, h *channelOnboardingE2EHarnes
 	read := func() channelonboarding.Result {
 		var out, errOut lockedBuffer
 		code := cliapp.Execute(t.Context(), []string{"--config", h.opts.ConfigPath, "channel", "list", "--json", "--api-server", h.endpoint},
-			&out, &errOut, nil, nil, OpenChannelRegistration)
+			&out, &errOut, nil, nil, ChannelRegistrations())
 		var listed struct {
 			Accounts []channelonboarding.Result `json:"accounts"`
 		}
