@@ -543,7 +543,7 @@ func gateReplacementHistoryForTest(t *testing.T, fixture *PipelineDeliveryNative
 	var history []authoractivity.Occurrence
 	var after int64
 	for {
-		page, err := fixture.Store.(authoractivity.Reader).ListAuthorActivity(ctx, authoractivity.ListOptions{AfterSequence: after, Limit: 200, IncludeRuntimeScope: true})
+		page, err := fixture.Store.(authoractivity.Reader).ListAuthorActivity(ctx, authoractivity.ListOptions{AfterSequence: after, Limit: 200})
 		if err != nil {
 			t.Fatal(err)
 		}

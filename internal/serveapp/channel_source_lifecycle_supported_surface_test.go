@@ -610,6 +610,10 @@ func runRegisteredSourceLifecycle(t *testing.T, h *channelOnboardingE2EHarness, 
 				if old := readRegisteredChannelCard(t, h, card); old.Status != decisioncard.StatusSuperseded || old.DecisionEventID != "" {
 					t.Fatal("restoring source reactivated the old card")
 				}
+				refusal := registeredChannelMailboxCLI(t, h, false, "decide", card, "approve", "--idempotency-key", "restored-old-"+card)
+				if !strings.Contains(refusal, "MAILBOX_CARD_SUPERSEDED") {
+					t.Fatalf("fresh matching-source old-card request lost terminal refusal: %s", refusal)
+				}
 				if decisions, err = observation.EventCardinality(t.Context(), seed.RunID, "mailbox.card_decided"); err != nil || decisions != 1 {
 					t.Fatalf("restored source did not admit exactly one later answer: count=%d err=%v", decisions, err)
 				}
