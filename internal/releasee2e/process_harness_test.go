@@ -102,6 +102,7 @@ type releaseProcessSpec struct {
 	MCPListenHost               string
 	PublicWebhookBaseURL        string
 	PublicWebhookListen         string
+	PublicWebhookListener       *net.TCPListener
 	TokenFile                   string
 	Token                       string
 	Env                         []string
@@ -184,6 +185,20 @@ func startReleaseServe(t *testing.T, options releaseProcessSpec) *releaseServePr
 	}
 	binary := options.BinaryPath
 	env := append([]string(nil), options.Env...)
+	var publicListenerFile *os.File
+	publicListenerFD := 0
+	if options.PublicWebhookListener != nil {
+		if options.InternalMockLifecycleBinary == "" || !options.RetainedLiveExecution || options.PublicWebhookListener.Addr().String() != options.PublicWebhookListen {
+			t.Fatal("bound public listener belongs to the exact retained live lifecycle child")
+		}
+		var err error
+		publicListenerFile, err = options.PublicWebhookListener.File()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer publicListenerFile.Close()
+		publicListenerFD = 3
+	}
 	if options.InternalMockLifecycleBinary != "" {
 		if !options.RetainedLiveExecution && (options.PublicWebhookBaseURL != "" || options.PublicWebhookListen != "") {
 			t.Fatal("internal mock lifecycle does not own public exposure/registration proof")
@@ -200,8 +215,9 @@ func startReleaseServe(t *testing.T, options releaseProcessSpec) *releaseServePr
 			ShutdownGrace        time.Duration
 			PublicWebhookBaseURL string
 			PublicWebhookListen  string
+			PublicWebhookFD      int
 		}{options.ConfigPath, options.Source, options.RetainedBundleHash, options.RetainedLiveExecution, options.Store, options.Dev, options.APIPort, options.Token, shutdownGrace,
-			options.PublicWebhookBaseURL, options.PublicWebhookListen})
+			options.PublicWebhookBaseURL, options.PublicWebhookListen, publicListenerFD})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -210,6 +226,9 @@ func startReleaseServe(t *testing.T, options releaseProcessSpec) *releaseServePr
 		env = append(env, "SWARM_TEST_INTERNAL_MOCK_LIFECYCLE_REQUEST="+string(request))
 	}
 	cmd := exec.Command(binary, args...)
+	if publicListenerFile != nil {
+		cmd.ExtraFiles = []*os.File{publicListenerFile}
+	}
 	cmd.Dir = options.WorkingDir
 	cmd.Env = env
 	cmd.Stdout = output
