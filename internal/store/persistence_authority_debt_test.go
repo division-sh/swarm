@@ -652,6 +652,46 @@ func debtChannelCrashPreparationSignatureTransitions() [9][2]authorityDebtSite {
 	return pairs
 }
 
+// #3073/6905619550: four exact source correspondences, including real 2->1 retirement.
+func debtChannelObservationSignatureTransitions() [4][2]authorityDebtSite {
+	var pairs [4][2]authorityDebtSite
+	for index, call := range [4]struct {
+		file, declaration, operation, before, after string
+		oldCount, newCount                          int
+	}{
+		{"channel_delivery_process_supported_surface_test.go", "TestChannelDeliverySettlementWaitIncludesPlannedWork", "newChannelResponsibilityProjectionDB", "func=func(t *testing.T) *database/sql.DB|recv=<nil>|arg=*testing.T|results=(*database/sql.DB)", "func=func(t *testing.T) (*database/sql.DB, string)|recv=<nil>|arg=*testing.T|results=(*database/sql.DB,string)", 2, 1},
+		{"channel_delivery_process_supported_surface_test.go", "TestChannelDeliverySettlementWaitIncludesPlannedWork", "waitChannelDeliverySendsSettled", "func=func(t *testing.T, db *database/sql.DB, backend github.com/division-sh/swarm/internal/servedparity.Backend)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/servedparity.Backend|results=()", "func=func(t *testing.T, db *database/sql.DB, observation interface{CountUnsettledResponsibilities(context.Context) (int, error)})|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/store/storetest.ChannelObservation|results=()", 1, 1},
+		{"channel_delivery_settlement_diagnostic_test.go", "TestChannelDeliverySettlementDiagnosticBothStores", "waitChannelDeliverySendsSettled", "func=func(t *testing.T, db *database/sql.DB, backend github.com/division-sh/swarm/internal/servedparity.Backend)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/servedparity.Backend|results=()", "func=func(t *testing.T, db *database/sql.DB, observation interface{CountUnsettledResponsibilities(context.Context) (int, error)})|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/store/storetest.ChannelObservation|results=()", 1, 1},
+		{"channel_source_lifecycle_supported_surface_test.go", "TestChannelSourceLifecyclePublicJourney", "waitChannelDeliverySendsSettled", "func=func(t *testing.T, db *database/sql.DB, backend github.com/division-sh/swarm/internal/servedparity.Backend)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/servedparity.Backend|results=()", "func=func(t *testing.T, db *database/sql.DB, observation interface{CountUnsettledResponsibilities(context.Context) (int, error)})|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/store/storetest.ChannelObservation|results=()", 3, 3},
+	} {
+		old := authorityDebtSite{
+			Kind: "raw-operation", File: "internal/serveapp/" + call.file, Declaration: call.declaration,
+			Operation: "call:github.com/division-sh/swarm/internal/serveapp." + call.operation, Resolved: call.before,
+			Family: "channel", Replacement: "selected channel/delivery owner and named channel fault/readback", Multiplicity: call.oldCount,
+		}
+		current := old
+		current.Resolved, current.Multiplicity = call.after, call.newCount
+		pairs[index] = [2]authorityDebtSite{old, current}
+	}
+	return pairs
+}
+
+// Historical baseline allowances differ from actual source counts for these two keys only.
+func debtChannelCrashWaiterCountedTransitions() [2][3]authorityDebtSite {
+	return [2][3]authorityDebtSite{
+		{
+			{Kind: "raw-operation", File: "internal/serveapp/channel_ack_process_supported_surface_test.go", Declaration: "TestChannelActionAcknowledgmentAbruptProcessDeathPublicJourney", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitChannelDeliverySendsSettled", Resolved: "func=func(t *testing.T, db *database/sql.DB, backend github.com/division-sh/swarm/internal/servedparity.Backend)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/servedparity.Backend|results=()", Family: "channel", Replacement: "selected channel/delivery owner and named channel fault/readback", Multiplicity: 2},
+			{Kind: "raw-operation", File: "internal/serveapp/channel_ack_process_supported_surface_test.go", Declaration: "TestChannelActionAcknowledgmentAbruptProcessDeathPublicJourney", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitChannelDeliverySendsSettled", Resolved: "func=func(t *testing.T, db *database/sql.DB, backend github.com/division-sh/swarm/internal/servedparity.Backend)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/servedparity.Backend|results=()", Family: "channel", Replacement: "selected channel/delivery owner and named channel fault/readback", Multiplicity: 1},
+			{Kind: "raw-operation", File: "internal/serveapp/channel_ack_process_supported_surface_test.go", Declaration: "TestChannelActionAcknowledgmentAbruptProcessDeathPublicJourney", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitChannelDeliverySendsSettled", Resolved: "func=func(t *testing.T, db *database/sql.DB, observation interface{CountUnsettledResponsibilities(context.Context) (int, error)})|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/store/storetest.ChannelObservation|results=()", Family: "channel", Replacement: "selected channel/delivery owner and named channel fault/readback", Multiplicity: 1},
+		},
+		{
+			{Kind: "raw-operation", File: "internal/serveapp/channel_delivery_process_supported_surface_test.go", Declaration: "TestChannelDeliveryAbruptProcessDeathPublicJourney", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitChannelDeliverySendsSettled", Resolved: "func=func(t *testing.T, db *database/sql.DB, backend github.com/division-sh/swarm/internal/servedparity.Backend)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/servedparity.Backend|results=()", Family: "channel", Replacement: "selected channel/delivery owner and named channel fault/readback", Multiplicity: 2},
+			{Kind: "raw-operation", File: "internal/serveapp/channel_delivery_process_supported_surface_test.go", Declaration: "TestChannelDeliveryAbruptProcessDeathPublicJourney", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitChannelDeliverySendsSettled", Resolved: "func=func(t *testing.T, db *database/sql.DB, backend github.com/division-sh/swarm/internal/servedparity.Backend)|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/servedparity.Backend|results=()", Family: "channel", Replacement: "selected channel/delivery owner and named channel fault/readback", Multiplicity: 1},
+			{Kind: "raw-operation", File: "internal/serveapp/channel_delivery_process_supported_surface_test.go", Declaration: "TestChannelDeliveryAbruptProcessDeathPublicJourney", Operation: "call:github.com/division-sh/swarm/internal/serveapp.waitChannelDeliverySendsSettled", Resolved: "func=func(t *testing.T, db *database/sql.DB, observation interface{CountUnsettledResponsibilities(context.Context) (int, error)})|recv=<nil>|arg=*testing.T|arg=*database/sql.DB|arg=github.com/division-sh/swarm/internal/store/storetest.ChannelObservation|results=()", Family: "channel", Replacement: "selected channel/delivery owner and named channel fault/readback", Multiplicity: 1},
+		},
+	}
+}
+
 func debtRunFixtureSignatureComparisons(actual, head, base, source map[string]authorityDebtSite) (map[string]authorityDebtSite, map[string]authorityDebtSite, map[string]authorityDebtSite, []string) {
 	runFixtures, selectedFixtures := debtRunFixtureSignatureTransitions(), debtSelectedFixtureSignatureTransitions()
 	w1Fixtures := debtW1RunObservationSignatureTransitions()
@@ -669,6 +709,8 @@ func debtRunFixtureSignatureComparisons(actual, head, base, source map[string]au
 	pairs = append(pairs, w2Evidence[:]...)
 	channelPreparation := debtChannelCrashPreparationSignatureTransitions()
 	pairs = append(pairs, channelPreparation[:]...)
+	channelObservation := debtChannelObservationSignatureTransitions()
+	pairs = append(pairs, channelObservation[:]...)
 	for index, pair := range pairs {
 		old, current := pair[0], pair[1]
 		for _, state := range []map[string]authorityDebtSite{actual, head, base, source} {
@@ -684,6 +726,25 @@ func debtRunFixtureSignatureComparisons(actual, head, base, source map[string]au
 			head = debtForwardQuiescenceUncertainty(head, old, current)
 			base = debtForwardQuiescenceUncertainty(base, old, current)
 			source = debtForwardQuiescenceUncertainty(source, old, current)
+		}
+	}
+	for _, row := range debtChannelCrashWaiterCountedTransitions() {
+		baselineOld, sourceOld, current := row[0], row[1], row[2]
+		for _, state := range []map[string]authorityDebtSite{actual, head, base, source} {
+			if state[sourceOld.identity()].Multiplicity > 0 && state[current.identity()].Multiplicity > 0 {
+				return head, base, source, []string{"both reviewed crash-waiter identities survive: " + sourceOld.Declaration}
+			}
+		}
+		headOld := head[baselineOld.identity()] == baselineOld && head[current.identity()].Multiplicity == 0
+		headLanded := head[current.identity()] == current && head[baselineOld.identity()].Multiplicity == 0
+		sourcePredecessor := source[sourceOld.identity()] == sourceOld && source[current.identity()].Multiplicity == 0
+		sourceLanded := source[current.identity()] == current && source[sourceOld.identity()].Multiplicity == 0
+		if actual[current.identity()] == current && actual[sourceOld.identity()].Multiplicity == 0 &&
+			base[baselineOld.identity()] == baselineOld && base[current.identity()].Multiplicity == 0 &&
+			(headOld || headLanded) && (sourcePredecessor || sourceLanded) {
+			head = debtForwardQuiescenceUncertainty(head, baselineOld, current)
+			base = debtForwardQuiescenceUncertainty(base, baselineOld, current)
+			source = debtForwardQuiescenceUncertainty(source, sourceOld, current)
 		}
 	}
 	// The selected-owner calls may already be landed while their allowance
@@ -2820,6 +2881,11 @@ func debtValidateCollectorIdentity(base, current string, trusted, head authority
 	}
 	if base == current && trusted.Collector == current && head.Collector == current {
 		return nil
+	}
+	if base == debtR241CollectorTo && trusted.Collector == base &&
+		current == debtChannelObservationCollectorTo && reviewedTransition == current && head.Collector == current &&
+		debtSitesEqual(head.Sites, trusted.Sites) {
+		return nil // #3073/6905619550: six exact counted correspondences; baseline bytes/sites unchanged.
 	}
 	if base == debtR241CollectorFrom && trusted.Collector == base &&
 		current == debtR241CollectorTo && authorityDebtHex(current, 64) && reviewedTransition == current && head.Collector == current &&
