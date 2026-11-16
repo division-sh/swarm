@@ -146,12 +146,6 @@ group.cross.requested:
 `
 	writeClosedVariantFile(t, root, "events.yaml", groupEvents)
 	applyClosedReplacement(t, filepath.Join(root, "envelope/schema.yaml"), "inputs: [opened, root.audit, cross.requested]", "inputs: [opened, root.audit, cross.requested, group.opened, group.cross.requested]\noutputs: [opened, cross.requested]")
-	eventsPath := filepath.Join(root, "envelope/events.yaml")
-	raw, err := os.ReadFile(eventsPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	writeClosedVariantFile(t, root, "envelope/events.yaml", string(raw)+groupEvents)
 	writeClosedVariantFile(t, root, "envelope/nodes.yaml", `forward:
   group.opened:
     emit: {event: opened, fields: {account_id: payload.account_id, ticket_id: payload.ticket_id}}
