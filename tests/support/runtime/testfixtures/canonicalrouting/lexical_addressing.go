@@ -78,6 +78,51 @@ func UseCrossInstanceAgentReceiver(t testing.TB, root string, shape CrossInstanc
 	writeClosedVariantFile(t, root, filepath.Join(flow, "agents.yaml"), "receiver:\n  model: regular\n  intent:\n    inline: Consume the selected cross-instance event.\n  subscriptions: ["+event+"]\n")
 }
 
+func AddCrossInstanceKeylessIntermediate(t testing.TB, root string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(root, "account/bridge"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(filepath.Join(root, "account/audit"), filepath.Join(root, "account/bridge/audit")); err != nil {
+		t.Fatal(err)
+	}
+	writeClosedVariantFile(t, root, "account/bridge/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+	writeClosedVariantFile(t, root, "account/bridge/schema.yaml", "stages: []\n")
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "to: account/audit}", "to: account/bridge/audit}")
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "to: account/audit,", "to: account/bridge/audit,")
+	applyClosedReplacement(t, filepath.Join(root, "account/schema.yaml"), "to: audit}", "to: bridge/audit}")
+}
+
+func AddCrossInstancePreparedAccount(t testing.TB, root string) {
+	t.Helper()
+	applyClosedReplacement(t, filepath.Join(root, "account/schema.yaml"), "inputs: [opened, root.audit, cross.forwarded]", "inputs: [opened, root.audit, cross.forwarded, ticket.cross]")
+	applyClosedReplacement(t, filepath.Join(root, "account/nodes.yaml"), "  cross.forwarded: {}\n", "  cross.forwarded: {}\n  ticket.cross: {}\n")
+	path := filepath.Join(root, "schema.yaml")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeClosedVariantFile(t, root, "schema.yaml", string(raw)+"  - {event: ticket.cross, from: account/ticket, to: account, resolution: select-or-create, key_from: payload.target_account_id}\n")
+}
+
+func UseCrossInstanceFanOut(t testing.TB, root string) {
+	t.Helper()
+	applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "  target_account_id: text\n", "  target_account_id: text\n  targets: [text]\n")
+	applyClosedReplacement(t, filepath.Join(root, "account/ticket/nodes.yaml"), "    emit: {event: ticket.cross, fields: {target_account_id: payload.target_account_id}}", `    fan_out:
+      items_from: payload.targets
+      as: selected
+      identity: selected
+      emit:
+        event: ticket.cross
+        fields: {target_account_id: selected}`)
+}
+
+func BindCrossInstanceOuterKey(t testing.TB, root string) {
+	t.Helper()
+	applyClosedReplacement(t, filepath.Join(root, "envelope/schema.yaml"), "inputs:", "instance: envelope_id\ninputs:")
+	writeClosedVariantFile(t, root, "envelope/state.yaml", "envelope_id: text\n")
+}
+
 func CopyLexicalAddressing(t testing.TB, crossAccount bool) string {
 	t.Helper()
 	root := t.TempDir()
