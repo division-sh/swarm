@@ -321,6 +321,14 @@ func proveThreeWholeFanInMembers(t *testing.T, backend fanInBarrierConformanceSt
 	arrive("op-b", 22)
 	after := loadFanInBarrierPortfolio(t, ctx, runtime.pipeline, period)
 	if !reflect.DeepEqual(before, after) {
+		left, right := reflect.ValueOf(before), reflect.ValueOf(after)
+		var differingFields []string
+		for i := 0; i < left.NumField(); i++ {
+			if !reflect.DeepEqual(left.Field(i).Interface(), right.Field(i).Interface()) {
+				differingFields = append(differingFields, left.Type().Field(i).Name)
+			}
+		}
+		t.Logf("whole-member duplicate comparison: before=%#v after=%#v differing_fields=%v", before, after, differingFields)
 		t.Fatal("same business member changed the retained join")
 	}
 	if err := runtime.manager.Shutdown(); err != nil {

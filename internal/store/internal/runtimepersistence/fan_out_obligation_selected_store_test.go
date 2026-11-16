@@ -1419,6 +1419,14 @@ func TestRunForkFanOutMaterializationPreservesPrefixAndResumesIndependently(t *t
 					if err != nil {
 						t.Fatal(err)
 					}
+					point := request.Preparation.ForkPoint
+					request.ForkOperation = &runfork.ForkOperationRequest{
+						OperationID: uuid.NewString(), Actor: "selected-fanout-native-fixture", IdempotencyKey: uuid.NewString(),
+						TransportHash: "selected-fanout-native-fixture", SourceRunID: source.runID, ForkEventID: request.At,
+						ResolvedPoint: &point, TargetBundleHash: request.SourceArtifactFact.BundleHash(),
+						TargetRootReference: request.RootAdmission.Reference(), ContractSelection: request.ContractSelection,
+						DataPinOverrides: request.DataPinOverrides,
+					}
 					_, refusal = owner.(runforkexecution.SelectedContractForkLifecycle).MaterializeRunForkForSelectedContractExecution(ctx, request)
 				}
 				if refusal == nil || !strings.Contains(refusal.Error(), "cardinality") {
