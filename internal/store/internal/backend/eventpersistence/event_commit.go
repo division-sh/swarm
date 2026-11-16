@@ -474,12 +474,16 @@ func (s *EventPostgresOwner) CommitAPIEventPublication(ctx context.Context, comm
 	})
 	var acknowledged bool
 	result, acknowledged = outcome.Value()
+	return s.finishPostgresAPIEventPublication(ctx, command.Publication, result, acknowledged, outcome.Err())
+}
+
+func (s *EventPostgresOwner) finishPostgresAPIEventPublication(ctx context.Context, publication runtimebus.PublicationCommand, result runtimebus.CommittedAPIEventPublication, acknowledged bool, outcomeErr error) (runtimebus.CommittedAPIEventPublication, error) {
 	if !acknowledged {
-		return result, classifyPublicationFailure(ctx, s, command.Publication, outcome.Err())
+		return result, classifyPublicationFailure(ctx, s, publication, outcomeErr)
 	}
 	result.Acknowledged = true
 	result.Publication = result.Publication.WithCommitAcknowledgment()
-	return result, errors.Join(outcome.Err(), result.Validate(), s.publishChannelChanges(acknowledged, result.Publication.ChannelCardsChanged()))
+	return result, errors.Join(outcomeErr, result.Validate(), s.publishChannelChanges(acknowledged, result.Publication.ChannelCardsChanged()))
 }
 
 func (s *EventSQLiteOwner) CommitAPIEventPublication(ctx context.Context, command runtimebus.APIEventPublicationCommand) (result runtimebus.CommittedAPIEventPublication, err error) {
