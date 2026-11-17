@@ -82,6 +82,15 @@ type Controller struct {
 	supervising bool
 	nonce       string
 	waitRetry   func(context.Context, time.Duration) error
+	updateCtx   context.Context
+	updateSeal  chan struct{}
+	updateN     int
+	updateDone  chan struct{}
+	updateErr   error
+	genErr      error
+	sealOnce    sync.Once
+	sealErr     error
+	sealed      bool
 }
 
 func PreflightCloudflared(ctx context.Context, binary string) error {
@@ -131,7 +140,7 @@ func NewController(opts Options) (*Controller, error) {
 	if (opts.Mode == ModeNativeTLS) != (opts.TLSConfig != nil) {
 		return nil, fmt.Errorf("native public ingress requires its own TLS configuration")
 	}
-	controller := &Controller{opts: opts, done: make(chan struct{}), waitRetry: waitPublicRouteRetry}
+	controller := &Controller{opts: opts, done: make(chan struct{}), updateSeal: make(chan struct{}), waitRetry: waitPublicRouteRetry}
 	if opts.Listener != nil {
 		controller.listener = opts.Listener
 	}
@@ -171,7 +180,9 @@ func (c *Controller) Start(ctx context.Context) error {
 		return fmt.Errorf("public exposure controller is required")
 	}
 	ctx, cancel := context.WithCancel(ctx)
-	c.cancel = cancel
+	c.mu.Lock()
+	c.updateCtx, c.cancel = ctx, cancel
+	c.mu.Unlock()
 	listenAddress := strings.TrimSpace(c.opts.ListenAddress)
 	if c.opts.Mode == ModeManagedQuickTunnel {
 		listenAddress = "127.0.0.1:0"
@@ -216,13 +227,22 @@ func (c *Controller) Start(ctx context.Context) error {
 		return err
 	}
 	c.mu.Lock()
+	if c.sealed {
+		c.mu.Unlock()
+		return context.Canceled
+	}
 	c.supervising = true
 	c.mu.Unlock()
 	go c.supervise(ctx)
 	return nil
 }
 
-func (c *Controller) establish(ctx context.Context) error {
+func (c *Controller) establish(ctx context.Context) (err error) {
+	ctx, finish, err := c.beginUpdate(ctx, true)
+	if err != nil {
+		return err
+	}
+	defer func() { finish(err) }()
 	publicOrigin := strings.TrimRight(strings.TrimSpace(c.opts.PublicOrigin), "/")
 	var process Process
 	succeeded := false
@@ -231,10 +251,7 @@ func (c *Controller) establish(ctx context.Context) error {
 			return
 		}
 		_ = process.Stop()
-		select {
-		case <-process.Done():
-		case <-time.After(5 * time.Second):
-		}
+		<-process.Done()
 		if c.opts.Readiness != nil {
 			c.opts.Readiness.RevokeExposure("public exposure generation did not converge")
 		}
@@ -248,7 +265,11 @@ func (c *Controller) establish(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		process, err = launcher.Launch(ctx, c.listener.Addr().String(), metricsAddress, c.opts.CloudflaredBinary)
+		processCtx := c.updateCtx
+		if processCtx == nil {
+			processCtx = ctx
+		}
+		process, err = launcher.Launch(processCtx, c.listener.Addr().String(), metricsAddress, c.opts.CloudflaredBinary)
 		if err != nil {
 			return fmt.Errorf("start cloudflared quick tunnel: %w", err)
 		}
@@ -288,7 +309,10 @@ func (c *Controller) establish(ctx context.Context) error {
 func (c *Controller) supervise(ctx context.Context) {
 	defer close(c.done)
 	if c.opts.Mode != ModeManagedQuickTunnel {
-		<-ctx.Done()
+		select {
+		case <-ctx.Done():
+		case <-c.updateSeal:
+		}
 		return
 	}
 	for {
@@ -300,6 +324,8 @@ func (c *Controller) supervise(ctx context.Context) {
 		}
 		select {
 		case <-ctx.Done():
+			return
+		case <-c.updateSeal:
 			return
 		case cause := <-process.Done():
 			if ctx.Err() != nil {
@@ -314,12 +340,19 @@ func (c *Controller) supervise(ctx context.Context) {
 				select {
 				case <-ctx.Done():
 					return
+				case <-c.updateSeal:
+					return
 				case <-time.After(backoff):
 				}
 				last = c.establish(ctx)
 				if last == nil {
 					log.Printf("public ingress restored with generation %s", c.Generation().ID)
 					break
+				}
+				select {
+				case <-c.updateSeal:
+					return
+				default:
 				}
 				if attempt == 2 && c.opts.OnFatal != nil {
 					c.opts.OnFatal(fmt.Errorf("public tunnel re-establishment failed after 3 attempts: %w", last))
@@ -330,7 +363,7 @@ func (c *Controller) supervise(ctx context.Context) {
 	}
 }
 
-func (c *Controller) Renew(ctx context.Context) error {
+func (c *Controller) renew(ctx context.Context) error {
 	generation := c.Generation()
 	if generation.ID == "" {
 		return fmt.Errorf("public exposure generation is unavailable")
@@ -351,6 +384,111 @@ func (c *Controller) Renew(ctx context.Context) error {
 	return nil
 }
 
+func (c *Controller) Renew(ctx context.Context) error {
+	_, reachability, registration := c.renewPass(ctx, false)
+	return errors.Join(reachability, registration)
+}
+
+func (c *Controller) RenewRegistrations(ctx context.Context) (bool, error, error) {
+	return c.renewPass(ctx, true)
+}
+
+func (c *Controller) renewPass(ctx context.Context, register bool) (selected bool, reachability, registration error) {
+	ctx, finish, err := c.beginUpdate(ctx, false)
+	if err != nil {
+		return false, err, nil
+	}
+	defer func() { finish(errors.Join(reachability, registration)) }()
+	reachability = c.renew(ctx)
+	if reachability == nil && register && c.opts.OnGeneration != nil {
+		registration = c.opts.OnGeneration(ctx, c.Generation())
+	}
+	return true, reachability, registration
+}
+
+func (c *Controller) beginUpdate(ctx context.Context, generation bool) (context.Context, func(error), error) {
+	c.mu.Lock()
+	if err := ctx.Err(); err != nil {
+		c.mu.Unlock()
+		return ctx, nil, err
+	}
+	if c.sealed {
+		c.mu.Unlock()
+		return ctx, nil, context.Canceled
+	}
+	if c.updateN == 0 {
+		c.updateDone = make(chan struct{})
+	}
+	c.updateN++
+	parent := c.updateCtx
+	c.mu.Unlock()
+	ctx, cancel := context.WithCancel(ctx)
+	var stopBridge func() bool
+	if parent != nil && !generation {
+		stopBridge = context.AfterFunc(parent, cancel)
+	}
+	return ctx, func(result error) {
+		if stopBridge != nil {
+			stopBridge()
+		}
+		cancel()
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		if generation {
+			if c.supervising || c.sealed {
+				c.genErr = result
+			}
+		} else if c.sealed {
+			c.updateErr = errors.Join(c.updateErr, result)
+		}
+		c.updateN--
+		if c.updateN == 0 {
+			close(c.updateDone)
+		}
+	}, nil
+}
+
+func (c *Controller) UpdateAdmissionClosed() <-chan struct{} { return c.updateSeal }
+
+// SealUpdates joins selected writers but retains the actual serving dependency.
+// Stop owns their final errors; a caller must not report the same cache twice.
+func (c *Controller) SealUpdates(ctx context.Context) {
+	if c == nil {
+		return
+	}
+	c.sealOnce.Do(func() {
+		c.mu.Lock()
+		c.sealed = true
+		if c.updateSeal != nil {
+			close(c.updateSeal)
+		}
+		joined, cancel := c.updateDone, c.cancel
+		var supervisorDone <-chan struct{}
+		if c.supervising {
+			supervisorDone = c.done
+		}
+		c.mu.Unlock()
+		if cancel != nil {
+			stop := context.AfterFunc(ctx, cancel)
+			defer stop()
+		}
+		for _, done := range []<-chan struct{}{joined, supervisorDone} {
+			if done == nil {
+				continue
+			}
+			select {
+			case <-done:
+			case <-ctx.Done():
+				c.sealErr = ctx.Err()
+				if cancel != nil {
+					cancel()
+				}
+				<-done
+			}
+		}
+	})
+}
+
 func (c *Controller) Generation() Generation {
 	if c == nil {
 		return Generation{}
@@ -364,44 +502,39 @@ func (c *Controller) Stop(ctx context.Context) error {
 	if c == nil {
 		return nil
 	}
+	c.SealUpdates(ctx)
 	if c.cancel != nil {
 		c.cancel()
 	}
 	c.mu.RLock()
 	process := c.process
-	supervising := c.supervising
 	c.mu.RUnlock()
 	if process != nil {
 		_ = process.Stop()
+		<-process.Done()
+	}
+	shutdownErr := c.CloseListener(ctx)
+	if c.opts.Readiness != nil {
+		c.opts.Readiness.RevokeExposure("serve shutdown")
+	}
+	return errors.Join(c.sealErr, c.genErr, c.updateErr, shutdownErr)
+}
+
+func (c *Controller) CloseListener(ctx context.Context) error {
+	if c == nil {
+		return nil
 	}
 	var shutdownErr error
 	if c.server != nil {
 		shutdownErr = c.server.Shutdown(ctx)
 		// Shutdown can precede Serve registering its listener. Join that handoff
 		// before returning ownership to the caller, including failed startup.
-		select {
-		case <-c.serverDone:
-		case <-ctx.Done():
-			shutdownErr = ctx.Err()
+		if shutdownErr != nil {
+			shutdownErr = errors.Join(shutdownErr, c.server.Close())
 		}
+		<-c.serverDone
 	} else if c.listener != nil {
 		_ = c.listener.Close()
-	}
-	if c.opts.Readiness != nil {
-		c.opts.Readiness.RevokeExposure("serve shutdown")
-	}
-	if supervising {
-		select {
-		case <-c.done:
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	} else if process != nil {
-		select {
-		case <-process.Done():
-		case <-ctx.Done():
-			return ctx.Err()
-		}
 	}
 	return shutdownErr
 }
