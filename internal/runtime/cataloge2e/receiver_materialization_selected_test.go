@@ -45,6 +45,31 @@ func proveNestedAuthoredSelectorFork(t *testing.T) {
 			for _, key := range []string{"source", "target"} {
 				h.publishAndWait(catalogTriggerStep{Event: "opened", Payload: map[string]any{"account_id": key, "ticket_id": "ticket"}}, catalogRuntimePublishTimeout)
 			}
+			instances, err := h.workflow.ListWorkflowInstances(ctx, catalogRuntimeRunID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			accounts := make(map[string]events.RouteIdentity)
+			for _, instance := range instances {
+				if instance.WorkflowName == "account" && (instance.InstanceKey == "source" || instance.InstanceKey == "target") {
+					if _, duplicate := accounts[instance.InstanceKey]; duplicate || instance.Fields["account_id"] != instance.InstanceKey {
+						t.Fatalf("account construction disagrees with authored key: %+v", instance)
+					}
+					accounts[instance.InstanceKey] = events.RouteIdentity{FlowID: instance.WorkflowName, FlowInstance: instance.StorageRef, EntityID: instance.EntityID}
+				}
+			}
+			var sourceTicket events.RouteIdentity
+			for _, instance := range instances {
+				if instance.WorkflowName == "account/ticket" && instance.ParentFlowInstance == accounts["source"].FlowInstance && instance.InstanceKey == "ticket" {
+					if sourceTicket.FlowID != "" || instance.ParentEntityID != accounts["source"].EntityID || instance.Fields["ticket_id"] != "ticket" {
+						t.Fatalf("source ticket construction disagrees with its parent/key: %+v", instance)
+					}
+					sourceTicket = events.RouteIdentity{FlowID: instance.WorkflowName, FlowInstance: instance.StorageRef, EntityID: instance.EntityID}
+				}
+			}
+			if len(accounts) != 2 || sourceTicket.FlowID == "" {
+				t.Fatalf("independent source/target constructions missing: %+v", instances)
+			}
 			h.publishAndWait(catalogTriggerStep{Event: "cross.requested", Payload: map[string]any{"source_account_id": "source", "ticket_id": "ticket", "target_account_id": "target"}}, catalogRuntimePublishTimeout)
 			h.waitForCatalogStoreQuiescence(catalogRuntimePublishTimeout)
 			public, err := catalogRunScopedOperatorEvents(h, catalogRuntimeRunID)
@@ -75,12 +100,18 @@ func proveNestedAuthoredSelectorFork(t *testing.T) {
 			if err != nil || !found || !admitted || schemaErr != nil || !schemaFound || admission.Binding().SchemaClass() != events.PayloadSchemaAuthored || admission.Binding().FlowID() != "account/ticket" || admission.Binding().SchemaDigest() != schema.AcceptanceSchemaDigest() {
 				t.Fatalf("stored native selector lost declared schema evidence: found=%t admitted=%t schema=%t errors=%v/%v binding=%+v", found, admitted, schemaFound, err, schemaErr, admission.Binding())
 			}
+			if selector.RoutingSource().Route() != sourceTicket {
+				t.Fatalf("native selector source=%+v, want independently constructed ticket=%+v", selector.RoutingSource().Route(), sourceTicket)
+			}
 			publication, found, err := selected.LoadPreparedPublishEvent(ctx, cut)
 			if err != nil || !found || len(publication.DeliveryRoutes) != 1 {
 				t.Fatalf("native C53 publication: %+v found=%t err=%v", publication, found, err)
 			}
 			original := publication.DeliveryRoutes[0]
 			route := original.Target.Route()
+			if route != accounts["target"] || publication.Event.Event().RoutingSource().Route() != sourceTicket {
+				t.Fatalf("native C53 source/target disagrees with independent constructions: source=%+v target=%+v want=%+v", publication.Event.Event().RoutingSource().Route(), route, accounts["target"])
+			}
 			captured, entity, found, err := runforkadmission.FixedConstructionForRoute(loaded.Source, plan, flowidentity.StoredRoute(route.FlowID, flowidentity.LogicalInstanceID(route.FlowInstance), route.FlowInstance))
 			if err != nil || !found || entity.Fields["cross_count"] != int64(0) {
 				t.Fatalf("C53 fixed-cut target: %+v found=%t err=%v", entity, found, err)

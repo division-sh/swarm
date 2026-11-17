@@ -113,7 +113,7 @@ func validateConformance2394Partition(policy Policy, names []string) ([][]string
 			}
 		}
 		want := 0
-		if old.MatchString(name) && name != conformance2394Soak && name != conformanceRebalancedReporterRoot {
+		if (old.MatchString(name) && name != conformance2394Soak && name != conformanceRebalancedReporterRoot) || name == "TestFanOutDeliveryBarrierCompletesThroughRealEventBusAndPublicReadbackOnBothBackends" {
 			want = 1
 		}
 		if owners != want {
