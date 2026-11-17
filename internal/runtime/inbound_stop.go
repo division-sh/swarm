@@ -3,10 +3,13 @@ package runtime
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	"github.com/division-sh/swarm/internal/runtime/publicingress"
 )
 
 // PrepareInboundStop holds new publications while accepted target creation joins.
@@ -250,6 +253,19 @@ func (u *InboundPublicationUse) HandleResolvedWebhook(w http.ResponseWriter, req
 	if !ownsInboundTarget(u.context, target) {
 		http.Error(w, "ingress target is unavailable", http.StatusServiceUnavailable)
 		return
+	}
+	// Validate the declaration before resolving its authenticated account key.
+	if registration, managed := publicingress.CurrentRegistrationTarget(request.Context()); managed {
+		if strings.TrimSpace(registration.BundleHash) != strings.TrimSpace(target.BundleHash) ||
+			strings.TrimSpace(registration.FlowPath) != strings.TrimSpace(target.FlowPath) ||
+			registration.Alias != target.Alias || registration.Provider != target.Provider ||
+			!registration.AdmissionPlanGeneration.Equal(target.AdmissionPlan.Generation()) ||
+			strings.TrimSpace(registration.SigningCredentialKey) == "" {
+			http.Error(w, fmt.Sprintf("ingress target %q provider %q contradicts the current provider registration", target.Alias, target.Provider), http.StatusServiceUnavailable)
+			return
+		}
+		target.SigningSecret = registration.SigningCredentialKey
+		target.RegisteredOperationID = registration.RegisteredOperationID
 	}
 	target.storeOnly = u.executed == nil
 	u.runtime.InboundGateway.HandleResolvedWebhook(w, request.WithContext(u.ctx), target, u.context.Source)
