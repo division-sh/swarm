@@ -55,7 +55,9 @@ func (s *processLifecycleSupervisor) beginInboundStop() *serveInboundStop {
 		s.stopRunStalled()
 		s.stopRunStalled = nil
 	}
-	var additional []*runtime.Runtime
+	s.mu.RLock()
+	additional := []*runtime.Runtime{s.currentRT}
+	s.mu.RUnlock()
 	for _, candidate := range s.resetContexts {
 		additional = append(additional, candidate.runtime)
 	}
