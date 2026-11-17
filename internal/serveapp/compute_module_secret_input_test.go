@@ -42,21 +42,26 @@ func TestComputeModuleSecretInputNativeBoundaryBothStores(t *testing.T) {
 			if len(uses) != 1 || uses[0].Kind != "compute_module" || uses[0].Role != "private_key" || uses[0].FlowID != "." || uses[0].Name != worker.Key()+"/compute.requested/inspect_key/rules[0]: compute_module" {
 				t.Fatalf("exact compute requirement was lost: %#v", uses)
 			}
-			publish := func(label string) servedEventPublishRPCResult {
+			publish := func(label, document string) servedEventPublishRPCResult {
 				return requireServedEventPublishRPCResult(t, fixture.Endpoint, map[string]any{
 					"event_name": "compute.requested", "bundle_hash": fixture.BundleHash,
-					"payload": map[string]any{"document": "x"}, "idempotency_key": label,
+					"payload": map[string]any{"document": document}, "idempotency_key": label,
 				})
 			}
-			for index, value := range values {
-				if err := file.Set(t.Context(), key, value); err != nil {
+			for index, tc := range []struct {
+				value, document string
+				want            bool
+			}{
+				{values[0], "x", true}, {values[1], "x", false}, {values[0], "y", false},
+			} {
+				if err := file.Set(t.Context(), key, tc.value); err != nil {
 					t.Fatal(err)
 				}
-				started := publish(fmt.Sprintf("secret-%d", index))
+				started := publish(fmt.Sprintf("secret-%d", index), tc.document)
 				entity := requireServedEventPublishEntityState(t, db, backend, started.RunID, "", "done")
 				var readback operatorread.OperatorEntityFull
 				requireServedJSONRPCResult(t, fixture.Endpoint, "entity.get", map[string]any{"run_id": started.RunID, "entity_id": entity}, &readback)
-				if readback.Fields["seen"] != (index == 0) {
+				if readback.Fields["seen"] != tc.want {
 					t.Fatalf("guest did not consume the current key: fields=%#v", readback.Fields)
 				}
 				var public json.RawMessage
@@ -70,7 +75,7 @@ func TestComputeModuleSecretInputNativeBoundaryBothStores(t *testing.T) {
 			if err := file.Delete(t.Context(), key); err != nil {
 				t.Fatal(err)
 			}
-			failed := publish("secret-missing")
+			failed := publish("secret-missing", "x")
 			waitServedEventPublishDeliveryStatusCount(t, db, backend, failed.EventID, "node", worker.Key(), "dead_letter", 1)
 			requireServedEventPublishEntityState(t, db, backend, failed.RunID, "", "waiting")
 			query := "SELECT COUNT(*) FROM events WHERE event_name='compute.completed' AND CAST(run_id AS TEXT)=?"
@@ -132,8 +137,22 @@ func TestComputeModuleSecretInputNativeBoundaryBothStores(t *testing.T) {
 					t.Fatalf("read/close native evidence: %v / %v", err, closeErr)
 				}
 			}
-			if len(traces) != 2 || traces[0].InputHash != traces[1].InputHash || traces[0].OutputHash == traces[1].OutputHash {
-				t.Fatal("native replay evidence changed safe input identity or lost ordinary output identity")
+			groups := map[string]map[string]bool{}
+			for _, trace := range traces {
+				if groups[trace.InputHash] == nil {
+					groups[trace.InputHash] = map[string]bool{}
+				}
+				groups[trace.InputHash][trace.OutputHash] = true
+			}
+			if len(traces) != 3 || len(groups) != 2 {
+				t.Fatal("native replay input identity did not separate ordinary input from key rotation")
+			}
+			var equalInputsDifferentOutputs bool
+			for _, outputs := range groups {
+				equalInputsDifferentOutputs = equalInputsDifferentOutputs || len(outputs) == 2
+			}
+			if !equalInputsDifferentOutputs {
+				t.Fatal("normal output evidence did not retain the changed-key result")
 			}
 			if code := process.stop(); code != 0 {
 				t.Fatal("native boundary shutdown did not join", code)
@@ -150,8 +169,8 @@ func TestComputeModuleSecretInputNativeBoundaryBothStores(t *testing.T) {
 func computeSecretNativeSource(t *testing.T, key string) string {
 	t.Helper()
 	root := t.TempDir()
-	// A first-party, non-signing guest reads the first byte of the named input.
-	// Its output deliberately contains only a boolean, not the input value.
+	// Both the ordinary document and named key determine this non-signing result.
+	// The output contains only a boolean, not either input value.
 	offset := len(`{"document":"x","private_key":"`)
 	wasm, err := wasmtime.Wat2Wasm(fmt.Sprintf(`(module
   (memory (export "memory") 1 1)
@@ -159,12 +178,14 @@ func computeSecretNativeSource(t *testing.T, key string) string {
   (data (i32.const 2048) "{\22seen\22:false}")
   (func (export "alloc") (param i32) (result i32) i32.const 4096)
   (func (export "compute") (param $p i32) (param i32) (result i64)
+    local.get $p i32.const %d i32.add i32.load8_u i32.const 120 i32.eq
     local.get $p i32.const %d i32.add i32.load8_u i32.const 65 i32.eq
+    i32.and
     if (result i64)
       i64.const %d
     else
       i64.const %d
-    end))`, offset, uint64(1024)<<32|uint64(len(`{"seen":true}`)), uint64(2048)<<32|uint64(len(`{"seen":false}`))))
+    end))`, len(`{"document":"`), offset, uint64(1024)<<32|uint64(len(`{"seen":true}`)), uint64(2048)<<32|uint64(len(`{"seen":false}`))))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -203,7 +224,7 @@ sink:
     additionalProperties: false
     required: [document, private_key]
     properties:
-      document: {type: string}
+      document: {type: string, enum: [x, y]}
       private_key: {type: string}
   output_schema:
     type: object
