@@ -12,11 +12,9 @@ import (
 
 	"github.com/bytecodealliance/wasmtime-go/v46"
 	"github.com/division-sh/swarm/internal/operatorread"
-	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/computemodule"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/credentials"
-	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 func TestComputeModuleSecretInputNativeBoundaryBothStores(t *testing.T) {
@@ -36,7 +34,6 @@ func TestComputeModuleSecretInputNativeBoundaryBothStores(t *testing.T) {
 			}
 			root := computeSecretNativeSource(t, key)
 			process, fixture := startServedBoundaryFixture(t, backend, root)
-			db := storetest.DatabaseForTest(fixture.Selected.RuntimeDeps().EventStore)
 			uses := credentials.BuildRequirementUses(fixture.Runtime.Options.WorkflowModule.SemanticSource())[key]
 			worker := identitytest.RootNode(t, "worker")
 			if len(uses) != 1 || uses[0].Kind != "compute_module" || uses[0].Role != "private_key" || uses[0].FlowID != "." || uses[0].Name != worker.Key()+"/compute.requested/inspect_key/rules[0]: compute_module" {
@@ -58,9 +55,7 @@ func TestComputeModuleSecretInputNativeBoundaryBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				started := publish(fmt.Sprintf("secret-%d", index), tc.document)
-				entity := requireServedEventPublishEntityState(t, db, backend, started.RunID, "", "done")
-				var readback operatorread.OperatorEntityFull
-				requireServedJSONRPCResult(t, fixture.Endpoint, "entity.get", map[string]any{"run_id": started.RunID, "entity_id": entity}, &readback)
+				readback := computeSecretNativeEntity(t, fixture.Endpoint, started.RunID, "done")
 				if readback.Fields["seen"] != tc.want {
 					t.Fatalf("guest did not consume the current key: fields=%#v", readback.Fields)
 				}
@@ -76,66 +71,59 @@ func TestComputeModuleSecretInputNativeBoundaryBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			failed := publish("secret-missing", "x")
-			waitServedEventPublishDeliveryStatusCount(t, db, backend, failed.EventID, "node", worker.Key(), "dead_letter", 1)
-			requireServedEventPublishEntityState(t, db, backend, failed.RunID, "", "waiting")
-			query := "SELECT COUNT(*) FROM events WHERE event_name='compute.completed' AND CAST(run_id AS TEXT)=?"
-			if backend == "postgres" {
-				query = strings.Replace(query, "?", "$1", 1)
+			deadline := time.Now().Add(15 * time.Second)
+			for {
+				var event operatorread.OperatorEventFull
+				requireServedJSONRPCResult(t, fixture.Endpoint, "event.get", map[string]any{"event_id": failed.EventID}, &event)
+				matches := 0
+				for _, delivery := range event.Deliveries {
+					if delivery.SubscriberType == "node" && delivery.SubscriberID == worker.Key() && delivery.Status == "dead_letter" {
+						matches++
+					}
+				}
+				if event.EventID != failed.EventID || event.RunID != failed.RunID || matches > 1 {
+					t.Fatal("failed recipient identity changed")
+				}
+				if matches == 1 {
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatal("private invocation did not reach its exact terminal recipient")
+				}
+				time.Sleep(50 * time.Millisecond)
 			}
-			var count int
-			if err := db.QueryRowContext(t.Context(), query, failed.RunID).Scan(&count); err != nil {
-				t.Fatal(err)
-			}
-			if count != 0 {
-				t.Fatal("failed private invocation published a partial result")
-			}
+			computeSecretNativeEntity(t, fixture.Endpoint, failed.RunID, "waiting")
 			ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 			defer cancel()
 			if err := fixture.Runtime.Bus.WaitForQuiescence(ctx); err != nil {
 				t.Fatal(err)
 			}
 			var traces []computemodule.ReplayEnvelope
-			for _, query := range []string{
-				"SELECT CAST(payload AS TEXT) FROM events",
-				"SELECT CAST(failure AS TEXT) FROM event_deliveries WHERE failure IS NOT NULL",
-			} {
-				rows, err := db.QueryContext(ctx, query)
+			completionCount := 0
+			for _, event := range computeSecretNativeEvents(t, fixture.Endpoint) {
+				if event.RunID == failed.RunID && event.EventName == "compute.completed" {
+					completionCount++
+				}
+				encoded, err := json.Marshal(event)
 				if err != nil {
 					t.Fatal(err)
 				}
-				for rows.Next() {
-					var encoded string
-					if err := rows.Scan(&encoded); err != nil {
-						rows.Close()
+				for _, canary := range values {
+					if strings.Contains(string(encoded), canary) {
+						t.Fatal("native journal/failure/log retained injected input")
+					}
+				}
+				detail, _ := event.Payload["details"].(map[string]any)
+				if detail["action"] == computemodule.ReplayEvidenceAction {
+					loaded, err := computemodule.DecodeReplayEvidenceDetail(detail)
+					if err != nil {
 						t.Fatal(err)
 					}
-					for _, canary := range values {
-						if strings.Contains(encoded, canary) {
-							rows.Close()
-							t.Fatal("native journal/failure/log retained injected input")
-						}
-					}
-					if query == "SELECT CAST(payload AS TEXT) FROM events" {
-						var payload map[string]any
-						if err := canonicaljson.DecodeInto([]byte(encoded), &payload); err != nil {
-							rows.Close()
-							t.Fatal(err)
-						}
-						detail, _ := payload["details"].(map[string]any)
-						if detail["action"] == computemodule.ReplayEvidenceAction {
-							loaded, err := computemodule.DecodeReplayEvidenceDetail(detail)
-							if err != nil {
-								rows.Close()
-								t.Fatal(err)
-							}
-							traces = append(traces, loaded...)
-						}
-					}
+					traces = append(traces, loaded...)
 				}
-				err = rows.Err()
-				if closeErr := rows.Close(); err != nil || closeErr != nil {
-					t.Fatalf("read/close native evidence: %v / %v", err, closeErr)
-				}
+			}
+			if completionCount != 0 {
+				t.Fatal("failed private invocation published a partial result")
 			}
 			groups := map[string]map[string]bool{}
 			for _, trace := range traces {
@@ -164,6 +152,78 @@ func TestComputeModuleSecretInputNativeBoundaryBothStores(t *testing.T) {
 			}
 		})
 	}
+}
+
+func computeSecretNativeEntity(t *testing.T, endpoint, runID, stage string) operatorread.OperatorEntityFull {
+	t.Helper()
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		var page operatorread.OperatorEntityListResult
+		requireServedJSONRPCResult(t, endpoint, "entity.list", map[string]any{"run_id": runID, "limit": 1000}, &page)
+		if page.NextCursor != "" || len(page.Entities) > 1 {
+			t.Fatal("entity census did not exhaust the exact single-root flow")
+		}
+		if len(page.Entities) == 1 {
+			entity := page.Entities[0]
+			if entity.RunID != runID {
+				t.Fatal("entity escaped the exact run")
+			}
+			if entity.CurrentState != nil && *entity.CurrentState == stage {
+				var full operatorread.OperatorEntityFull
+				requireServedJSONRPCResult(t, endpoint, "entity.get", map[string]any{"run_id": runID, "entity_id": entity.EntityID}, &full)
+				if full.Entity.EntityID != entity.EntityID || full.Entity.RunID != runID || full.Entity.CurrentState == nil || *full.Entity.CurrentState != stage {
+					t.Fatal("entity full view changed identity/state")
+				}
+				return full
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("exact run never reached %s", stage)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+func computeSecretNativeEvents(t *testing.T, endpoint string) map[string]operatorread.OperatorEventFull {
+	t.Helper()
+	var runs struct {
+		Runs       []operatorread.RunHeader `json:"runs"`
+		NextCursor string                   `json:"next_cursor"`
+	}
+	requireServedJSONRPCResult(t, endpoint, "run.list", map[string]any{"limit": 1000}, &runs)
+	if runs.NextCursor != "" || len(runs.Runs) >= 1000 {
+		t.Fatal("run census not exhausted")
+	}
+	events := map[string]operatorread.OperatorEventFull{}
+	for _, run := range runs.Runs {
+		var page operatorread.OperatorEventListResult
+		requireServedJSONRPCResult(t, endpoint, "event.list", map[string]any{"filter": map[string]any{"run_id": run.RunID}, "limit": 1000}, &page)
+		if page.NextCursor != "" || len(page.Events) >= 1000 {
+			t.Fatal("event census not exhausted")
+		}
+		for _, summary := range page.Events {
+			var full operatorread.OperatorEventFull
+			requireServedJSONRPCResult(t, endpoint, "event.get", map[string]any{"event_id": summary.EventID}, &full)
+			if full.EventID != summary.EventID || full.RunID != run.RunID {
+				t.Fatal("event full view changed identity/run")
+			}
+			events[full.EventID] = full
+		}
+	}
+	var logs operatorread.OperatorRuntimeLogListResult
+	requireServedJSONRPCResult(t, endpoint, "runtime.logs", map[string]any{"limit": 1000}, &logs)
+	if logs.NextCursor != "" || len(logs.Logs) >= 1000 {
+		t.Fatal("runtime-log census not exhausted")
+	}
+	for _, log := range logs.Logs {
+		var full operatorread.OperatorEventFull
+		requireServedJSONRPCResult(t, endpoint, "event.get", map[string]any{"event_id": log.LogID}, &full)
+		if full.EventID != log.LogID || full.RunID != log.RunID || full.EventName != "platform.runtime_log" {
+			t.Fatal("runtime-log raw event identity changed")
+		}
+		events[full.EventID] = full
+	}
+	return events
 }
 
 func computeSecretNativeSource(t *testing.T, key string) string {
