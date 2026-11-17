@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -56,8 +57,24 @@ func TestGracefulStopKeepsAlreadyLaunchedChannelSendUntilAcknowledgement(t *test
 type lateChannelNoticeRuntime struct {
 	channelAnchorLLMRuntime
 	entered, resume chan struct{}
-	completed       chan string
+	completed       chan lateChannelNoticeObservation
 	once            sync.Once
+	mu              sync.Mutex
+	expectedCall    string
+	overflow        atomic.Bool
+}
+
+type lateChannelNoticeObservation struct {
+	id  string
+	err error
+}
+
+func (r *lateChannelNoticeRuntime) observe(result lateChannelNoticeObservation) {
+	select {
+	case r.completed <- result:
+	default:
+		r.overflow.Store(true)
+	}
 }
 
 func (r *lateChannelNoticeRuntime) ContinueManagedSession(ctx context.Context, session *runtimellm.Session, call runtimellm.ManagedCall) (*runtimellm.Response, error) {
@@ -67,17 +84,24 @@ func (r *lateChannelNoticeRuntime) ContinueManagedSession(ctx context.Context, s
 	}
 	if strings.HasSuffix(call.Frame().Turn.Event.Type, "notice.requested") {
 		if message.Role == "tool" {
-			var result struct {
-				ID     string `json:"mailbox_id"`
-				Status string `json:"status"`
+			var batch []struct {
+				Name   string `json:"name"`
+				CallID string `json:"tool_call_id"`
+				OK     bool   `json:"ok"`
+				Result struct {
+					ID     string `json:"mailbox_id"`
+					Status string `json:"status"`
+				} `json:"result"`
 			}
-			if err := json.Unmarshal([]byte(message.Content), &result); err != nil || result.ID == "" || result.Status != "queued" {
-				return nil, fmt.Errorf("late notice tool result lacks its committed mailbox identity: %v", err)
-			}
-			select {
-			case r.completed <- result.ID:
-			case <-ctx.Done():
-				return nil, ctx.Err()
+			r.mu.Lock()
+			expected := r.expectedCall
+			r.mu.Unlock()
+			if err := json.Unmarshal([]byte(message.Content), &batch); err != nil || len(batch) != 1 || expected == "" ||
+				batch[0].Name != "notify_human" || batch[0].CallID != expected || !batch[0].OK ||
+				batch[0].Result.ID == "" || batch[0].Result.Status != "queued" {
+				r.observe(lateChannelNoticeObservation{err: fmt.Errorf("invalid successful notify_human result batch: %v", err)})
+			} else {
+				r.observe(lateChannelNoticeObservation{id: batch[0].Result.ID})
 			}
 		} else {
 			r.once.Do(func() { close(r.entered) })
@@ -88,13 +112,23 @@ func (r *lateChannelNoticeRuntime) ContinueManagedSession(ctx context.Context, s
 			}
 		}
 	}
-	return r.channelAnchorLLMRuntime.ContinueManagedSession(ctx, session, call)
+	response, err := r.channelAnchorLLMRuntime.ContinueManagedSession(ctx, session, call)
+	if strings.HasSuffix(call.Frame().Turn.Event.Type, "notice.requested") && message.Role != "tool" {
+		r.mu.Lock()
+		if err != nil || response == nil || len(response.ToolCalls) != 1 || response.ToolCalls[0].Name != "notify_human" || response.ToolCalls[0].ID == "" || r.expectedCall != "" {
+			r.observe(lateChannelNoticeObservation{err: fmt.Errorf("invalid or duplicate emitted notice call: %v", err)})
+		} else {
+			r.expectedCall = response.ToolCalls[0].ID
+		}
+		r.mu.Unlock()
+	}
+	return response, err
 }
 
 func TestGracefulStopSendsNoticeCreatedByAcceptedTurnAfterStoredIntakeBothStores(t *testing.T) {
 	for _, backend := range servedparity.RequiredBackends {
 		t.Run(string(backend), func(t *testing.T) {
-			model := &lateChannelNoticeRuntime{entered: make(chan struct{}), resume: make(chan struct{}), completed: make(chan string, 1)}
+			model := &lateChannelNoticeRuntime{entered: make(chan struct{}), resume: make(chan struct{}), completed: make(chan lateChannelNoticeObservation, 2)}
 			var resumeOnce sync.Once
 			resume := func() { resumeOnce.Do(func() { close(model.resume) }) }
 			defer resume()
@@ -156,18 +190,30 @@ func TestGracefulStopSendsNoticeCreatedByAcceptedTurnAfterStoredIntakeBothStores
 				t.Fatal(err)
 			}
 			resume()
-			var notice string
+			var observation lateChannelNoticeObservation
 			select {
-			case notice = <-model.completed:
+			case observation = <-model.completed:
 			case <-cut.Done():
-				t.Fatal("accepted turn did not commit its notice after stored intake opened")
+				t.Fatal("accepted notice tool continuation was not observed after stored intake opened")
 			}
+			if observation.err != nil {
+				t.Fatal(observation.err)
+			}
+			notice := observation.id
 			if err := accepted.Done(); err != nil {
 				t.Fatal(err)
 			}
 			process := h.process
 			code := process.stop()
 			h.process = nil
+			select {
+			case <-model.completed:
+				t.Error("duplicate late-notice model observation")
+			default:
+			}
+			if model.overflow.Load() {
+				t.Error("late-notice observation channel overflowed")
+			}
 			receipt, err := reader.HistoricalReceipt(t.Context(), notice)
 			if code != 0 || err != nil || receipt == "" {
 				t.Fatalf("accepted late notice lacks sent receipt at stop: exit=%d receipt=%q err=%v\n%s", code, receipt, err, process.outputString())
