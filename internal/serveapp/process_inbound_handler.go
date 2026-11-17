@@ -127,8 +127,6 @@ func serveAcquiredProcessWebhook(w http.ResponseWriter, r *http.Request, use *ru
 			http.Error(w, fmt.Sprintf("ingress target %q provider %q contradicts the current provider registration", alias, provider), http.StatusServiceUnavailable)
 			return
 		}
-		inbound.SigningSecret = registrationTarget.SigningCredentialKey
-		inbound.RegisteredOperationID = registrationTarget.RegisteredOperationID
 	}
 	use.HandleResolvedWebhook(w, r, inbound)
 }
