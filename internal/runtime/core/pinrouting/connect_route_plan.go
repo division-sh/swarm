@@ -2364,7 +2364,10 @@ func keyedAncestorConnectOwner(source semanticview.Source, connect runtimecontra
 		return "", false
 	}
 	input, found, err := source.ConnectionInputs().Input(connect)
-	if err != nil || !found {
+	if err != nil {
+		return source.ConnectionInputs().FailedSelectionOwner(connect)
+	}
+	if !found {
 		return "", false
 	}
 	selectionFlow := input.SelectionFlowID()
