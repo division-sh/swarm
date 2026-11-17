@@ -20,14 +20,18 @@ func validateReporterPartition(policy Policy) error {
 		}, false},
 		{"serveapp-i-reporter-all-commit", ServedReporterPackage, ServedReporterStressRun, ServedReporterGoTimeout, "full", []string{"TestIssue2394ServedOriginalReporterFiveHundredDelayedBothStores"}, true},
 		{"conformance-2394-reporter", SoakPackage, "^TestIssue2394ReporterFiveHundredDelayedCommitsBothStores$", "", "broad", []string{"TestIssue2394ReporterFiveHundredDelayedCommitsBothStores"}, true},
-		{"conformance-2394-reporter-window", SoakPackage, "^TestIssue2394ReporterFiveHundredServingWindowBothStores$", "", "broad", []string{"TestIssue2394ReporterFiveHundredServingWindowBothStores"}, false},
+		{"conformance-2394-reporter-window", SoakPackage, "^Test(FanOutDeliveryBarrierCompletesThroughRealEventBusAndPublicReadbackOnBothBackends|Issue2394ReporterFiveHundredServingWindowBothStores)$", "", "broad", []string{"TestIssue2394ReporterFiveHundredServingWindowBothStores", "TestFanOutDeliveryBarrierCompletesThroughRealEventBusAndPublicReadbackOnBothBackends"}, false},
 	} {
 		unit := policy.Units[family.id]
 		if !slices.Equal(unit.Packages, []string{family.pkg}) || unit.Run != family.run || unit.Skip != "" || unit.GoTimeout != family.timeout || unit.CountMode != "count-1" || unit.BudgetClass != family.budget || unit.EnvironmentID != "" || !reflect.DeepEqual(unit.EnvironmentIDs, managedEnvironmentIDs()) || len(unit.RequiredChildren) != len(family.roots) {
 			return fmt.Errorf("%s lost its exact complete reporter envelope: %+v", family.id, unit)
 		}
 		for _, root := range family.roots {
-			if !slices.Equal(unit.RequiredChildren[root], []string{"sqlite", "postgres"}) {
+			children := []string{"sqlite", "postgres"}
+			if root == "TestFanOutDeliveryBarrierCompletesThroughRealEventBusAndPublicReadbackOnBothBackends" {
+				children = append(children, "sqlite/hundred_settled_outcomes", "postgres/hundred_settled_outcomes")
+			}
+			if !slices.Equal(unit.RequiredChildren[root], children) {
 				return fmt.Errorf("%s lost a reporter backend: %v", root, unit.RequiredChildren[root])
 			}
 		}
