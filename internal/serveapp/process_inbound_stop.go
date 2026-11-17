@@ -74,6 +74,5 @@ func (s *serveInboundStop) Finish() error {
 	s.supervisor.mu.Lock()
 	s.supervisor.currentRT = nil
 	s.supervisor.mu.Unlock()
-	s.supervisor.inboundStopCancel()
 	return result
 }
