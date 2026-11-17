@@ -145,7 +145,12 @@ group.cross.requested:
   target_account_id: text
 `
 	writeClosedVariantFile(t, root, "events.yaml", groupEvents)
-	applyClosedReplacement(t, filepath.Join(root, "envelope/schema.yaml"), "inputs: [opened, root.audit, cross.requested]", "inputs: [opened, root.audit, cross.requested, group.opened, group.cross.requested]\noutputs: [opened, cross.requested]")
+	applyClosedReplacement(t, filepath.Join(root, "envelope/schema.yaml"), "inputs: [opened, root.audit, cross.requested]", "inputs: [opened, cross.requested, group.opened, group.cross.requested]\noutputs: [opened, cross.requested]")
+	applyClosedReplacement(t, filepath.Join(root, "envelope/schema.yaml"), "  - {event: root.audit, from: ., to: account, resolution: select}\n  - {event: root.audit, from: ., to: account/bridge/audit}\n", "")
+	applyClosedReplacement(t, filepath.Join(root, "envelope/account/schema.yaml"), "inputs: [opened, root.audit, cross.forwarded]", "inputs: [opened, cross.forwarded]")
+	applyClosedReplacement(t, filepath.Join(root, "envelope/account/nodes.yaml"), "  root.audit: {}\n", "")
+	applyClosedReplacement(t, filepath.Join(root, "envelope/account/bridge/audit/schema.yaml"), "inputs: [ticket.done, root.audit, ticket.cross]", "inputs: [ticket.done, ticket.cross]")
+	applyClosedReplacement(t, filepath.Join(root, "envelope/account/bridge/audit/nodes.yaml"), "  root.audit: {}\n", "")
 	writeClosedVariantFile(t, root, "envelope/nodes.yaml", `forward:
   group.opened:
     emit: {event: opened, fields: {account_id: payload.account_id, ticket_id: payload.ticket_id}}

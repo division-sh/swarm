@@ -103,6 +103,38 @@ func (p CompiledConnectionInputs) Input(connect FlowConnect) (CompiledConnection
 	return input, ok, nil
 }
 
+// FailedSelectionOwner preserves diagnostic placement without admitting input.
+func (p CompiledConnectionInputs) FailedSelectionOwner(connect FlowConnect) (string, bool) {
+	if p.value == nil {
+		return "", false
+	}
+	var failure *connectionSelectionFailure
+	if !errors.As(p.value.errors[connect.normalized()], &failure) {
+		return "", false
+	}
+	return failure.owner, true
+}
+
+type connectionSelectionFailure struct {
+	owner string
+	cause error
+}
+
+func (e *connectionSelectionFailure) Error() string { return e.cause.Error() }
+func (e *connectionSelectionFailure) Unwrap() error { return e.cause }
+
+type connectionSelection struct {
+	flow  string
+	owner string
+}
+
+func (s connectionSelection) failure(err error) error {
+	if s.owner != "" {
+		return &connectionSelectionFailure{owner: s.owner, cause: err}
+	}
+	return err
+}
+
 // Schema imports may still await composition; every other bound policy failure
 // must reject composition before the source becomes executable.
 func (p CompiledConnectionInputs) ValidateBindings() error {
@@ -131,18 +163,18 @@ func CompileConnectionInputs(bundle *WorkflowContractBundle, pins ConnectionInpu
 	}
 	for _, connect := range bundle.Semantics.CompositionConnects {
 		connect = connect.normalized()
-		selectionFlow, err := connectionSelectionFlow(bundle, connect)
+		selection, err := connectionSelectionFlow(bundle, connect)
 		if err != nil {
-			value.errors[connect] = err
+			value.errors[connect] = selection.failure(err)
 			continue
 		}
 		receiverFlow := connectEndpointFlowID(connect.OwnerFlowPath, connect.To)
-		if connect.Resolution == FlowInputResolutionModeNone && connect.KeyFrom == "" && selectionFlow == receiverFlow {
+		if connect.Resolution == FlowInputResolutionModeNone && connect.KeyFrom == "" && selection.flow == receiverFlow {
 			continue
 		}
-		input, err := compileConnectionInput(bundle, pins, connect, selectionFlow)
+		input, err := compileConnectionInput(bundle, pins, connect, selection.flow)
 		if err != nil {
-			value.errors[connect] = err
+			value.errors[connect] = selection.failure(err)
 			continue
 		}
 		value.inputs[connect] = input
@@ -190,18 +222,19 @@ func compileConnectionInput(bundle *WorkflowContractBundle, pins ConnectionInput
 	}}, nil
 }
 
-func connectionSelectionFlow(bundle *WorkflowContractBundle, connect FlowConnect) (string, error) {
+func connectionSelectionFlow(bundle *WorkflowContractBundle, connect FlowConnect) (connectionSelection, error) {
 	owner := normalizedConnectOwnerFlowPath(connect.OwnerFlowPath)
 	receiver := connectEndpointFlowID(owner, connect.To)
 	producer := connectEndpointFlowID(owner, connect.From)
+	ordinary := connectionSelection{flow: receiver}
 	view, found := bundle.FlowViewByID(receiver)
 	if !found {
-		return receiver, nil
+		return ordinary, nil
 	}
 	var keyed []string
 	for view.Paths.FlowPath != owner {
 		if view.Parent == nil {
-			return receiver, nil
+			return ordinary, nil
 		}
 		if schema, found := bundle.FlowSchemaByID(view.Paths.FlowPath); found && !schema.Instance.Empty() {
 			keyed = append(keyed, view.Paths.FlowPath)
@@ -209,21 +242,25 @@ func connectionSelectionFlow(bundle *WorkflowContractBundle, connect FlowConnect
 		view = view.Parent
 	}
 	if len(keyed) == 0 {
-		return receiver, nil
+		return ordinary, nil
 	}
 	boundary := keyed[len(keyed)-1]
 	properSender := strings.HasPrefix(producer, boundary+"/")
 	sameKeyed := producer == receiver && keyed[0] == receiver
 	if !sameKeyed && !(properSender && (receiver == boundary || strings.HasPrefix(receiver, boundary+"/"))) {
-		return receiver, nil
+		return ordinary, nil
+	}
+	selection := connectionSelection{flow: boundary}
+	if boundaryView, found := bundle.FlowViewByID(boundary); found && boundaryView.Parent != nil && boundaryView.Parent.Paths.FlowPath == owner {
+		selection.owner = owner
 	}
 	if len(keyed) > 1 {
-		return "", fmt.Errorf("connect can select only one keyed level below its owner; receiver %q requires %d", receiver, len(keyed))
+		return selection, fmt.Errorf("connect can select only one keyed level below its owner; receiver %q requires %d", receiver, len(keyed))
 	}
 	if receiver != boundary && connect.Resolution != FlowInputResolutionModeSelect {
-		return "", fmt.Errorf("connect to keyless receiver %q in another instance requires resolution: select", receiver)
+		return selection, fmt.Errorf("connect to keyless receiver %q in another instance requires resolution: select", receiver)
 	}
-	return boundary, nil
+	return selection, nil
 }
 
 func lexicallyBoundConnectionKeyError(bundle *WorkflowContractBundle, connect FlowConnect) error {
