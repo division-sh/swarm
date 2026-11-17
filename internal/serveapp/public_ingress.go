@@ -392,9 +392,8 @@ func startServePublicIngressRenewal(
 	ctx context.Context,
 	owner *worklifetime.Process,
 	exposure *runtimepublicingress.Controller,
-	reconcile func(context.Context, runtimepublicingress.Generation) error,
 ) error {
-	if owner == nil || exposure == nil || reconcile == nil {
+	if owner == nil || exposure == nil {
 		return fmt.Errorf("public ingress renewal dependencies are incomplete")
 	}
 	lease, err := owner.Begin(ctx)
@@ -409,13 +408,19 @@ func startServePublicIngressRenewal(
 			select {
 			case <-lease.Context().Done():
 				return
+			case <-exposure.UpdateAdmissionClosed():
+				return
 			case <-ticker.C:
-				if err := exposure.Renew(lease.Context()); err != nil {
-					log.Printf("public ingress reachability renewal failed: %v", err)
+				selected, reachability, registration := exposure.RenewRegistrations(lease.Context())
+				if !selected {
+					return
+				}
+				if reachability != nil {
+					log.Printf("public ingress reachability renewal failed: %v", reachability)
 					continue
 				}
-				if err := reconcile(lease.Context(), exposure.Generation()); err != nil {
-					log.Printf("provider registration renewal failed: %v", err)
+				if registration != nil {
+					log.Printf("provider registration renewal failed: %v", registration)
 				}
 			}
 		}

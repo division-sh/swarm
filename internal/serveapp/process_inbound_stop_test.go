@@ -7,6 +7,9 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 )
 
 func TestInboundStopRetainsOriginalDeadlineThroughOuterFinalization(t *testing.T) {
@@ -83,5 +86,49 @@ func TestInboundStopJoinsOwnedCurrentRuntimeBeforeRegistration(t *testing.T) {
 	case <-subscription.Retiring():
 	default:
 		t.Fatal("owned unregistered runtime escaped the process stop tail")
+	}
+}
+
+func TestInboundStopPreparationFencesFreshDispatchWithoutCancelingAcceptedBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			_, start := clockDeploymentHarness(t, backend, canonicalrouting.CopyRootInputFeed(t, canonicalrouting.DeploymentFeedSameFlowRoot))
+			process, _ := start()
+			t.Cleanup(func() {
+				if code := process.stop(); code != 0 {
+					t.Errorf("joined native stop exit=%d", code)
+				}
+			})
+			rt := servedTestProcessRuntime(t, process)
+			accepted, err := rt.WorkOccurrence().Begin(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() {
+				if err := accepted.Done(); err != nil {
+					t.Error(err)
+				}
+			}()
+			s := newProcessLifecycleSupervisor(nil, rt)
+			s.runtimeContexts = &runtime.RuntimeContextManager{}
+			s.shutdownOptions = runtime.DefaultShutdownOptions()
+			_ = s.prepareInboundStop()
+			defer s.inboundStopCancel()
+			fresh, err := rt.WorkOccurrence().Begin(t.Context())
+			if fresh != nil {
+				if err := fresh.Done(); err != nil {
+					t.Error(err)
+				}
+			}
+			if fresh != nil || !errors.Is(err, worklifetime.ErrAdmissionFenced) {
+				t.Fatalf("preparation admitted fresh dispatch before dependency drain: %v", err)
+			}
+			if accepted.Context().Err() != nil {
+				t.Fatal("fresh-dispatch seal canceled previously accepted work")
+			}
+			if grant, err := rt.CurrentStartupGrantEvidence(); err != nil || grant.State != startupownership.GrantAdmitted {
+				t.Fatalf("preparation withdrew the native generation: %+v err=%v", grant, err)
+			}
+		})
 	}
 }
