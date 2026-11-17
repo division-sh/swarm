@@ -284,6 +284,14 @@ func TestLogComputeModuleReplayEvidenceEmitsRuntimeLogCarrier(t *testing.T) {
 		if err != nil || preserved["key"] != "  exact text\n" {
 			t.Fatal("valid credential text was normalized", err)
 		}
+		pc.credentials = probe
+		for _, sentinel := range []error{context.Canceled, context.DeadlineExceeded} {
+			probe.failure = errors.Join(errors.New("wrapped-private-snapshot-canary"), sentinel)
+			_, err := resolve(ctx, bindings)
+			if err != sentinel || strings.Contains(err.Error(), "wrapped-private-snapshot-canary") {
+				t.Fatalf("snapshot cancellation identity/cause changed: %v", err)
+			}
+		}
 	})
 	bus := &recordingPipelineBus{}
 	evt := eventtest.PersistedProjection(
@@ -343,10 +351,14 @@ type computeSnapshotProbe struct {
 	credentials.Store
 	snapshots credentials.Snapshotter
 	calls     int
+	failure   error
 }
 
 func (p *computeSnapshotProbe) Snapshot(ctx context.Context, key string) (credentials.AtomicSnapshot, error) {
 	p.calls++
+	if p.failure != nil {
+		return credentials.AtomicSnapshot{}, p.failure
+	}
 	observed, err := p.snapshots.Snapshot(ctx, key)
 	if err == nil && p.calls == 1 {
 		err = p.Store.Set(ctx, key, "second-private-call")

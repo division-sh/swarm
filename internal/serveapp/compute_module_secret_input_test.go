@@ -13,6 +13,7 @@ import (
 	"github.com/bytecodealliance/wasmtime-go/v46"
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/computemodule"
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/store/storetest"
 )
@@ -36,7 +37,8 @@ func TestComputeModuleSecretInputNativeBoundaryBothStores(t *testing.T) {
 			process, fixture := startServedBoundaryFixture(t, backend, root)
 			db := storetest.DatabaseForTest(fixture.Selected.RuntimeDeps().EventStore)
 			uses := credentials.BuildRequirementUses(fixture.Runtime.Options.WorkflowModule.SemanticSource())[key]
-			if len(uses) != 1 || uses[0].Kind != "compute_module" || uses[0].Role != "private_key" || uses[0].FlowID != "." || !strings.Contains(uses[0].Name, "/compute.requested/inspect_key/") {
+			worker := identitytest.RootNode(t, "worker")
+			if len(uses) != 1 || uses[0].Kind != "compute_module" || uses[0].Role != "private_key" || uses[0].FlowID != "." || uses[0].Name != worker.Key()+"/compute.requested/inspect_key/rules[0]: compute_module" {
 				t.Fatalf("exact compute requirement was lost: %#v", uses)
 			}
 			publish := func(label string) servedEventPublishRPCResult {
@@ -68,7 +70,8 @@ func TestComputeModuleSecretInputNativeBoundaryBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			failed := publish("secret-missing")
-			waitServedEventPublishDeliveryStatusCount(t, db, backend, failed.EventID, "node", "worker", "dead_letter", 1)
+			waitServedEventPublishDeliveryStatusCount(t, db, backend, failed.EventID, "node", worker.Key(), "dead_letter", 1)
+			requireServedEventPublishEntityState(t, db, backend, failed.RunID, "", "waiting")
 			query := "SELECT COUNT(*) FROM events WHERE event_name='compute.completed' AND CAST(run_id AS TEXT)=?"
 			if backend == "postgres" {
 				query = strings.Replace(query, "?", "$1", 1)

@@ -32,6 +32,12 @@ func (pc *PipelineCoordinator) computeSecretInputs(ctx context.Context, bindings
 		value, present := observed[key]
 		if !present {
 			snapshot, err := owner.Observe(ctx, key)
+			if errors.Is(err, context.Canceled) {
+				return nil, context.Canceled
+			}
+			if errors.Is(err, context.DeadlineExceeded) {
+				return nil, context.DeadlineExceeded
+			}
 			if err != nil || !snapshot.Present {
 				return nil, errors.New("compute_module secret input unavailable")
 			}
