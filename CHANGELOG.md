@@ -16,6 +16,11 @@ release approval or a promise of old-store migration.
 
 ### Added
 
+- Declared typed events emitted from nested keyed or keyless flow instances now
+  undergo their declared payload-schema validation. Payloads previously admitted
+  as schema-less because of the owner lookup defect are refused if they do not
+  match that schema. Existing stored events are unchanged. (#3107)
+
 - WhatsApp link notices use the configured operator's bound conversation and
   the existing delivery journal. Down and back notices each have a ten-minute
   creation cap; intervening observed drops are counted. Delayed deliveries can

@@ -1,20 +1,132 @@
 package cataloge2e
 
 import (
+	"context"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	forkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 )
 
 func TestReceiverMaterializationSelectedForkExecutionBothStores(t *testing.T) {
+	t.Run("nested authored selector", proveNestedAuthoredSelectorFork)
 	runReceiverMaterializationSelectedForkExecution(t, false)
+}
+
+func proveNestedAuthoredSelectorFork(t *testing.T) {
+	for _, backend := range []catalogRuntimeBackend{catalogBackendSQLite, catalogBackendPostgres} {
+		t.Run(string(backend), func(t *testing.T) {
+			root := canonicalrouting.CopyNestedEventSchema(t)
+			h := newLiveForkCatalogHarness(t, root, backend)
+			ctx := worklifetime.WithOccurrence(catalogRunContext(h, catalogRuntimeRunID), h.rt.WorkOccurrence())
+			var selected interface {
+				forkexecution.SelectedContractForkLifecycle
+				forkexecution.SourceArtifactSelectedContractSourceStore
+				storetest.RootedDataCatalogStore
+				bus.PreparedPublishEventReader
+				deliverylifecycle.Store
+			} = h.pg
+			if h.sqlite != nil {
+				selected = h.sqlite
+			}
+			seedCatalogRootStateForRun(t, h, catalogRuntimeRunID)
+			for _, key := range []string{"source", "target"} {
+				h.publishAndWait(catalogTriggerStep{Event: "opened", Payload: map[string]any{"account_id": key, "ticket_id": "ticket"}}, catalogRuntimePublishTimeout)
+			}
+			h.publishAndWait(catalogTriggerStep{Event: "cross.requested", Payload: map[string]any{"source_account_id": "source", "ticket_id": "ticket", "target_account_id": "target"}}, catalogRuntimePublishTimeout)
+			h.waitForCatalogStoreQuiescence(catalogRuntimePublishTimeout)
+			public, err := catalogRunScopedOperatorEvents(h, catalogRuntimeRunID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			cut := ""
+			for _, event := range public {
+				if strings.HasSuffix(event.EventName, "/ticket.cross") {
+					if cut != "" {
+						t.Fatal("expected one native nested publication")
+					}
+					cut = event.EventID
+				}
+			}
+			if cut == "" {
+				t.Fatal("nested node did not publish its declared event")
+			}
+			loader, selection, loaded := selectedContractForkFixtureSelection(t, ctx, repoRootFromCatalogE2E(t), root, selected)
+			installCatalogSelectedSourceTopology(t, ctx, h, loaded)
+			plan, err := selected.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: catalogRuntimeRunID, At: cut})
+			if err != nil {
+				t.Fatal(err)
+			}
+			selector, found, err := plan.HistoricalRouteSelector(cut)
+			admission, admitted := selector.PayloadAdmission()
+			schema, schemaFound, schemaErr := loaded.Source.ResolveEffectiveCompiledFlowEventSchema("account/ticket", "ticket.cross")
+			if err != nil || !found || !admitted || schemaErr != nil || !schemaFound || admission.Binding().SchemaClass() != events.PayloadSchemaAuthored || admission.Binding().FlowID() != "account/ticket" || admission.Binding().SchemaDigest() != schema.AcceptanceSchemaDigest() {
+				t.Fatalf("stored native selector lost declared schema evidence: found=%t admitted=%t schema=%t errors=%v/%v binding=%+v", found, admitted, schemaFound, err, schemaErr, admission.Binding())
+			}
+			publication, found, err := selected.LoadPreparedPublishEvent(ctx, cut)
+			if err != nil || !found || len(publication.DeliveryRoutes) != 1 {
+				t.Fatalf("native C53 publication: %+v found=%t err=%v", publication, found, err)
+			}
+			original := publication.DeliveryRoutes[0]
+			route := original.Target.Route()
+			captured, entity, found, err := runforkadmission.FixedConstructionForRoute(loaded.Source, plan, flowidentity.StoredRoute(route.FlowID, flowidentity.LogicalInstanceID(route.FlowInstance), route.FlowInstance))
+			if err != nil || !found || entity.Fields["cross_count"] != int64(0) {
+				t.Fatalf("C53 fixed-cut target: %+v found=%t err=%v", entity, found, err)
+			}
+			before, err := storetest.ReadSelectedForkSourceDomain(ctx, selected, catalogRuntimeRunID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := executeCatalogLiveFork(t, h, ctx, forkexecution.SelectedContractExecutionRequest{
+				SourceRunID: catalogRuntimeRunID, At: cut, SourceLoader: loader, ContractSelection: selection,
+				Owner: selectedContractExecutionOwnerForCatalogHarness(t, h), AgentRuntime: selectedContractAgentRuntimeOptionsForCatalogHarness(h, testRuntimeConfig()), ExpectedBundleHash: selection.BundleHash,
+			})
+			if err != nil || !result.Activation.Activated || result.ExecutedEventCount < 1 {
+				t.Fatalf("real stored-selector fork: %+v err=%v", result, err)
+			}
+			child := result.Materialization.ForkRunID
+			target, err := runfork.ProjectCapturedConstructionIdentity(catalogRuntimeRunID, child, captured)
+			if err != nil {
+				t.Fatal(err)
+			}
+			wait, cancel := context.WithTimeout(ctx, catalogRuntimePublishTimeout)
+			defer cancel()
+			for {
+				instances, err := h.workflow.ListWorkflowInstances(wait, child)
+				if err != nil {
+					t.Fatal(err)
+				}
+				completed := false
+				for _, instance := range instances {
+					completed = completed || instance.StorageRef == target.InstancePath && instance.Fields["cross_count"] == int64(1)
+				}
+				if completed {
+					break
+				}
+				select {
+				case <-wait.Done():
+					t.Fatalf("fork did not execute exact captured target: %+v", instances)
+				case <-time.After(10 * time.Millisecond):
+				}
+			}
+			after, err := storetest.ReadSelectedForkSourceDomain(ctx, selected, catalogRuntimeRunID)
+			if err != nil || !reflect.DeepEqual(before, after) {
+				t.Fatalf("selected fork mutated source: %v", err)
+			}
+		})
+	}
 }
 
 func TestReceiverMaterializationSelectedForkPublicationFrontierBothStores(t *testing.T) {
