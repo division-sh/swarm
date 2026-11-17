@@ -271,6 +271,18 @@ func validatePolicySheetComputeModuleRow(context string, rule HandlerRuleEntry, 
 	declared := computeModuleSchemaProperties(module.InputSchema)
 	required := computeModuleSchemaRequired(module.InputSchema)
 	mapped := stringSetFromMap(spec.Input)
+	if len(spec.SecretInput) > 0 && module.Kind != "wasm" {
+		errs = append(errs, fmt.Errorf("%w: %s compute_module.secret_input requires a Wasm module", ErrInvalidField, context))
+	}
+	for name, key := range spec.SecretInput {
+		if !isPolicySheetPathSegment(name) || strings.TrimSpace(key) == "" {
+			errs = append(errs, fmt.Errorf("%w: %s compute_module.secret_input requires an input name and a stored key name", ErrInvalidField, context))
+		}
+		if _, duplicate := mapped[name]; duplicate {
+			errs = append(errs, fmt.Errorf("%w: %s compute_module input %q is mapped by both input and secret_input", ErrInvalidField, context, name))
+		}
+		mapped[name] = struct{}{}
+	}
 	for name := range required {
 		if _, ok := mapped[name]; !ok {
 			errs = append(errs, fmt.Errorf("%w: %s compute_module.input missing required module input %q", ErrInvalidField, context, name))

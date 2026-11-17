@@ -1,6 +1,7 @@
 package computemodule
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -140,6 +141,16 @@ func TestExecuteClassifiesAllocatorTrapAsTrap(t *testing.T) {
 }
 
 func TestExecuteRejectsDigestMismatchBeforeExecution(t *testing.T) {
+	t.Run("private_error_chains", func(t *testing.T) {
+		cause := errors.Join(errors.New("synthetic-private-value"), context.Canceled)
+		private := InvocationError(CodeABI, "module", "row", cause, true)
+		if !errors.Is(private, context.Canceled) || strings.Contains(private.Error(), "synthetic-private-value") || errors.Is(private, cause) {
+			t.Fatalf("private cause was retained: %v", private)
+		}
+		if !strings.Contains(InvocationError(CodeABI, "module", "row", cause, false).Error(), "synthetic-private-value") {
+			t.Fatal("ordinary error diagnostics changed")
+		}
+	})
 	wasm := readFixture(t)
 	raw := []byte(`{"component":"api","owner":"platform","language":"go","files":["main.go"]}`)
 	_, err := Execute(Request{

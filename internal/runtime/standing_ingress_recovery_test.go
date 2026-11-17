@@ -213,6 +213,11 @@ func TestStandingLearnedAuthorityCredentialMatrix(t *testing.T) {
 							}
 							use := runtimecredentials.RequirementUse{Requirement: runtimecredentials.Requirement{Kind: "tool", Name: apply.ToolID()}, FlowID: "coordinator", Role: registration.ProviderCredentials()[0], Entry: apply.Tool()}
 							inspect := bootAdmittedCredentials(source, store, file, []packs.SatisfactionPlan{plan})
+							independent := use
+							independent.Kind = "compute_module"
+							if observed, extent, err := inspect(ctx, independent); err != nil || extent != runtimebootverify.NoAdmittedCredential || observed.Present {
+								t.Fatalf("channel admission waived independent compute requirement: extent=%v err=%v", extent, err)
+							}
 							if strings.HasPrefix(scenario, "frozen_") {
 								if observed, extent, err := inspect(ctx, use); err != nil || extent != runtimebootverify.FullyAdmittedCredential || observed.Key != op.CredentialAdmissions[0].StoreKey {
 									t.Fatalf("initial exact learned admission: extent=%v err=%v", extent, err)

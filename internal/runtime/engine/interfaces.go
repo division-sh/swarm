@@ -156,13 +156,14 @@ type PayloadShaper interface {
 }
 
 type RuntimeDependencies struct {
-	Source            semanticview.Source
-	StateRepo         StateRepository
-	EntityCollections EntityCollectionReader
-	MutationOwner     EngineMutationOwner
-	Locker            EntityLocker
-	WorkflowLifecycle WorkflowLifecycleEffectOwner
-	PayloadShaper     PayloadShaper
-	EmitNow           func() time.Time
-	MaxChainDepth     int
+	Source              semanticview.Source
+	StateRepo           StateRepository
+	EntityCollections   EntityCollectionReader
+	MutationOwner       EngineMutationOwner
+	Locker              EntityLocker
+	WorkflowLifecycle   WorkflowLifecycleEffectOwner
+	PayloadShaper       PayloadShaper
+	ComputeSecretInputs func(context.Context, map[string]string) (map[string]string, error)
+	EmitNow             func() time.Time
+	MaxChainDepth       int
 }

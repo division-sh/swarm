@@ -506,11 +506,12 @@ type ComputeValidationSpec struct {
 }
 
 type ComputeModuleSpec struct {
-	RowID      string                `yaml:"-"`
-	Module     string                `yaml:"-"`
-	Into       string                `yaml:"-"`
-	Input      map[string]string     `yaml:"-"`
-	InputPaths map[string]paths.Path `yaml:"-"`
+	RowID       string                `yaml:"-"`
+	Module      string                `yaml:"-"`
+	Into        string                `yaml:"-"`
+	Input       map[string]string     `yaml:"-"`
+	SecretInput map[string]string     `yaml:"-"`
+	InputPaths  map[string]paths.Path `yaml:"-"`
 }
 
 type ComputeTier struct {

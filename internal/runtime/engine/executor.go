@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimeaccumulator "github.com/division-sh/swarm/internal/runtime/accumulator"
@@ -1357,14 +1358,21 @@ func (e *Executor) computeModuleValue(frame *executionFrame, spec *runtimecontra
 		rowID = strings.TrimSpace(spec.StoreAs)
 	}
 	moduleID := strings.TrimSpace(plan.Module)
+	privateInput := len(plan.SecretInput) > 0
+	fail := func(code computemodule.Code, cause error) *computemodule.Error {
+		return computemodule.InvocationError(code, moduleID, rowID, cause, privateInput)
+	}
 	bundle, ok := semanticview.Bundle(e.deps.Source)
 	if !ok || bundle == nil {
-		return nil, &computemodule.Error{Code: computemodule.CodeCompile, ModuleID: moduleID, RowID: rowID, Err: fmt.Errorf("semantic source is not a workflow contract bundle")}
+		return nil, fail(computemodule.CodeCompile, fmt.Errorf("semantic source is not a workflow contract bundle"))
 	}
 	tool, _ := bundle.ToolEntryForFlow(frame.req.ExecutionFlowID.String(), moduleID)
 	module, ok := tool.Module()
 	if !ok {
-		return nil, &computemodule.Error{Code: computemodule.CodeCompile, ModuleID: moduleID, RowID: rowID, Err: fmt.Errorf("unknown module %q", moduleID)}
+		return nil, fail(computemodule.CodeCompile, fmt.Errorf("unknown module %q", moduleID))
+	}
+	if privateInput && (module.Kind != "wasm" || len(plan.Input) == 0) {
+		return nil, fail(computemodule.CodeABI, nil)
 	}
 	current := e.currentContext(frame)
 	inputs := map[string]any{}
@@ -1378,24 +1386,57 @@ func (e *Executor) computeModuleValue(frame *executionFrame, spec *runtimecontra
 			path = paths.Parse(rawPath)
 		}
 		if path.IsZero() {
-			return nil, &computemodule.Error{Code: computemodule.CodeABI, ModuleID: moduleID, RowID: rowID, Err: fmt.Errorf("input.%s has no mapped source path", name)}
+			return nil, fail(computemodule.CodeABI, fmt.Errorf("input.%s has no mapped source path", name))
 		}
 		value, exists := current.Lookup(path)
 		if !exists {
-			return nil, &computemodule.Error{Code: computemodule.CodeABI, ModuleID: moduleID, RowID: rowID, Err: fmt.Errorf("input.%s source %s is missing", name, path.String())}
+			return nil, fail(computemodule.CodeABI, fmt.Errorf("input.%s source %s is missing", name, path.String()))
 		}
 		inputs[name] = value
 	}
+	var inputHash string
+	if privateInput {
+		for name, key := range plan.SecretInput {
+			if _, overlaps := inputs[name]; overlaps || strings.TrimSpace(key) == "" {
+				return nil, fail(computemodule.CodeABI, nil)
+			}
+		}
+		safe, err := computemodule.CanonicalJSONBytes(map[string]any{"input": inputs, "secret_input": plan.SecretInput})
+		if err != nil {
+			return nil, fail(computemodule.CodeABI, err)
+		}
+		inputHash = computemodule.HashBytes(append([]byte("compute_module:secret_input:v1\x00"), safe...))
+		if e.deps.ComputeSecretInputs == nil {
+			return nil, fail(computemodule.CodeABI, nil)
+		}
+		values, err := e.deps.ComputeSecretInputs(frame.ctx, plan.SecretInput)
+		if err != nil {
+			return nil, fail(computemodule.CodeABI, err)
+		}
+		if len(values) != len(plan.SecretInput) {
+			return nil, fail(computemodule.CodeABI, nil)
+		}
+		for name := range plan.SecretInput {
+			value, present := values[name]
+			if !present || strings.TrimSpace(value) == "" || !utf8.ValidString(value) {
+				return nil, fail(computemodule.CodeABI, nil)
+			}
+			inputs[name] = value
+		}
+	}
 	if err := eventschema.ValidatePayloadAgainstSchema(module.InputSchema, inputs); err != nil {
-		return nil, &computemodule.Error{Code: computemodule.CodeABI, ModuleID: moduleID, RowID: rowID, Err: fmt.Errorf("input schema violation: %w", err)}
+		return nil, fail(computemodule.CodeABI, fmt.Errorf("input schema violation: %w", err))
 	}
 	inputBytes, err := computemodule.CanonicalJSONBytes(inputs)
 	if err != nil {
-		return nil, &computemodule.Error{Code: computemodule.CodeABI, ModuleID: moduleID, RowID: rowID, Err: err}
+		return nil, fail(computemodule.CodeABI, err)
+	}
+	if !privateInput {
+		inputHash = computemodule.HashBytes(inputBytes)
 	}
 	moduleBytes, _, err := runtimecontracts.PolicyModuleBytes(bundle, module)
 	if err != nil {
-		return nil, &computemodule.Error{Code: computemodule.CodeCompile, ModuleID: moduleID, RowID: rowID, Err: err}
+		return nil, fail(computemodule.CodeCompile, err)
 	}
 	kind := strings.TrimSpace(module.Kind)
 	abi := strings.TrimSpace(module.ABI)
@@ -1424,7 +1465,7 @@ func (e *Executor) computeModuleValue(frame *executionFrame, spec *runtimecontra
 		Entry:      entry,
 		Digest:     strings.TrimSpace(module.Digest),
 		SourceHash: strings.TrimSpace(module.SourceHash),
-		InputHash:  computemodule.HashBytes(inputBytes),
+		InputHash:  inputHash,
 		Outcome:    computemodule.ReplayOutcomeSuccess,
 		Arch:       computemodule.CurrentArch(),
 		Limits: computemodule.ReplayLimits{
@@ -1438,15 +1479,16 @@ func (e *Executor) computeModuleValue(frame *executionFrame, spec *runtimecontra
 	case "wasm":
 		trace.Engine = computemodule.EngineVersion()
 		result, err := computemodule.Execute(computemodule.Request{
-			ModuleID:    moduleID,
-			RowID:       rowID,
-			Digest:      strings.TrimSpace(module.Digest),
-			Entry:       entry,
-			Wasm:        moduleBytes,
-			Input:       inputBytes,
-			Fuel:        module.Limits.Gas,
-			MemoryPages: module.Limits.MemoryPages,
-			OutputBytes: module.Limits.OutputBytes,
+			ModuleID:     moduleID,
+			RowID:        rowID,
+			Digest:       strings.TrimSpace(module.Digest),
+			Entry:        entry,
+			Wasm:         moduleBytes,
+			Input:        inputBytes,
+			PrivateInput: privateInput,
+			Fuel:         module.Limits.Gas,
+			MemoryPages:  module.Limits.MemoryPages,
+			OutputBytes:  module.Limits.OutputBytes,
 		})
 		if err != nil {
 			return nil, e.recordComputeModuleFailure(frame, trace, err)
@@ -1487,13 +1529,13 @@ func (e *Executor) computeModuleValue(frame *executionFrame, spec *runtimecontra
 	default:
 		return nil, &computemodule.Error{Code: computemodule.CodeCompile, ModuleID: moduleID, RowID: rowID, Err: fmt.Errorf("unsupported module kind %q", kind)}
 	}
-	output, err := decodeComputeModuleOutput(moduleID, rowID, rawOutput, module.OutputSchema)
+	output, err := decodeComputeModuleOutput(moduleID, rowID, rawOutput, module.OutputSchema, privateInput)
 	if err != nil {
 		return nil, e.recordComputeModuleFailure(frame, trace, err)
 	}
 	outputHash, err := computemodule.CanonicalJSONHash(output)
 	if err != nil {
-		return nil, e.recordComputeModuleFailure(frame, trace, &computemodule.Error{Code: computemodule.CodeABI, ModuleID: moduleID, RowID: rowID, Err: err})
+		return nil, e.recordComputeModuleFailure(frame, trace, fail(computemodule.CodeABI, err))
 	}
 	trace.OutputHash = outputHash
 	if err := verifyComputeModuleReplayTrace(frame, trace); err != nil {
@@ -1528,21 +1570,24 @@ func (e *Executor) recordComputeModuleFailure(frame *executionFrame, trace Compu
 	return cause
 }
 
-func decodeComputeModuleOutput(moduleID, rowID string, raw []byte, schema map[string]any) (map[string]any, error) {
+func decodeComputeModuleOutput(moduleID, rowID string, raw []byte, schema map[string]any, privateInput bool) (map[string]any, error) {
+	fail := func(cause error) *computemodule.Error {
+		return computemodule.InvocationError(computemodule.CodeABI, moduleID, rowID, cause, privateInput)
+	}
 	admitted, err := canonicaljson.Decode(raw)
 	if err != nil {
-		return nil, &computemodule.Error{Code: computemodule.CodeABI, ModuleID: moduleID, RowID: rowID, Err: fmt.Errorf("output is not exactly one JSON object: %w", err)}
+		return nil, fail(fmt.Errorf("output is not exactly one JSON object: %w", err))
 	}
 	projected, err := workflowexpr.ProjectSemanticValue(admitted)
 	if err != nil {
-		return nil, &computemodule.Error{Code: computemodule.CodeABI, ModuleID: moduleID, RowID: rowID, Err: err}
+		return nil, fail(err)
 	}
 	output, ok := projected.(map[string]any)
 	if !ok {
-		return nil, &computemodule.Error{Code: computemodule.CodeABI, ModuleID: moduleID, RowID: rowID, Err: fmt.Errorf("output is not JSON object")}
+		return nil, fail(fmt.Errorf("output is not JSON object"))
 	}
 	if err := eventschema.ValidatePayloadAgainstSchema(schema, output); err != nil {
-		return nil, &computemodule.Error{Code: computemodule.CodeABI, ModuleID: moduleID, RowID: rowID, Err: fmt.Errorf("output schema violation: %w", err)}
+		return nil, fail(fmt.Errorf("output schema violation: %w", err))
 	}
 	return output, nil
 }

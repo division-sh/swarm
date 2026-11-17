@@ -22,6 +22,7 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -242,6 +243,48 @@ func (b *recordingPipelineBus) runtimeLogEntries() []RuntimeLogEntry {
 }
 
 func TestLogComputeModuleReplayEvidenceEmitsRuntimeLogCarrier(t *testing.T) {
+	t.Run("actual_invocation_snapshot", func(t *testing.T) {
+		ctx := t.Context()
+		file, err := credentials.NewFileStore(filepath.Join(t.TempDir(), "keys.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := file.Set(ctx, "named_key", "first-private-call"); err != nil {
+			t.Fatal(err)
+		}
+		probe := &computeSnapshotProbe{Store: file, snapshots: file}
+		pc := &PipelineCoordinator{credentials: probe}
+		resolve := coordinatorEngineDependencies(pc).ComputeSecretInputs
+		bindings := map[string]string{"one": "named_key", "two": "named_key"}
+		first, err := resolve(ctx, bindings)
+		if err != nil || probe.calls != 1 || first["one"] != "first-private-call" || first["two"] != first["one"] {
+			t.Fatalf("invocation observation count=%d err=%v", probe.calls, err)
+		}
+		second, err := resolve(ctx, bindings)
+		if err != nil || probe.calls != 2 || second["one"] != "second-private-call" || second["two"] != second["one"] || first["one"] != "first-private-call" {
+			t.Fatalf("rotation was frozen across calls: count=%d err=%v", probe.calls, err)
+		}
+		if err := file.Delete(ctx, "named_key"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := resolve(ctx, bindings); err == nil {
+			t.Fatal("missing key was admitted")
+		}
+		pc.credentials = nil
+		if _, err := resolve(ctx, bindings); err == nil {
+			t.Fatal("non-snapshot owner was accepted")
+		}
+		pc.credentials = credentials.NewEnvStore()
+		t.Setenv("COMPUTE_BOUNDARY_KEY", string([]byte{0xff}))
+		if _, err := resolve(ctx, map[string]string{"key": "COMPUTE_BOUNDARY_KEY"}); err == nil {
+			t.Fatal("invalid text was silently replaced")
+		}
+		t.Setenv("COMPUTE_BOUNDARY_KEY", "  exact text\n")
+		preserved, err := resolve(ctx, map[string]string{"key": "COMPUTE_BOUNDARY_KEY"})
+		if err != nil || preserved["key"] != "  exact text\n" {
+			t.Fatal("valid credential text was normalized", err)
+		}
+	})
 	bus := &recordingPipelineBus{}
 	evt := eventtest.PersistedProjection(
 		"evt-1",
@@ -294,6 +337,21 @@ func TestLogComputeModuleReplayEvidenceEmitsRuntimeLogCarrier(t *testing.T) {
 	if len(envelopes) != 1 || envelopes[0].Normalized() != trace.Normalized() {
 		t.Fatalf("decoded envelopes = %#v, want %#v", envelopes, trace.Normalized())
 	}
+}
+
+type computeSnapshotProbe struct {
+	credentials.Store
+	snapshots credentials.Snapshotter
+	calls     int
+}
+
+func (p *computeSnapshotProbe) Snapshot(ctx context.Context, key string) (credentials.AtomicSnapshot, error) {
+	p.calls++
+	observed, err := p.snapshots.Snapshot(ctx, key)
+	if err == nil && p.calls == 1 {
+		err = p.Store.Set(ctx, key, "second-private-call")
+	}
+	return observed, err
 }
 
 func VerifyNativeExecuteNodeContractHandlerLogsComputeModuleReplayEvidenceBeforeFailureReturnForTest(t *testing.T, backend string, open pipelineDeliveryNativeOpenerForTest) {

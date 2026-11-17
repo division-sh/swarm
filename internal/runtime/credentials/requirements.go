@@ -90,6 +90,24 @@ func BuildRequirementUses(source semanticview.Source) map[string][]RequirementUs
 				appendToolRequirements(index, source, node.FlowPath(), map[string]runtimecontracts.ToolSchemaEntry{site.Spec.Tool: entry})
 			}
 		}
+		for event, handler := range source.ExecutableNodeEventHandlers(node) {
+			for _, rule := range handler.Rules {
+				if rule.Compute == nil || rule.Compute.Module == nil {
+					continue
+				}
+				spec := rule.Compute.Module
+				row := spec.RowID
+				if row == "" {
+					row = spec.StoreTarget()
+				}
+				for parameter, key := range spec.SecretInput {
+					index[key] = append(index[key], RequirementUse{
+						Requirement: Requirement{Kind: "compute_module", Name: fmt.Sprintf("%s/%s/%s/%s", node.Key(), event, spec.Module, row)},
+						FlowID:      node.FlowPath(), Role: parameter,
+					})
+				}
+			}
+		}
 	}
 	appendPolicyCredentialRequirements(index, source, "")
 	for _, scope := range source.FlowScopes() {

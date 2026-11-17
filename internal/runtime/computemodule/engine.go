@@ -1,6 +1,7 @@
 package computemodule
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -39,15 +40,36 @@ const (
 )
 
 type Request struct {
-	ModuleID    string
-	RowID       string
-	Digest      string
-	Entry       string
-	Wasm        []byte
-	Input       []byte
-	Fuel        uint64
-	MemoryPages uint32
-	OutputBytes int
+	ModuleID     string
+	RowID        string
+	Digest       string
+	Entry        string
+	Wasm         []byte
+	Input        []byte
+	Fuel         uint64
+	MemoryPages  uint32
+	OutputBytes  int
+	PrivateInput bool
+}
+
+// InvocationError never retains value-bearing causes for a private-input call.
+// Cancellation identity is safe and remains observable by existing owners.
+func InvocationError(code Code, moduleID, rowID string, cause error, privateInput bool) *Error {
+	if privateInput {
+		switch {
+		case errors.Is(cause, context.Canceled):
+			cause = context.Canceled
+		case errors.Is(cause, context.DeadlineExceeded):
+			cause = context.DeadlineExceeded
+		default:
+			cause = nil
+		}
+	}
+	return &Error{Code: code, ModuleID: moduleID, RowID: rowID, Err: cause}
+}
+
+func (r Request) failure(code Code, cause error) *Error {
+	return InvocationError(code, r.ModuleID, r.RowID, cause, r.PrivateInput)
 }
 
 type Result struct {
@@ -134,20 +156,20 @@ func ValidateCoreJSONModule(wasm []byte, entry string, memoryPages uint32) error
 func Execute(req Request) (Result, error) {
 	req.Entry = normalizeEntry(req.Entry)
 	if err := ValidateDigest(req.Wasm, req.Digest); err != nil {
-		return Result{}, &Error{Code: CodeDigest, ModuleID: req.ModuleID, RowID: req.RowID, Err: err}
+		return Result{}, req.failure(CodeDigest, err)
 	}
 	if err := ValidateCoreJSONModule(req.Wasm, req.Entry, req.MemoryPages); err != nil {
-		return Result{}, withSite(err, req.ModuleID, req.RowID)
+		return Result{}, withSite(err, req)
 	}
 	engine := newEngine()
 	module, err := wasmtime.NewModule(engine, req.Wasm)
 	if err != nil {
-		return Result{}, &Error{Code: CodeCompile, ModuleID: req.ModuleID, RowID: req.RowID, Err: err}
+		return Result{}, req.failure(CodeCompile, err)
 	}
 	store := wasmtime.NewStore(engine)
 	store.Limiter(memoryLimitBytes(req.MemoryPages), -1, -1, -1, -1)
 	if err := store.SetFuel(req.Fuel); err != nil {
-		return Result{}, &Error{Code: CodeFuel, ModuleID: req.ModuleID, RowID: req.RowID, Err: err}
+		return Result{}, req.failure(CodeFuel, err)
 	}
 	instance, err := wasmtime.NewInstance(store, module, nil)
 	if err != nil {
@@ -155,19 +177,19 @@ func Execute(req Request) (Result, error) {
 	}
 	memoryExt := instance.GetExport(store, memoryExport)
 	if memoryExt == nil || memoryExt.Memory() == nil {
-		return Result{}, &Error{Code: CodeABI, ModuleID: req.ModuleID, RowID: req.RowID, Err: fmt.Errorf("missing %s memory export", memoryExport)}
+		return Result{}, req.failure(CodeABI, fmt.Errorf("missing %s memory export", memoryExport))
 	}
 	memory := memoryExt.Memory()
 	if memory.Size(store) > uint64(req.MemoryPages) {
-		return Result{}, &Error{Code: CodeMemory, ModuleID: req.ModuleID, RowID: req.RowID, Err: fmt.Errorf("memory size %d exceeds limit %d pages", memory.Size(store), req.MemoryPages)}
+		return Result{}, req.failure(CodeMemory, fmt.Errorf("memory size %d exceeds limit %d pages", memory.Size(store), req.MemoryPages))
 	}
 	alloc := instance.GetFunc(store, allocExport)
 	if alloc == nil {
-		return Result{}, &Error{Code: CodeABI, ModuleID: req.ModuleID, RowID: req.RowID, Err: fmt.Errorf("missing %s function export", allocExport)}
+		return Result{}, req.failure(CodeABI, fmt.Errorf("missing %s function export", allocExport))
 	}
 	compute := instance.GetFunc(store, req.Entry)
 	if compute == nil {
-		return Result{}, &Error{Code: CodeABI, ModuleID: req.ModuleID, RowID: req.RowID, Err: fmt.Errorf("missing %s function export", req.Entry)}
+		return Result{}, req.failure(CodeABI, fmt.Errorf("missing %s function export", req.Entry))
 	}
 	allocResult, err := alloc.Call(store, int32(len(req.Input)))
 	if err != nil {
@@ -175,10 +197,10 @@ func Execute(req Request) (Result, error) {
 	}
 	inputPtr, ok := toInt32(allocResult)
 	if !ok || inputPtr < 0 {
-		return Result{}, &Error{Code: CodeABI, ModuleID: req.ModuleID, RowID: req.RowID, Err: fmt.Errorf("alloc returned invalid pointer %v", allocResult)}
+		return Result{}, req.failure(CodeABI, fmt.Errorf("alloc returned invalid pointer %v", allocResult))
 	}
 	if err := writeMemory(memory, store, uint32(inputPtr), req.Input); err != nil {
-		return Result{}, &Error{Code: CodeOutputBounds, ModuleID: req.ModuleID, RowID: req.RowID, Err: err}
+		return Result{}, req.failure(CodeOutputBounds, err)
 	}
 	raw, err := compute.Call(store, inputPtr, int32(len(req.Input)))
 	if err != nil {
@@ -186,16 +208,18 @@ func Execute(req Request) (Result, error) {
 	}
 	packed, ok := toInt64(raw)
 	if !ok {
-		return Result{}, &Error{Code: CodeABI, ModuleID: req.ModuleID, RowID: req.RowID, Err: fmt.Errorf("%s returned non-i64 value %T", req.Entry, raw)}
+		return Result{}, req.failure(CodeABI, fmt.Errorf("%s returned non-i64 value %T", req.Entry, raw))
 	}
 	outputPtr := uint32(uint64(packed) >> 32)
 	outputLen := uint32(uint64(packed) & 0xffffffff)
 	if req.OutputBytes > 0 && uint64(outputLen) > uint64(req.OutputBytes) {
-		return Result{}, &Error{Code: CodeOutputSize, ModuleID: req.ModuleID, RowID: req.RowID, Limit: req.OutputBytes, Actual: int(outputLen), Err: fmt.Errorf("output %d bytes exceeds cap %d", outputLen, req.OutputBytes)}
+		failure := req.failure(CodeOutputSize, fmt.Errorf("output %d bytes exceeds cap %d", outputLen, req.OutputBytes))
+		failure.Limit, failure.Actual = req.OutputBytes, int(outputLen)
+		return Result{}, failure
 	}
 	output, err := readMemory(memory, store, outputPtr, outputLen)
 	if err != nil {
-		return Result{}, &Error{Code: CodeOutputBounds, ModuleID: req.ModuleID, RowID: req.RowID, Err: err}
+		return Result{}, req.failure(CodeOutputBounds, err)
 	}
 	fuelConsumed := req.Fuel
 	if remaining, err := store.GetFuel(); err == nil && remaining <= req.Fuel {
@@ -203,7 +227,7 @@ func Execute(req Request) (Result, error) {
 	}
 	outputHash, err := CanonicalJSONHashRaw(output)
 	if err != nil {
-		return Result{}, &Error{Code: CodeABI, ModuleID: req.ModuleID, RowID: req.RowID, Err: fmt.Errorf("output is not canonical JSON: %w", err)}
+		return Result{}, req.failure(CodeABI, fmt.Errorf("output is not canonical JSON: %w", err))
 	}
 	return Result{
 		Output:       output,
@@ -315,17 +339,20 @@ func valKindSummary(kinds []wasmtime.ValKind) string {
 	return "(" + strings.Join(parts, ",") + ")"
 }
 
-func withSite(err error, moduleID, rowID string) error {
+func withSite(err error, req Request) error {
 	var typed *Error
 	if errors.As(err, &typed) {
-		return &Error{Code: typed.Code, ModuleID: moduleID, RowID: rowID, Err: typed.Err}
+		return req.failure(typed.Code, typed.Err)
+	}
+	if req.PrivateInput {
+		return req.failure(CodeABI, err)
 	}
 	return err
 }
 
 func classifyCallError(req Request, fallback Code, err error) error {
 	code := WasmtimeFailureCode(err, fallback)
-	return &Error{Code: code, ModuleID: req.ModuleID, RowID: req.RowID, Err: err}
+	return req.failure(code, err)
 }
 
 // WasmtimeFailureCode translates the engine's stable trap code once at the

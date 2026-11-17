@@ -86,6 +86,25 @@ func TestValidatePolicySheetComputeModuleRowRequiresDeclaredInputs(t *testing.T)
 	if !errorsContain(errs, `missing required module input "files"`) {
 		t.Fatalf("errors = %v, want missing required input", errs)
 	}
+	spec.Input["files"], spec.Input["language"] = "payload.files", "payload.language"
+	spec.SecretInput = map[string]string{"owner": "any_static_key"}
+	if errs := validatePolicySheetComputeModuleRow("test row", rule, tool); len(errs) != 0 {
+		t.Fatalf("ordinary/secret union rejected: %v", errs)
+	}
+	for _, tc := range []struct {
+		name, parameter, key, want string
+	}{
+		{"overlap", "component", "any_static_key", "both input and secret_input"},
+		{"undeclared", "unknown", "any_static_key", "undeclared module input"},
+		{"empty_reference", "owner", "", "stored key name"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			spec.SecretInput = map[string]string{tc.parameter: tc.key}
+			if errs := validatePolicySheetComputeModuleRow("test row", rule, tool); !errorsContain(errs, tc.want) {
+				t.Fatalf("errors=%v, want %q", errs, tc.want)
+			}
+		})
+	}
 }
 
 func computeModuleValidationBundle(t *testing.T) (*WorkflowContractBundle, PolicyModule, string) {

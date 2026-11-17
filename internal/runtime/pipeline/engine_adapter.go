@@ -941,15 +941,16 @@ func coordinatorEngineDependencies(pc *PipelineCoordinator) runtimeengine.Runtim
 	activityWriter := pipelineActivityIntentWriter{coordinator: pc}
 	publicationPlanner, _ := pc.bus.(EnginePublicationPlanner)
 	return runtimeengine.RuntimeDependencies{
-		Source:            source,
-		StateRepo:         stateRepo,
-		EntityCollections: pipelineEngineEntityCollectionReader{coordinator: pc},
-		MutationOwner:     pipelineEngineMutationOwner{store: pc.workflowStore, state: stateRepo, publication: publicationPlanner, verifier: stateRepo, lifecycle: lifecycleOwner, activities: activityWriter},
-		Locker:            pipelineEngineLocker{coordinator: pc},
-		WorkflowLifecycle: lifecycleOwner,
-		PayloadShaper:     pipelineEnginePayloadShaper{coordinator: pc},
-		EmitNow:           pc.testEngineEmitNow,
-		MaxChainDepth:     workflowMaxChainDepthPolicy(source),
+		Source:              source,
+		StateRepo:           stateRepo,
+		EntityCollections:   pipelineEngineEntityCollectionReader{coordinator: pc},
+		MutationOwner:       pipelineEngineMutationOwner{store: pc.workflowStore, state: stateRepo, publication: publicationPlanner, verifier: stateRepo, lifecycle: lifecycleOwner, activities: activityWriter},
+		Locker:              pipelineEngineLocker{coordinator: pc},
+		WorkflowLifecycle:   lifecycleOwner,
+		PayloadShaper:       pipelineEnginePayloadShaper{coordinator: pc},
+		ComputeSecretInputs: pc.computeSecretInputs,
+		EmitNow:             pc.testEngineEmitNow,
+		MaxChainDepth:       workflowMaxChainDepthPolicy(source),
 	}
 }
 

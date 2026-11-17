@@ -2165,6 +2165,114 @@ func TestExecutor_PythonModuleOutputSchemaFailureStopsBeforeEmit(t *testing.T) {
 }
 
 func TestExecutor_ComputeModuleReplayTraceComparison(t *testing.T) {
+	t.Run("secret_input_identity_rotation_and_author_output", func(t *testing.T) {
+		source, _ := sourceWithStructuredRendererModule(t)
+		exec := newStructuredRendererExecutor(t, source)
+		value := "private-call-canary-A"
+		exec.deps.ComputeSecretInputs = func(_ context.Context, bindings map[string]string) (map[string]string, error) {
+			if len(bindings) != 1 || bindings["owner"] == "" {
+				t.Fatal("resolver did not receive the selected bindings")
+			}
+			return map[string]string{"owner": value}, nil
+		}
+		spec := structuredRendererModuleSpec()
+		delete(spec.Input, "owner")
+		spec.SecretInput = map[string]string{"owner": "named_key"}
+		req := structuredRendererExecutionRequest(t, spec)
+		first, err := exec.ExecuteSemanticFixture(context.Background(), req)
+		if err != nil || len(first.ComputeModuleTraces) != 1 {
+			t.Fatalf("private invocation: %v", err)
+		}
+		// The renderer intentionally returns this input. R210 leaves it ordinary.
+		output, _ := json.Marshal(first.Computed)
+		if !strings.Contains(string(output), value) {
+			t.Fatal("author-returned output was silently redacted")
+		}
+		ordinary := map[string]any{"component": "api", "language": "go", "files": []any{"main.go", "README.md", "service.yaml"}}
+		safe, err := computemodule.CanonicalJSONBytes(map[string]any{"input": ordinary, "secret_input": spec.SecretInput})
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := computemodule.HashBytes(append([]byte("compute_module:secret_input:v1\x00"), safe...))
+		if first.ComputeModuleTraces[0].InputHash != want {
+			t.Fatal("trace did not use ordinary inputs and complete named bindings")
+		}
+		req.ExpectedComputeModuleTraces = first.ComputeModuleTraces
+		if _, err := exec.ExecuteSemanticFixture(context.Background(), req); err != nil {
+			t.Fatalf("equal private result: %v", err)
+		}
+		value = "private-call-canary-B"
+		_, err = exec.ExecuteSemanticFixture(context.Background(), req)
+		var typed *computemodule.Error
+		if !errors.As(err, &typed) || typed.Code != computemodule.CodeReplay || typed.Finding == nil || typed.Finding.Field != "output_hash" {
+			t.Fatalf("changed output was not conditionally compared: %v", err)
+		}
+		req.ExpectedComputeModuleTraces = nil
+		second, err := exec.ExecuteSemanticFixture(context.Background(), req)
+		if err != nil || second.ComputeModuleTraces[0].InputHash != want || second.ComputeModuleTraces[0].OutputHash == first.ComputeModuleTraces[0].OutputHash {
+			t.Fatalf("ordinary execution invented a rotation fence: %v", err)
+		}
+		spec.SecretInput["owner"] = "another_named_key"
+		third, err := exec.ExecuteSemanticFixture(context.Background(), req)
+		if err != nil || third.ComputeModuleTraces[0].InputHash == want {
+			t.Fatalf("different declared key lost its identity: %v", err)
+		}
+	})
+	t.Run("secret_input_refusals", func(t *testing.T) {
+		for _, tc := range []struct {
+			name   string
+			values map[string]string
+			cause  error
+		}{
+			{"missing", nil, nil},
+			{"no_resolver", nil, nil},
+			{"blank", map[string]string{"owner": " "}, nil},
+			{"binary", map[string]string{"owner": string([]byte{0xff})}, nil},
+			{"wrong_parameter", map[string]string{"other": "private-call-canary"}, nil},
+			{"extra_parameter", map[string]string{"owner": "private-call-canary", "other": "x"}, nil},
+			{"raw_failure", nil, errors.New("private-call-canary")},
+			{"cancelled", nil, errors.Join(context.Canceled, errors.New("private-call-canary"))},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				source, _ := sourceWithStructuredRendererModule(t)
+				exec := newStructuredRendererExecutor(t, source)
+				exec.deps.ComputeSecretInputs = func(context.Context, map[string]string) (map[string]string, error) { return tc.values, tc.cause }
+				if tc.name == "no_resolver" {
+					exec.deps.ComputeSecretInputs = nil
+				}
+				spec := structuredRendererModuleSpec()
+				delete(spec.Input, "owner")
+				spec.SecretInput = map[string]string{"owner": "named_key"}
+				result, err := exec.ExecuteSemanticFixture(context.Background(), structuredRendererExecutionRequest(t, spec))
+				var typed *computemodule.Error
+				if !errors.As(err, &typed) || typed.Code != computemodule.CodeABI || strings.Contains(err.Error(), "private-call-canary") || len(result.EmitIntents) != 0 {
+					t.Fatalf("unsafe or effectful refusal: %v", err)
+				}
+				if errors.Is(tc.cause, context.Canceled) != errors.Is(err, context.Canceled) {
+					t.Fatal("cancellation identity changed")
+				}
+				if typed.Err != nil && typed.Err != context.Canceled {
+					t.Fatal("raw cause retained in the full error chain")
+				}
+			})
+		}
+	})
+	t.Run("python_secret_refused_before_handoff", func(t *testing.T) {
+		source, _ := sourceWithPythonRendererModule(t)
+		exec := newStructuredRendererExecutor(t, source)
+		exec.deps.ComputeSecretInputs = func(context.Context, map[string]string) (map[string]string, error) {
+			t.Fatal("Python reached the secret owner")
+			return nil, nil
+		}
+		spec := pythonRendererModuleSpec()
+		delete(spec.Input, "owner")
+		spec.SecretInput = map[string]string{"owner": "named_key"}
+		_, err := exec.ExecuteSemanticFixture(context.Background(), structuredRendererExecutionRequest(t, spec))
+		var typed *computemodule.Error
+		if !errors.As(err, &typed) || typed.Code != computemodule.CodeABI || typed.Err != nil {
+			t.Fatalf("Python private-input refusal=%v", err)
+		}
+	})
 	source, _ := sourceWithStructuredRendererModule(t)
 	exec := newStructuredRendererExecutor(t, source)
 	req := structuredRendererExecutionRequest(t, structuredRendererModuleSpec())
@@ -2313,7 +2421,7 @@ func TestDecodeComputeModuleOutputRejectsTrailingJSON(t *testing.T) {
 		[]byte(`{"content":"ok"} {"content":"again"}`),
 	} {
 		t.Run(string(raw), func(t *testing.T) {
-			_, err := decodeComputeModuleOutput("structured_renderer", "render_bundle", raw, schema)
+			_, err := decodeComputeModuleOutput("structured_renderer", "render_bundle", raw, schema, false)
 			if err == nil {
 				t.Fatal("decodeComputeModuleOutput error = nil, want strict JSON failure")
 			}
@@ -2322,6 +2430,17 @@ func TestDecodeComputeModuleOutputRejectsTrailingJSON(t *testing.T) {
 				t.Fatalf("error = %#v, want code %s", err, computemodule.CodeABI)
 			}
 		})
+	}
+	for _, raw := range []string{
+		`{"content":"private-output-canary"} trailing`,
+		`{"content":"private-output-canary","content":"again"}`,
+		`{"unexpected":"private-output-canary"}`,
+	} {
+		_, err := decodeComputeModuleOutput("module", "row", []byte(raw), schema, true)
+		var typed *computemodule.Error
+		if !errors.As(err, &typed) || typed.Code != computemodule.CodeABI || typed.Err != nil || strings.Contains(err.Error(), "private-output-canary") {
+			t.Fatalf("value-bearing output failure retained: %v", err)
+		}
 	}
 }
 

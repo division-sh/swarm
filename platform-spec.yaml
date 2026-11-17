@@ -3440,7 +3440,43 @@ compute_module_contracts:
       rows and bind only computed.*. Public `compute.operation: compute_module`
       is forbidden; `compute_module` is not a standalone handler field and does
       not overload the existing compute primitive vocabulary.
-    input_roots: '`compute_module.input` values must be simple explicit paths rooted in payload, entity, event, or computed.'
+    input_roots: '`compute_module.input` remains a required nonempty map of simple explicit paths rooted in payload, state, instance, event, or computed.'
+    secret_input: |
+      A Wasm compute_module row may additionally declare `secret_input`, a map
+      from a declared module input parameter to one static stored key name.
+      Ordinary and secret inputs jointly satisfy the module input schema;
+      overlapping, duplicate or undeclared parameters are refused. Python and
+      other row families cannot use this field. A secret-only invocation does
+      not remove the required ordinary input map or justify a dummy input.
+      Any static key the author names is readable by that invocation; there is
+      no deployment/per-flow allowlist or store-listing capability. Imported
+      code is trusted with this access. Provider/session/managed stores are not
+      alternative key sources. Missing, unusable or invalid-text values refuse;
+      valid strings retain their exact value, without crypto decoding or a
+      binary handoff. The module owns its key encoding and all signing logic.
+      Each distinct key is observed atomically once per invocation through the
+      existing snapshot owner. Updates remain allowed; an in-flight invocation
+      keeps its observation and later invocations see current values. There is
+      no run-wide freeze, historical key store or atomic multi-key transaction.
+      Source requirement projection is store-free and retains each compute use;
+      an admitted channel use of the same key never waives that requirement.
+    secret_input_evidence: |
+      Guest input is private to that invocation, not frame/result state, a
+      journal event, retry payload, log detail, temporary file or readback.
+      InputHash uses ordinary inputs and the complete parameter-to-key-name
+      map with an unambiguous domain marker, never the injected values or a
+      value-derived commitment/token. No-secret input identities stay unchanged.
+      OutputHash and the existing trace carrier stay unchanged. Comparison is
+      conditional on existing expected traces and occurs after execution;
+      equal outputs do not prove an unchanged key. Ordinary replay and recovery
+      do not acquire a comparison, commitment or historical-key mechanism.
+      Errors for a secret-bearing call carry no values, including every
+      wrapped/joined cause under serve --verbose. Fixed typed categories and
+      safe declared identities remain; the HTTP verbose exception is unchanged
+      and does not apply to this compute promise. Author-returned values are
+      ordinary data: a module can return the key or a transform, and normal
+      output hashing/persistence applies. No universal output secrecy,
+      constant-time, side-channel or memory-zeroization guarantee is made.
     target_namespace: '`compute_module.into` MUST be a simple explicit computed.* path. Entity persistence is forbidden for
       module outputs unless a separate declared data write explicitly persists the value under its own owner.'
     side_effects: |
@@ -11293,16 +11329,24 @@ tool_model:
       - OAuth or managed credential lifecycle
       - external vault/team secret management
       - boot-check severity policy
-    contract_reference: Tools, MCP servers, and native web-search provider configuration reference credentials by key name,
+    contract_reference: Tools, MCP servers, Wasm compute_module.secret_input, and native web-search provider configuration reference credentials by key name,
       never by value. The key name appears in tools.yaml (credentials field), policy.yaml (mcp_servers.*.credentials_key),
       and policy.yaml (web_search_provider.credentials_key). The platform resolves the key to the secret value at call time
       only.
-    boot_validation: At boot, the platform checks that every credential key referenced by tools, MCP servers, and native
+    boot_validation: At boot, the platform checks that every credential key referenced by tools, MCP servers, Wasm compute_module.secret_input, and native
       web-search provider configuration exists in the credential store (any tier). Missing keys log a warning — the tool may
       be unconfigured in this deployment.
-    platform_guarantee: The platform never logs, indexes, or persists credential values in the event store, dead letters, or
-      any platform table. Credentials exist only in the credential store and in-flight tool requests. Supported operator
-      surfaces never return credential values after write — only metadata.
+    platform_guarantee: |
+      The platform's credential injection path does not log, index, persist or
+      read back injected values in event/dead-letter/platform tables. Supported
+      credential operator surfaces return metadata after write, not values.
+      The existing explicit credentialed-HTTP serve --verbose internal-failure
+      diagnostic exception remains as declared under credentialed_http_tools.
+      For compute_module.secret_input the platform never persists, logs or
+      reads back the value it injects, and its errors for such a call carry no
+      values, including under serve --verbose. Author code is trusted with the
+      key, and what it returns is ordinary data. That ordinary output can expose
+      and persist the key or a transform; this is not an output-secrecy promise.
   managed_credential_store:
     description: >
       Sibling source authority for deployment-level managed OAuth/token credentials used by outbound HTTP tools. It owns

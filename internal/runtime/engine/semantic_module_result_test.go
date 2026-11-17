@@ -46,7 +46,7 @@ func TestComputeModuleSemanticResultFeedsIntegerArithmeticAndReplay(t *testing.T
 		t.Fatal("module replay changed output")
 	}
 	for _, number := range []string{"7", "7.0", "7e0"} {
-		output, err := decodeComputeModuleOutput("numeric", "row", []byte(`{"n":`+number+`}`), map[string]any{"type": "object", "properties": map[string]any{"n": map[string]any{"type": "integer"}}})
+		output, err := decodeComputeModuleOutput("numeric", "row", []byte(`{"n":`+number+`}`), map[string]any{"type": "object", "properties": map[string]any{"n": map[string]any{"type": "integer"}}}, false)
 		if err != nil || output["n"] != int64(7) {
 			t.Fatalf("%s output=%#v err=%v", number, output, err)
 		}

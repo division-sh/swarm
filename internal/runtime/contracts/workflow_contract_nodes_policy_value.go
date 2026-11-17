@@ -23,9 +23,13 @@ func projectNodePolicyValueRow(value yamlsource.Value, kind string) (PolicySheet
 		intoValidator = validatePolicySheetComputeModuleInto
 		operation, rowKind = ComputeOpModule, PolicySheetRowKindModule
 	}
-	fields, err := nodeValueFields(value, label, map[string]struct{}{
+	allowed := map[string]struct{}{
 		nameKey: {}, "input": {}, "into": {},
-	})
+	}
+	if kind == "compute_module" {
+		allowed["secret_input"] = struct{}{}
+	}
+	fields, err := nodeValueFields(value, label, allowed)
 	if err != nil {
 		return PolicySheetRowMetadata{}, nil, err
 	}
@@ -58,9 +62,42 @@ func projectNodePolicyValueRow(value yamlsource.Value, kind string) (PolicySheet
 		compute.Validation, metadata.Validation = spec, spec
 	} else {
 		spec := &ComputeModuleSpec{Module: name, Into: into, Input: inputs, InputPaths: parsed}
+		if secret, present := fields["secret_input"]; present {
+			spec.SecretInput, err = projectNodePolicySecretInputsValue(secret)
+			if err != nil {
+				return PolicySheetRowMetadata{}, nil, err
+			}
+		}
 		compute.Module, metadata.Module = spec, spec
 	}
 	return metadata, compute, nil
+}
+
+func projectNodePolicySecretInputsValue(value yamlsource.Value) (map[string]string, error) {
+	fields, err := value.Mapping()
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]string, len(fields))
+	for _, field := range fields {
+		name := strings.TrimSpace(field.Name)
+		if !isPolicySheetPathSegment(name) {
+			return nil, fmt.Errorf("POLICY-SHEET-ROW: compute_module.secret_input key %q at %s must be a short input name", name, field.KeyLocation)
+		}
+		if _, duplicate := out[name]; duplicate {
+			return nil, fmt.Errorf("POLICY-SHEET-ROW: compute_module.secret_input duplicate key %q at %s", name, field.KeyLocation)
+		}
+		key, err := nodeValueText(field.Value, "compute_module.secret_input."+name)
+		if err != nil {
+			return nil, err
+		}
+		key = strings.TrimSpace(key)
+		if key == "" {
+			return nil, fmt.Errorf("POLICY-SHEET-ROW: compute_module.secret_input.%s at %s requires a stored key name", name, field.Value.Location())
+		}
+		out[name] = key
+	}
+	return out, nil
 }
 
 func projectNodePolicyRequiredField(fields map[string]yamlsource.Value, key, label string, parent yamlsource.Value) (string, error) {
