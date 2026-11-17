@@ -31,7 +31,7 @@ func TestDormantIngressTelegramScaffoldJourney(t *testing.T) {
 		{"test", "telegram-agent", "tests/smoke.yaml"},
 	} {
 		var out, errOut bytes.Buffer
-		if code := executeCLIFrom(context.Background(), cwd, args, &out, &errOut, nil); code != 0 {
+		if code := executeCLIFrom(context.Background(), cwd, args, &out, &errOut, nil, ChannelRegistrations()); code != 0 {
 			t.Fatalf("public command %v exited %d: stdout=%s stderr=%s", args, code, &out, &errOut)
 		}
 		if args[0] == "test" && !strings.Contains(out.String(), "swarm test ok: scenarios=1") {

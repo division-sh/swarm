@@ -37,7 +37,7 @@ type serveSessionBootstrap struct {
 type serveSessionBootstrapAttempt struct {
 	mu          sync.Mutex
 	operation   channelonboarding.Operation
-	connection  *sessionprovider.RuntimeConnection
+	connection  serveSessionConnection
 	done        chan struct{}
 	err         error
 	bootstrap   bool
@@ -48,7 +48,7 @@ type serveSessionBootstrapAttempt struct {
 	connectDone chan struct{}
 }
 
-func (a *serveSessionBootstrapAttempt) current(ctx context.Context) (*sessionprovider.RuntimeConnection, error) {
+func (a *serveSessionBootstrapAttempt) current(ctx context.Context) (serveSessionConnection, error) {
 	connection, err := a.finishedConnection(ctx)
 	if err != nil {
 		return nil, err
@@ -61,7 +61,7 @@ func (a *serveSessionBootstrapAttempt) current(ctx context.Context) (*sessionpro
 
 // Completed preparation/transport is historical ownership, not current health
 // or execution authority. Those consumers retain their own exact checks.
-func (a *serveSessionBootstrapAttempt) finishedConnection(ctx context.Context) (*sessionprovider.RuntimeConnection, error) {
+func (a *serveSessionBootstrapAttempt) finishedConnection(ctx context.Context) (serveSessionConnection, error) {
 	if ctx == nil {
 		return nil, channelonboarding.ErrInvalidRequest
 	}
@@ -93,7 +93,7 @@ func (a *serveSessionBootstrapAttempt) finishedConnection(ctx context.Context) (
 	}
 }
 
-func (s *serveSessionBootstrap) currentConnection(ctx context.Context, operationID string) (*sessionprovider.RuntimeConnection, error) {
+func (s *serveSessionBootstrap) currentConnection(ctx context.Context, operationID string) (serveSessionConnection, error) {
 	s.mu.Lock()
 	attempt := s.connections[operationID]
 	s.mu.Unlock()
@@ -125,10 +125,14 @@ func (s *serveSessionBootstrap) QualifySessionPlan(candidate channelonboarding.C
 	if candidate.Posture != channelonboarding.ActivationSessionConnection {
 		return &operatorchannel.SessionProviderUnavailableError{Provider: candidate.Provider}
 	}
-	return sessionprovider.QualifyBootstrapPlan(candidate.Plan)
+	binding, found := installedChannelProvider(candidate.Provider)
+	if !found || binding.qualify == nil {
+		return &operatorchannel.SessionProviderUnavailableError{Provider: candidate.Provider}
+	}
+	return binding.qualify(candidate.Plan)
 }
 
-func (s *serveSessionBootstrap) connection(operationID string) *sessionprovider.RuntimeConnection {
+func (s *serveSessionBootstrap) connection(operationID string) serveSessionConnection {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if attempt := s.connections[operationID]; attempt != nil {
@@ -228,7 +232,7 @@ func (s *serveSessionBootstrap) validateResumeSession(ctx context.Context, op ch
 	}
 	if op.Provider != candidate.Provider || op.Posture != candidate.Posture || op.Interface.Normalized() != candidate.Interface.Normalized() ||
 		!op.Coordinate.MatchesRuntimeContext(candidate.Coordinate) || op.TargetSelector != candidate.Target.Selector ||
-		op.Phase == channelonboarding.PhaseFailed || op.Phase == channelonboarding.PhaseRetired || op.ValidateSessionAccount() != nil ||
+		op.Phase == channelonboarding.PhaseFailed || op.Phase == channelonboarding.PhaseRetired || op.ValidateSessionAccount(op.ProviderFacts()) != nil ||
 		op.SessionAccount == (operatorchannel.SessionAccountAdmission{}) && op.Phase != channelonboarding.PhaseActivatingProvider {
 		return channelonboarding.ErrRevisionConflict
 	}
@@ -248,7 +252,7 @@ func (s *serveSessionBootstrap) validateResumeSession(ctx context.Context, op ch
 }
 
 func (s *serveSessionBootstrap) RollSessionSource(ctx context.Context, op channelonboarding.Operation, candidate channelonboarding.Candidate) (channelonboarding.Operation, error) {
-	if !op.AccountConnection() || op.Phase != channelonboarding.PhaseSucceeded || op.IdentityOperationID != "" ||
+	if !op.AccountConnection(op.ProviderFacts()) || op.Phase != channelonboarding.PhaseSucceeded || op.IdentityOperationID != "" ||
 		op.Provider != candidate.Provider || op.Interface.Normalized() != candidate.Interface.Normalized() ||
 		op.TargetSelector != candidate.Target.Selector || candidate.Ceremony != op.Ceremony || candidate.ValidateDeclaration() != nil {
 		return op, channelonboarding.ErrRevisionConflict
@@ -305,7 +309,7 @@ func (s *serveSessionBootstrap) validateRetainedSessionOperation(ctx context.Con
 		return context.Cause(ctx)
 	}
 	if op.Posture != channelonboarding.ActivationSessionConnection || op.Phase == channelonboarding.PhaseFailed ||
-		op.Phase == channelonboarding.PhaseRetired || op.ValidateSessionAccount() != nil {
+		op.Phase == channelonboarding.PhaseRetired || op.ValidateSessionAccount(op.ProviderFacts()) != nil {
 		return channelonboarding.ErrRevisionConflict
 	}
 	operations, err := s.operationsFor(op)
@@ -350,7 +354,7 @@ func (s *serveSessionBootstrap) operationsFor(op channelonboarding.Operation) (c
 	return scoped.DeploymentChannelOperations(), nil
 }
 
-func (s *serveSessionBootstrap) registerDeploymentConnection(op channelonboarding.Operation, connection *sessionprovider.RuntimeConnection) error {
+func (s *serveSessionBootstrap) registerDeploymentConnection(op channelonboarding.Operation, connection serveSessionConnection) error {
 	if !op.DeploymentRegistration || connection == nil || connection.Closed() || connection.ConnectionID() != op.SessionConnectionID {
 		return channelonboarding.ErrInvalidRequest
 	}
@@ -537,7 +541,7 @@ func serveSessionRetirementRequired(ctx context.Context, store channelonboarding
 				return false, channelonboarding.ErrInvalidRequest
 			}
 			current, err := channelonboarding.RegisteredAccount(ctx, scoped.DeploymentChannelOperations(),
-				channelonboarding.AccountReference{Provider: op.Provider, Account: op.AccountReference})
+				channelonboarding.AccountReference{Provider: op.Provider, Account: op.AccountReference}, op.ProviderFacts())
 			if errors.Is(err, channelonboarding.ErrNotFound) {
 				return true, nil
 			}
@@ -597,14 +601,16 @@ func (s *serveSessionBootstrap) completeSessionAttempt(ctx, owned context.Contex
 	// is launched here; a live explicit request or startup owner must connect it.
 	options := sessionprovider.RuntimeConnectionOptions{Directory: s.directory, InvocationState: s.invocationState, OperationID: op.OperationID,
 		Store: s.store, Credentials: s.credentials, Plan: candidate.Plan, Incoming: incoming, ProcessBinding: processBinding}
-	var connection *sessionprovider.RuntimeConnection
-	if bootstrap {
-		connection, err = sessionprovider.OpenRuntimeBootstrap(owned, options)
-	} else {
-		connection, err = sessionprovider.OpenRuntimeConnection(owned, options)
+	binding, installed := installedChannelProvider(candidate.Provider)
+	if !installed || binding.runtime == nil {
+		return &operatorchannel.SessionProviderUnavailableError{Provider: candidate.Provider}
 	}
+	options.Plan = options.Plan.WithProviderFacts(binding.facts)
+	connection, err := binding.runtime(owned, options, bootstrap)
 	s.mu.Lock()
-	attempt.connection = connection
+	if connection != nil {
+		attempt.connection = connection
+	}
 	s.mu.Unlock()
 	return err
 }
@@ -637,8 +643,8 @@ func (s *serveSessionBootstrap) ValidateActivityRequestAccount(ctx context.Conte
 	return connection.ValidateActivityRequestAccount(ctx, account, parent, revision)
 }
 
-func (s *serveSessionBootstrap) activityAccountConnection(ctx context.Context, account operatorchannel.SessionAccountAdmission) (*sessionprovider.RuntimeConnection, error) {
-	if s == nil || ctx == nil || ctx.Err() != nil || account.Validate() != nil || account.Provider != "whatsapp" {
+func (s *serveSessionBootstrap) activityAccountConnection(ctx context.Context, account operatorchannel.SessionAccountAdmission) (serveSessionConnection, error) {
+	if s == nil || ctx == nil || ctx.Err() != nil || account.Validate() != nil || !isInstalledSession(account.Provider) {
 		return nil, channelonboarding.ErrInvalidRequest
 	}
 	s.mu.Lock()

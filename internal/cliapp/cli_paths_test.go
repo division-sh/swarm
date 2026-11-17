@@ -148,7 +148,7 @@ func TestRunVerifyCommandConsumesExplicitSourceRoot(t *testing.T) {
 	missingSource := filepath.Join(repo, "tests", "tier8-boot-verification", "test-boot-success", "zzz-not-a-real-dir")
 
 	var out bytes.Buffer
-	opts := defaultVerifyCommandOptions()
+	opts := defaultVerifyCommandOptionsForTest()
 	opts.sourceRoot = missingSource
 	code := runVerifyCommandWithOutput(context.Background(), repo, opts, &out, &out)
 	if code == 0 {

@@ -1,6 +1,8 @@
 package generationauthority_test
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"context"
 	"database/sql"
 	"errors"
@@ -36,7 +38,7 @@ func nativeGenerationAdmissionFixture(t *testing.T, sqlite bool) generationNativ
 	var fixture generationNativeFixture
 	var bootstrap func(context.Context, schemastore.SchemaBootstrapRequest) error
 	if sqlite {
-		owner, db, err := construction.OpenSQLiteRuntimeForServing(ctx, filepath.Join(t.TempDir(), "admission.db"))
+		owner, db, err := construction.OpenSQLiteRuntimeForServing(ctx, filepath.Join(t.TempDir(), "admission.db"), channelfixture.Facts)
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -8,6 +8,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/channelprovider"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
@@ -33,9 +34,9 @@ type incomingPayload struct {
 	Ephemeral           bool    `json:"ephemeral"`
 }
 
-func captureSDKMessage(scope captureScope, source captureSource, occurrenceID string, event *events.Message, receivedAt time.Time) (capturedEvent, error) {
+func captureSDKMessage(scope captureScope, source captureSource, occurrenceID string, event *events.Message, receivedAt time.Time, facts channelprovider.Binding) (capturedEvent, error) {
 	var result capturedEvent
-	if err := scope.Validate(); err != nil {
+	if err := scope.Validate(facts); err != nil {
 		return result, err
 	}
 	accountJID, err := types.ParseJID(scope.Session.AccountRef)
@@ -43,7 +44,7 @@ func captureSDKMessage(scope captureScope, source captureSource, occurrenceID st
 		return result, errCaptureScopeChanged
 	}
 	account := channelonboarding.AccountReference{Provider: "whatsapp", Account: "+" + accountJID.User}
-	if err := account.Validate(); err != nil {
+	if err := account.Validate(facts); err != nil {
 		return result, errCaptureScopeChanged
 	}
 	conversationScope, err := validateIncomingEnvelope(event)
@@ -68,6 +69,7 @@ func captureSDKMessage(scope captureScope, source captureSource, occurrenceID st
 	}
 	result = capturedEvent{Scope: scope, OccurrenceID: occurrenceID, Conversation: payload.Conversation,
 		EventID: event.Info.ID, Kind: kind, Body: body, ReceivedAt: receivedAt.UTC(), Source: source}
+	result = result.WithProviderFacts(facts)
 	return result, result.Validate()
 }
 

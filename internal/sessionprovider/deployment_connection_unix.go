@@ -9,26 +9,8 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
-	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/packs"
-	"github.com/division-sh/swarm/internal/providertriggers"
-	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 )
-
-type DeploymentConnectionOptions struct {
-	OperatorAccount    channelonboarding.AccountReference
-	OperatorBinding    func(context.Context, channelonboarding.Operation) (channelonboarding.Result, error)
-	RegisteredBusiness RegisteredBusinessSelector
-	Directory          string
-	OperationID        string
-	Principal          operatorchannel.Principal
-	Process            *worklifetime.Process
-	Operations         channelonboarding.OperationStore
-	Store              channelonboarding.Store
-	Credentials        operatorchannel.CredentialCurrentness
-	Plan               packs.SatisfactionPlan
-	Trigger            providertriggers.InboundAdmissionPlan
-}
 
 // OpenDeploymentConnection reuses private SDK possession and pairing under the
 // invocation's process lifetime. No runtime source or executable channel exists.
@@ -49,7 +31,7 @@ func OpenDeploymentConnection(ctx context.Context, opts DeploymentConnectionOpti
 		op.Provider != "whatsapp" || op.Posture != channelonboarding.ActivationSessionConnection ||
 		op.Phase != channelonboarding.PhaseActivatingProvider && op.Phase != channelonboarding.PhaseAwaitingExternalIdentity &&
 			op.Phase != channelonboarding.PhaseAwaitingOperatorConfirmation && op.Phase != channelonboarding.PhaseSucceeded ||
-		op.ValidateSessionAccount() != nil || identity.Normalized() != op.Interface.Normalized() {
+		op.ValidateSessionAccount(op.ProviderFacts()) != nil || identity.Normalized() != op.Interface.Normalized() {
 		return nil, errPairingScope
 	}
 	if err := QualifyBootstrapPlan(opts.Plan); err != nil {

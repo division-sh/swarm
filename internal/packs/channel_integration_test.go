@@ -17,6 +17,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
 	"github.com/division-sh/swarm/internal/yamlsource"
+	"github.com/division-sh/swarm/tests/support/channelfixture"
 	"github.com/division-sh/swarm/tests/support/testutil/packfixture"
 	"github.com/google/uuid"
 )
@@ -319,7 +320,7 @@ func TestTelegramOnboardingProfileCompilesAsWebhookTextChallenge(t *testing.T) {
 }
 
 func TestLearnedActivationCompilationUsesDurableConversationDestination(t *testing.T) {
-	plan := loadTelegramChannelPlan(t)
+	plan := loadTelegramChannelPlan(t).WithProviderFacts(channelfixture.For("telegram"))
 	profile, ok := plan.OnboardingProfile()
 	if !ok {
 		t.Fatal("Telegram onboarding profile is missing")
@@ -379,7 +380,7 @@ func TestLearnedActivationCompilationUsesDurableConversationDestination(t *testi
 		op := channelonboarding.Operation{DeploymentRegistration: true, AccountConfirmed: true,
 			OperationID: uuid.NewString(), Revision: 3, Provider: "telegram", AccountReference: "420079",
 			Posture: channelonboarding.ActivationWebhookRegistration, Phase: channelonboarding.PhaseSucceeded,
-			CredentialAdmissions: activation.CredentialAdmissions}
+			CredentialAdmissions: activation.CredentialAdmissions}.WithProviderFacts(candidate.ProviderFacts())
 		registered, err := channelonboarding.CompileRegisteredActivation(candidate, op)
 		if err != nil {
 			t.Fatal(err)

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/division-sh/swarm/internal/channelprovider"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 )
 
@@ -35,7 +36,7 @@ func (s *Service) DeploymentOperatorBinding(ctx context.Context, ref AccountRefe
 	if !s.deployment || ref != s.operatorAccount {
 		return Result{}, ErrNotFound
 	}
-	op, err := RegisteredAccount(ctx, s.store, ref)
+	op, err := RegisteredAccount(ctx, s.store, ref, s.providerFacts)
 	if err != nil {
 		return Result{}, err
 	}
@@ -70,8 +71,8 @@ func (s *Service) DeploymentOperatorBinding(ctx context.Context, ref AccountRefe
 
 // RegisteredAccount selects only confirmed deployment evidence. A pending
 // operator ceremony does not withdraw an already approved customer account.
-func RegisteredAccount(ctx context.Context, operations OperationStore, ref AccountReference) (Operation, error) {
-	if operations == nil || ref.Validate() != nil {
+func RegisteredAccount(ctx context.Context, operations OperationStore, ref AccountReference, facts channelprovider.Binding) (Operation, error) {
+	if operations == nil || ref.Validate(facts) != nil {
 		return Operation{}, ErrInvalidRequest
 	}
 	rows, err := operations.ListChannelOnboardingOperations(ctx)
@@ -84,7 +85,7 @@ func RegisteredAccount(ctx context.Context, operations OperationStore, ref Accou
 			!op.AccountConfirmed || op.LogoutCompleted || op.Phase == PhaseRetired || op.Phase == PhaseFailed {
 			continue
 		}
-		if op.ValidateDeploymentRegistration() != nil || op.ValidateSessionAccount() != nil ||
+		if op.ValidateDeploymentRegistration(op.ProviderFacts()) != nil || op.ValidateSessionAccount(op.ProviderFacts()) != nil ||
 			(op.Phase != PhaseSucceeded && op.Phase != PhaseAwaitingExternalIdentity && op.Phase != PhaseAwaitingOperatorConfirmation) {
 			return Operation{}, fmt.Errorf("%w: account registration is not usable", ErrConflict)
 		}
@@ -101,12 +102,12 @@ func RegisteredAccount(ctx context.Context, operations OperationStore, ref Accou
 
 // RegisteredAccountStatus observes durable link state only. The retained
 // transport owner, when present, separately supplies live connection health.
-func RegisteredAccountStatus(ctx context.Context, operations OperationStore, ref AccountReference) (AccountStatus, Operation, error) {
-	if ref.Validate() != nil {
+func RegisteredAccountStatus(ctx context.Context, operations OperationStore, ref AccountReference, facts channelprovider.Binding) (AccountStatus, Operation, error) {
+	if ref.Validate(facts) != nil {
 		return AccountStatus{}, Operation{}, ErrInvalidRequest
 	}
 	status := AccountStatus{Provider: ref.Provider, Account: ref.Account, State: "stopped", Health: "disconnected", Holders: []AccountHolder{}}
-	op, err := RegisteredAccount(ctx, operations, ref)
+	op, err := RegisteredAccount(ctx, operations, ref, facts)
 	if err == ErrNotFound {
 		status.Reason = "not_linked"
 		return status, Operation{}, nil
@@ -122,7 +123,7 @@ func (s *Service) DeploymentAccountStatus(ctx context.Context, ref AccountRefere
 	if !s.deployment {
 		return AccountStatus{}, ErrInvalidRequest
 	}
-	status, op, err := RegisteredAccountStatus(ctx, s.store, ref)
+	status, op, err := RegisteredAccountStatus(ctx, s.store, ref, s.providerFacts)
 	if err != nil || op.OperationID == "" {
 		return status, err
 	}

@@ -155,7 +155,7 @@ func compileSessionActivityDeclaration(source semanticview.Source, site contract
 		return absent, "", "", fmt.Errorf("session activity requires its scoped private connector")
 	}
 	target, native := tool.InProcess()
-	if !native || target != contracts.ToolInProcessWhatsAppSendText {
+	if !native || !target.IsWrite() {
 		return absent, "", "", fmt.Errorf("session activity has no supported private write contract")
 	}
 	if _, hasAccount := site.Spec.Input["account"]; !hasAccount {

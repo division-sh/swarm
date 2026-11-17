@@ -1,6 +1,8 @@
 package testconstruction
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"context"
 	"errors"
 	"fmt"
@@ -21,9 +23,9 @@ func OpenIssue2564WorkloadObservationForTest(ctx context.Context, backend, locat
 	case "postgres":
 		// H2 retains a sampler connection beside independent snapshot reads;
 		// the one-connection, snapshot-scoped inspection transport cannot do both.
-		selected, err = store.NewPostgresStore(location)
+		selected, err = store.NewPostgresStore(location, channelfixture.Facts)
 	case "sqlite":
-		selected, err = store.NewSQLiteRuntimeStore(location)
+		selected, err = store.NewSQLiteRuntimeStore(location, channelfixture.Facts)
 	default:
 		return nil, fmt.Errorf("unknown issue2564 observation backend %q", backend)
 	}

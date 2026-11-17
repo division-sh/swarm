@@ -100,7 +100,7 @@ func TestServingProbeStaysAliveWithoutExecutionBeforeAdmission(t *testing.T) {
 func TestServingStandbyPrecedesStoreProjectionBothStores(t *testing.T) {
 	for _, backend := range []backendselection.Backend{backendselection.BackendSQLite, backendselection.BackendPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
-			request := selected.RuntimeRequest{Selection: backendselection.Selection{Backend: backend}}
+			request := selected.RuntimeRequest{Selection: backendselection.Selection{Backend: backend}, ProviderFacts: installedChannelFactsFor}
 			cfg := &config.Config{}
 			if backend == backendselection.BackendSQLite {
 				request.Selection.SQLitePath = filepath.Join(t.TempDir(), "runtime.db")

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/channelprovider"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/types"
 	"google.golang.org/protobuf/proto"
@@ -27,11 +27,11 @@ type outboundReply struct {
 func encodeOutboundText(destination, text string, reply *outboundReply) (types.JID, *waE2E.Message, error) {
 	canonical := destination
 	if strings.HasPrefix(destination, "+") {
-		account := channelonboarding.AccountReference{Provider: "whatsapp", Account: destination}
-		if err := account.Validate(); err != nil {
+		account, err := channelprovider.WhatsAppAccount(destination)
+		if err != nil || account != destination {
 			return types.JID{}, nil, fmt.Errorf("%w: destination shape=phone-like", errOutboundTarget)
 		}
-		canonical = strings.TrimPrefix(account.Account, "+") + "@" + types.DefaultUserServer
+		canonical = strings.TrimPrefix(account, "+") + "@" + types.DefaultUserServer
 	}
 	to, err := types.ParseJID(canonical)
 	if err != nil || to.String() != canonical || to.User == "" || to.Device != 0 ||

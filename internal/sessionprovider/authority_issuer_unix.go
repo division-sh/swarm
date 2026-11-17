@@ -5,6 +5,7 @@ package sessionprovider
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"sync"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
@@ -19,7 +20,7 @@ type sessionAuthorityOwner struct {
 	mu          sync.Mutex
 	releaseErr  error
 	parent      sessionWorkParent
-	state       *sessionState
+	state       retainedSessionAccountReader
 	store       channelonboarding.Store
 	operations  channelonboarding.OperationStore
 	operation   channelonboarding.Operation
@@ -31,12 +32,24 @@ type sessionWorkParent interface {
 	BeginStanding(context.Context) (*worklifetime.Lease, error)
 }
 
-func newSessionAuthorityOwner(state *sessionState, store channelonboarding.OperationStore, operation channelonboarding.Operation, credentials operatorchannel.CredentialCurrentness, invocation sessionWorkParent) (*sessionAuthorityOwner, error) {
-	if state == nil || state.directory == nil || store == nil || operation.Provider != "whatsapp" || operation.ValidateSessionAccount() != nil ||
-		operation.SessionAccount.ConnectionID != state.directory.connectionID || !operation.DeploymentRegistration && operation.Coordinate.ValidateContext() != nil {
+type retainedSessionAccountReader interface {
+	sessionAccountScope() (provider, connection string, occurrence context.Context, err error)
+	acquireSessionAccount(context.Context, operatorchannel.SessionAccountAdmission) (context.Context, func() bool, func(), error)
+	failSessionAuthority(error)
+}
+
+func newSessionAuthorityOwner(state retainedSessionAccountReader, store channelonboarding.OperationStore, operation channelonboarding.Operation, credentials operatorchannel.CredentialCurrentness, invocation sessionWorkParent) (*sessionAuthorityOwner, error) {
+	if state == nil || reflect.ValueOf(state).Kind() == reflect.Pointer && reflect.ValueOf(state).IsNil() || store == nil ||
+		operation.ValidateSessionAccount(operation.ProviderFacts()) != nil || !operation.DeploymentRegistration && operation.Coordinate.ValidateContext() != nil {
 		return nil, fmt.Errorf("session authority requires its original declared operation and private state")
 	}
-	occurrence := state.currentOccurrence()
+	provider, connection, occurrence, err := state.sessionAccountScope()
+	if !operation.ProviderFacts().Session() || operation.Provider != provider || operation.SessionAccount.ConnectionID != connection {
+		return nil, fmt.Errorf("session authority requires its original declared operation and private state")
+	}
+	if err != nil {
+		return nil, err
+	}
 	if occurrence == nil {
 		return nil, errClientOccurrenceFenced
 	}
@@ -50,7 +63,7 @@ func newSessionAuthorityOwner(state *sessionState, store channelonboarding.Opera
 	if !ok {
 		return nil, errRuntimeConnection
 	}
-	parent, ok := worklifetime.RuntimeOccurrenceFromContext(occurrence.ctx)
+	parent, ok := worklifetime.RuntimeOccurrenceFromContext(occurrence)
 	if !ok || parent.Identity().RuntimeInstanceID != operation.Coordinate.RuntimeInstanceID || parent.Identity().BundleHash != operation.Coordinate.BundleHash {
 		return nil, fmt.Errorf("session authority requires its owning runtime occurrence")
 	}
@@ -96,13 +109,12 @@ func (o *sessionAuthorityOwner) AdmitSessionAccount(ctx context.Context, expecte
 		!op.DeploymentRegistration && !op.Coordinate.MatchesDeclaration(o.operation.Coordinate) || op.DeploymentRegistration && !op.AccountConfirmed {
 		return authority.Admission{}, errCaptureScopeChanged
 	}
-	occurrence := o.state.currentOccurrence()
-	if occurrence == nil {
-		return authority.Admission{}, errClientOccurrenceFenced
-	}
-	workCtx, release, err := occurrence.acquire(ctx)
+	workCtx, current, release, err := o.state.acquireSessionAccount(ctx, expected)
 	if err != nil {
 		return authority.Admission{}, err
+	}
+	if release == nil {
+		return authority.Admission{}, errSessionAccount
 	}
 	retained := false
 	defer func() {
@@ -110,15 +122,8 @@ func (o *sessionAuthorityOwner) AdmitSessionAccount(ctx context.Context, expecte
 			release()
 		}
 	}()
-	device, err := o.state.device(workCtx)
-	if err != nil {
-		return authority.Admission{}, err
-	}
-	if device.ID == nil || device.ID.ToNonAD().String() != expected.AccountRef || workCtx.Err() != nil {
+	if workCtx == nil || workCtx.Err() != nil || current == nil {
 		return authority.Admission{}, errSessionAccount
-	}
-	current := func() bool {
-		return o.state.ownsConnectedOccurrence(workCtx, occurrence)
 	}
 	if !current() {
 		return authority.Admission{}, errClientOccurrenceFenced
@@ -140,16 +145,6 @@ func (o *sessionAuthorityOwner) releaseRuntime(work *worklifetime.Lease) {
 		o.mu.Lock()
 		o.releaseErr = err
 		o.mu.Unlock()
-		if occurrence := o.state.currentOccurrence(); occurrence != nil {
-			occurrence.recordFailure("runtime release failed", false)
-			occurrence.mu.Lock()
-			callbacks := occurrence.callbacks
-			occurrence.mu.Unlock()
-			if callbacks != nil {
-				callbacks.fail("crash", err)
-				return
-			}
-			occurrence.fence()
-		}
+		o.state.failSessionAuthority(err)
 	}
 }

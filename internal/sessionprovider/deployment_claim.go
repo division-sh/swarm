@@ -91,7 +91,7 @@ func pollDeploymentIdentityClaim(ctx context.Context, client *http.Client, ident
 }
 
 func ConsumeDeploymentWebhookClaim(ctx context.Context, opts DeploymentConnectionOptions, identities operatorchannel.Store, account channelonboarding.AccountReference, credential func(channelonboarding.CredentialAdmission) bool, admit func(providertriggers.InboundAdmissionPlan) (providertriggers.Delivery, error), current func() bool) (bool, error) {
-	if account.Provider != "telegram" || account.Validate() != nil || credential == nil || admit == nil || current == nil {
+	if account.Provider != "telegram" || account.Validate(opts.Plan.ProviderFacts()) != nil || credential == nil || admit == nil || current == nil {
 		return false, channelonboarding.ErrInvalidRequest
 	}
 	selected, err := opts.Plan.InterfaceIdentity()

@@ -140,7 +140,7 @@ func proveDeploymentLogoutDuringAcknowledgment(t *testing.T, h *channelOnboardin
 	}()
 	go func() {
 		done <- cliapp.Execute(ctx, []string{"--config", h.opts.ConfigPath, "channel", "logout", "telegram", "420079",
-			"--api-server", h.endpoint, "--json"}, &out, &errOut, nil, nil, OpenChannelRegistration)
+			"--api-server", h.endpoint, "--json"}, &out, &errOut, nil, nil, ChannelRegistrations())
 	}()
 	select {
 	case code := <-done:

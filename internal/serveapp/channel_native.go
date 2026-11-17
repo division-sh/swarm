@@ -297,7 +297,7 @@ func (d *serveChannelDeliveryDispatcher) reconcileNativeInboxActivation(ctx cont
 		responsibility := channelonboarding.AdmissionResponsibility{OperationID: op.OperationID, OperationRevision: activation.OperationRevision,
 			ActivationRevision: op.ActivationRevision, Coordinate: op.Coordinate, TargetSelector: op.TargetSelector,
 			Provider: op.Provider, Credentials: op.CredentialAdmissions, SessionAccount: op.SessionAccount}
-		if responsibility.MatchesAccountConnection(op, activation) {
+		if responsibility.MatchesAccountConnection(op, activation, op.ProviderFacts()) {
 			return nil // Customer transport has no operator Inbox to provision.
 		}
 		return channelonboarding.ErrRevisionConflict

@@ -1,6 +1,8 @@
 package runtimepersistence
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"context"
 	"database/sql"
 	"testing"
@@ -34,7 +36,7 @@ func seedNormalRunCompletionFixture(t *testing.T, ctx context.Context, db *sql.D
 	if flowTemplate == "" {
 		flowTemplate = "example"
 	}
-	selected := newPostgresStoreWithBackend(mustPostgresBackend(db))
+	selected := newPostgresStoreWithBackend(mustPostgresBackend(db), channelfixture.Facts)
 	ctx = originalStoreFixtureContext(t, ctx, selected)
 	requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{
 		RunID: runID, Origin: semanticEventRunOriginForTest(t, eventID, "example.started"),

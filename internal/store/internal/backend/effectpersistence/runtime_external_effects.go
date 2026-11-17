@@ -136,7 +136,7 @@ func (s *EffectPostgresOwner) ReconcileExternalEffectAttempts(ctx context.Contex
 			if err := admitExternalEffectRecoveryCandidates(request, candidates); err != nil {
 				return err
 			}
-			summary, err = reconcileExternalEffectAttemptsPostgres(txctx, tx, s.llm, s.delivery, s.directives, mutation, candidates, request.Now())
+			summary, err = reconcileExternalEffectAttemptsPostgres(txctx, s.channelChecks, tx, s.llm, s.delivery, s.directives, mutation, candidates, request.Now())
 			if err != nil {
 				return err
 			}
@@ -179,7 +179,7 @@ func (s *EffectSQLiteOwner) ReconcileExternalEffectAttempts(ctx context.Context,
 			if err := admitExternalEffectRecoveryCandidates(request, candidates); err != nil {
 				return err
 			}
-			summary, err = reconcileExternalEffectAttemptsSQLiteTx(txctx, tx, s.llm, s.delivery, s.directives, mutation, candidates, request.Now())
+			summary, err = reconcileExternalEffectAttemptsSQLiteTx(txctx, s.channelChecks, tx, s.llm, s.delivery, s.directives, mutation, candidates, request.Now())
 			if err != nil {
 				return err
 			}
@@ -209,7 +209,7 @@ func (s *EffectPostgresOwner) IsExternalEffectAuthorityCurrent(ctx context.Conte
 		}
 		return current, err
 	}
-	return externalEffectAuthorityCurrentPostgres(ctx, s.backend, authority)
+	return externalEffectAuthorityCurrentPostgres(ctx, s.channelChecks, s.backend, authority)
 }
 
 func (s *EffectSQLiteOwner) IsExternalEffectAuthorityCurrent(ctx context.Context, authority runtimeeffects.Authority) (bool, error) {
@@ -221,7 +221,7 @@ func (s *EffectSQLiteOwner) IsExternalEffectAuthorityCurrent(ctx context.Context
 		}
 		return current, err
 	}
-	return externalEffectAuthorityCurrentSQLite(ctx, s.backend, authority)
+	return externalEffectAuthorityCurrentSQLite(ctx, s.channelChecks, s.backend, authority)
 }
 
 func processEffectAuthority(authority runtimeeffects.Authority) bool {
@@ -525,7 +525,7 @@ func (s *EffectPostgresOwner) AuthorizeExternalAttempt(ctx context.Context, auth
 				return err
 			}
 			ctx = withAdmittedTurnOwnership(ctx, tx, authority.Target.AgentIdentity, req.InstanceOwnership)
-			if err := requireExternalEffectAuthorityPostgres(ctx, tx, authority, true); err != nil {
+			if err := requireExternalEffectAuthorityPostgres(ctx, s.channelChecks, tx, authority, true); err != nil {
 				return err
 			}
 			if err := s.validateProviderOrigin(ctx, tx, authority, req); err != nil {
@@ -719,7 +719,7 @@ func (s *EffectSQLiteOwner) AuthorizeExternalAttempt(ctx context.Context, author
 				return err
 			}
 			txctx = withAdmittedTurnOwnership(txctx, tx, authority.Target.AgentIdentity, req.InstanceOwnership)
-			if err := requireExternalEffectAuthoritySQLite(txctx, tx, authority, true); err != nil {
+			if err := requireExternalEffectAuthoritySQLite(txctx, s.channelChecks, tx, authority, true); err != nil {
 				return err
 			}
 			if err := s.validateProviderOrigin(txctx, tx, authority, req); err != nil {
@@ -1908,7 +1908,7 @@ func (s *EffectPostgresOwner) MarkExternalAttemptLaunched(ctx context.Context, a
 			if err != nil {
 				return err
 			}
-			if err := requireExternalEffectAuthorityPostgres(txctx, tx, attempt.Authority, false); err != nil {
+			if err := requireExternalEffectAuthorityPostgres(txctx, s.channelChecks, tx, attempt.Authority, false); err != nil {
 				return err
 			}
 			if err := s.validateProviderOrigin(txctx, tx, attempt.Authority, runtimeeffects.AuthorizeRequest{Kind: attempt.Kind, Origin: attempt.Origin}); err != nil {
@@ -1970,7 +1970,7 @@ func (s *EffectSQLiteOwner) MarkExternalAttemptLaunched(ctx context.Context, att
 			if err != nil {
 				return err
 			}
-			if err := requireExternalEffectAuthoritySQLite(txctx, tx, attempt.Authority, false); err != nil {
+			if err := requireExternalEffectAuthoritySQLite(txctx, s.channelChecks, tx, attempt.Authority, false); err != nil {
 				return err
 			}
 			if err := s.validateProviderOrigin(txctx, tx, attempt.Authority, runtimeeffects.AuthorizeRequest{Kind: attempt.Kind, Origin: attempt.Origin}); err != nil {
@@ -2023,7 +2023,7 @@ func (s *EffectPostgresOwner) HeartbeatCompletionAttempt(ctx context.Context, at
 	}
 	result := mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, mutation *mutationprotocol.Attempt) (struct{}, error) {
 		err := mutation.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
-			permit, err := resolveCompletionSettlementPermitPostgres(txctx, tx, attempt)
+			permit, err := resolveCompletionSettlementPermitPostgres(txctx, s.channelChecks, tx, attempt)
 			if err != nil {
 				return err
 			}
@@ -2074,7 +2074,7 @@ func (s *EffectSQLiteOwner) HeartbeatCompletionAttempt(ctx context.Context, atte
 	}
 	result := mutationprotocol.RunSQLite(ctx, s.backend, "sqlite heartbeat completion attempt", mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, mutation *mutationprotocol.Attempt) (struct{}, error) {
 		err := mutation.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
-			permit, err := resolveCompletionSettlementPermitSQLite(txctx, tx, attempt)
+			permit, err := resolveCompletionSettlementPermitSQLite(txctx, s.channelChecks, tx, attempt)
 			if err != nil {
 				return err
 			}
@@ -2156,7 +2156,7 @@ func (s *EffectPostgresOwner) MarkExternalAttemptResponseObserved(ctx context.Co
 	}
 	result := mutationprotocol.RunPostgresExternalEffectResult(ctx, s.backend, runtimeeffects.Settlement{OperationID: attempt.OperationID, AttemptID: attempt.AttemptID, Authority: attempt.Authority, InstanceOwnership: attempt.InstanceOwnership.Clone()}, mutationprotocol.RevisionOnly, nil, func(ctx context.Context, mutation *mutationprotocol.Attempt) (struct{}, error) {
 		err := mutation.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
-			if _, err := resolveCompletionSettlementPermitPostgres(ctx, tx, attempt); err != nil {
+			if _, err := resolveCompletionSettlementPermitPostgres(ctx, s.channelChecks, tx, attempt); err != nil {
 				return err
 			}
 			raw, err := json.Marshal(evidence)
@@ -2181,7 +2181,7 @@ func (s *EffectSQLiteOwner) MarkExternalAttemptResponseObserved(ctx context.Cont
 	}
 	result := mutationprotocol.RunSQLiteExternalEffectResult(ctx, s.backend, "sqlite mark external attempt response observed", runtimeeffects.Settlement{OperationID: attempt.OperationID, AttemptID: attempt.AttemptID, Authority: attempt.Authority, InstanceOwnership: attempt.InstanceOwnership.Clone()}, mutationprotocol.RevisionOnly, nil, func(txctx context.Context, mutation *mutationprotocol.Attempt) (struct{}, error) {
 		err := mutation.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
-			if _, err := resolveCompletionSettlementPermitSQLite(txctx, tx, attempt); err != nil {
+			if _, err := resolveCompletionSettlementPermitSQLite(txctx, s.channelChecks, tx, attempt); err != nil {
 				return err
 			}
 			raw, err := json.Marshal(evidence)
@@ -2232,7 +2232,7 @@ func (s *EffectPostgresOwner) SettleExternalAttempt(ctx context.Context, settlem
 				return err
 			}
 			if settlement.Authority.Kind != runtimeeffects.AuthorityChannelDelivery && settlement.Authority.Kind != runtimeeffects.AuthorityChannelNativeSetting && settlement.Authority.Kind != runtimeeffects.AuthorityChannelLogout && settlement.Authority.Valid() && !mutationprotocol.ExternalEffectResultAccepted(txctx, tx, settlement) {
-				if err := requireExternalEffectAuthorityPostgres(txctx, tx, settlement.Authority, false); err != nil {
+				if err := requireExternalEffectAuthorityPostgres(txctx, s.channelChecks, tx, settlement.Authority, false); err != nil {
 					return err
 				}
 			}
@@ -2240,7 +2240,7 @@ func (s *EffectPostgresOwner) SettleExternalAttempt(ctx context.Context, settlem
 			if err != nil {
 				return err
 			}
-			channelChanged, err = projectChannelSourceSettlementTx(txctx, tx, settlement, true)
+			channelChanged, err = projectChannelSourceSettlementTx(txctx, s.channelChecks, tx, settlement, true)
 			if err != nil {
 				return err
 			}
@@ -2281,7 +2281,7 @@ func (s *EffectSQLiteOwner) SettleExternalAttempt(ctx context.Context, settlemen
 				return err
 			}
 			if settlement.Authority.Kind != runtimeeffects.AuthorityChannelDelivery && settlement.Authority.Kind != runtimeeffects.AuthorityChannelNativeSetting && settlement.Authority.Kind != runtimeeffects.AuthorityChannelLogout && settlement.Authority.Valid() && !mutationprotocol.ExternalEffectResultAccepted(txctx, tx, settlement) {
-				if err := requireExternalEffectAuthoritySQLite(txctx, tx, settlement.Authority, false); err != nil {
+				if err := requireExternalEffectAuthoritySQLite(txctx, s.channelChecks, tx, settlement.Authority, false); err != nil {
 					return err
 				}
 			}
@@ -2289,7 +2289,7 @@ func (s *EffectSQLiteOwner) SettleExternalAttempt(ctx context.Context, settlemen
 			if err != nil {
 				return err
 			}
-			channelChanged, err = projectChannelSourceSettlementTx(txctx, tx, settlement, false)
+			channelChanged, err = projectChannelSourceSettlementTx(txctx, s.channelChecks, tx, settlement, false)
 			if err != nil {
 				return err
 			}
@@ -2611,13 +2611,13 @@ func externalEffectRecoveryFailure(class runtimefailures.Class, code string, now
 	return json.Marshal(envelope)
 }
 
-func reconcileExternalEffectAttemptsPostgres(ctx context.Context, tx *sql.Tx, llm *storellm.LLMPostgresOwner, delivery providerDrainDeliveryOwner, directives providerDrainDirectiveOwner, mutation *mutationprotocol.Attempt, candidates []externalEffectRecoveryCandidate, now time.Time) (runtimeeffects.RecoverySummary, error) {
+func reconcileExternalEffectAttemptsPostgres(ctx context.Context, nativeChecks nativeChannelChecks, tx *sql.Tx, llm *storellm.LLMPostgresOwner, delivery providerDrainDeliveryOwner, directives providerDrainDirectiveOwner, mutation *mutationprotocol.Attempt, candidates []externalEffectRecoveryCandidate, now time.Time) (runtimeeffects.RecoverySummary, error) {
 	allowed := externalEffectRecoveryAttemptSet(candidates)
 	completionSummary, err := reconcileCompletionAttemptsPostgres(ctx, tx, llm, delivery, directives, mutation, allowed, now, "")
 	if err != nil {
 		return runtimeeffects.RecoverySummary{}, err
 	}
-	genericSummary, err := reconcileGenericExternalEffectCandidates(ctx, tx, true, candidates, now)
+	genericSummary, err := reconcileGenericExternalEffectCandidates(ctx, nativeChecks, tx, true, candidates, now)
 	if err != nil {
 		return runtimeeffects.RecoverySummary{}, err
 	}
@@ -2629,13 +2629,13 @@ func reconcileExternalEffectAttemptsPostgres(ctx context.Context, tx *sql.Tx, ll
 	return completionSummary, nil
 }
 
-func reconcileExternalEffectAttemptsSQLiteTx(ctx context.Context, tx *sql.Tx, llm *storellm.LLMSQLiteOwner, delivery providerDrainDeliveryOwner, directives providerDrainDirectiveOwner, mutation *mutationprotocol.Attempt, candidates []externalEffectRecoveryCandidate, now time.Time) (runtimeeffects.RecoverySummary, error) {
+func reconcileExternalEffectAttemptsSQLiteTx(ctx context.Context, nativeChecks nativeChannelChecks, tx *sql.Tx, llm *storellm.LLMSQLiteOwner, delivery providerDrainDeliveryOwner, directives providerDrainDirectiveOwner, mutation *mutationprotocol.Attempt, candidates []externalEffectRecoveryCandidate, now time.Time) (runtimeeffects.RecoverySummary, error) {
 	allowed := externalEffectRecoveryAttemptSet(candidates)
 	completionSummary, err := reconcileCompletionAttemptsSQLite(ctx, tx, llm, delivery, directives, mutation, allowed, now, "")
 	if err != nil {
 		return runtimeeffects.RecoverySummary{}, err
 	}
-	genericSummary, err := reconcileGenericExternalEffectCandidates(ctx, tx, false, candidates, now)
+	genericSummary, err := reconcileGenericExternalEffectCandidates(ctx, nativeChecks, tx, false, candidates, now)
 	if err != nil {
 		return runtimeeffects.RecoverySummary{}, err
 	}
@@ -2655,7 +2655,7 @@ func externalEffectRecoveryAttemptSet(candidates []externalEffectRecoveryCandida
 	return allowed
 }
 
-func reconcileGenericExternalEffectCandidates(ctx context.Context, tx *sql.Tx, postgres bool, candidates []externalEffectRecoveryCandidate, now time.Time) (runtimeeffects.RecoverySummary, error) {
+func reconcileGenericExternalEffectCandidates(ctx context.Context, nativeChecks nativeChannelChecks, tx *sql.Tx, postgres bool, candidates []externalEffectRecoveryCandidate, now time.Time) (runtimeeffects.RecoverySummary, error) {
 	prelaunchFailure, err := externalEffectRecoveryFailure(runtimefailures.ClassLifecycleConflict, "effect_recovery_prelaunch_abandoned", now)
 	if err != nil {
 		return runtimeeffects.RecoverySummary{}, err
@@ -2675,7 +2675,7 @@ func reconcileGenericExternalEffectCandidates(ctx context.Context, tx *sql.Tx, p
 			targetState = string(runtimeeffects.StateOutcomeUncertain)
 			failure = uncertainFailure
 		}
-		changed, projectionChanged, err := recoverGenericExternalEffectCandidateTx(ctx, tx, candidate, targetState, failure, now, postgres)
+		changed, projectionChanged, err := recoverGenericExternalEffectCandidateTx(ctx, nativeChecks, tx, candidate, targetState, failure, now, postgres)
 		if err != nil {
 			return runtimeeffects.RecoverySummary{}, err
 		}
@@ -2692,10 +2692,10 @@ func reconcileGenericExternalEffectCandidates(ctx context.Context, tx *sql.Tx, p
 	return summary, nil
 }
 
-func recoverGenericExternalEffectCandidateTx(ctx context.Context, tx *sql.Tx, candidate externalEffectRecoveryCandidate,
+func recoverGenericExternalEffectCandidateTx(ctx context.Context, nativeChecks nativeChannelChecks, tx *sql.Tx, candidate externalEffectRecoveryCandidate,
 	targetState string, failure []byte, now time.Time, postgres bool) (bool, bool, error) {
 	if candidate.AuthorityKind == string(runtimeeffects.AuthorityChannelDelivery) || candidate.AuthorityKind == string(runtimeeffects.AuthorityChannelNativeSetting) || candidate.AuthorityKind == string(runtimeeffects.AuthorityChannelLogout) {
-		changed, projectionChanged, err := recoverChannelSourceSettlementTx(ctx, tx, candidate, runtimeeffects.State(targetState), failure, now, postgres)
+		changed, projectionChanged, err := recoverChannelSourceSettlementTx(ctx, nativeChecks, tx, candidate, runtimeeffects.State(targetState), failure, now, postgres)
 		if err != nil {
 			return false, false, runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict,
 				"channel_source_recovery_settlement_conflict", "external-effects", "startup_reconcile",

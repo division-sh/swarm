@@ -17,7 +17,7 @@ func TestWhatsAppOwnedChannelDispatchRefusesReconstructedAndChangedSelectionBoth
 		t.Run(backend, func(t *testing.T) {
 			f := newNativeConfirmationFixture(t, backend)
 			ctx := f.confirmationContext(t)
-			executor := sessionChannelExecutor{owner: f.authority, plan: f.channel}.channelExecution()
+			executor := sessionChannelExecutor{owner: f.authority, state: f.state, plan: f.channel}.channelExecution()
 			encoded, err := json.Marshal(executor)
 			if err != nil {
 				t.Fatal(err)
@@ -51,6 +51,7 @@ func TestWhatsAppOwnedChannelDispatchRefusesReconstructedAndChangedSelectionBoth
 				tool        contracts.ToolSchemaEntry
 			}{
 				{"reconstructed", ctx, reconstructed, f.operation.OperationID, "deliver", toolID, tool},
+				{"crossed_provider_state", ctx, (sessionChannelExecutor{owner: f.authority, state: &sessionState{}, plan: f.channel}).channelExecution(), f.operation.OperationID, "deliver", toolID, tool},
 				{"foreign_connection", ctx, executor, "another-connection", "deliver", toolID, tool},
 				{"foreign_operation", ctx, executor, f.operation.OperationID, "not-deliver", toolID, tool},
 				{"foreign_tool", ctx, executor, f.operation.OperationID, "deliver", "other.send", tool},

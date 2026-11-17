@@ -1,6 +1,8 @@
 package runtimepersistence
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"encoding/json"
 	"strings"
 	"testing"
@@ -90,7 +92,7 @@ func TestSQLiteRuntimeLogCarriesComputeModuleReplayEvidenceForReplayConsumer(t *
 	ctx = originalStoreFixtureContext(t, ctx, store)
 	runID := uuid.NewString()
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
-	requireRunFixtureForTest(t, ctx, NewSQLiteRuntimeStoreForTest(store.backend.ConstructionHandle()), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: time.Now().UTC()})
+	requireRunFixtureForTest(t, ctx, NewSQLiteRuntimeStoreForTest(store.backend.ConstructionHandle(), channelfixture.Facts), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: time.Now().UTC()})
 
 	envelope := computeModuleReplayEvidenceTestEnvelope()
 	detail := computemodule.NewReplayEvidenceDetail([]computemodule.ReplayEnvelope{envelope})
@@ -195,7 +197,7 @@ func TestSQLiteRuntimeLogSourceProjectionAndFilterParity(t *testing.T) {
 	runID := uuid.NewString()
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
 
-	requireRunFixtureForTest(t, ctx, NewSQLiteRuntimeStoreForTest(store.backend.ConstructionHandle()), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: time.Now().UTC()})
+	requireRunFixtureForTest(t, ctx, NewSQLiteRuntimeStoreForTest(store.backend.ConstructionHandle(), channelfixture.Facts), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: time.Now().UTC()})
 	direct := eventtest.DiagnosticDirect(
 		uuid.NewString(), events.EventTypePlatformRuntimeLog, "runtime", "",
 		json.RawMessage(`{"log_level":"warn","message":"direct fallback source","details":{"component":"source-parity","action":"direct_runtime_source"}}`),

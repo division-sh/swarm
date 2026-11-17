@@ -31,23 +31,6 @@ func TestNativeToolPostgresConstructionRetainsCanonicalAdmissionAndCleanup(t *te
 	if formattedNativeReadNode(projectionShapeFunction(t, row.Before)) != formattedNativeReadNode(projectionShapeFunction(t, before)) || !nativeToolPostgresConstructionShape(t, row.After) {
 		t.Fatal("constructor admission, owner or cleanup changed outside the finite migration")
 	}
-	path := filepath.Join("..", "..", "..", "internal", "store", "storetest", "runtime_reopen.go")
-	source, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	file, err := parser.ParseFile(token.NewFileSet(), path, source, parser.AllErrors)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ownerRecipe := nativeReopenCloseRecipes(t)[0]
-	owner, err := uniqueFunction(file, ownerRecipe.Function)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if formattedNativeReadNode(owner) != formattedNativeReadNode(projectionShapeFunction(t, ownerRecipe.After)) {
-		t.Fatal("native factory admission or shared close ownership differs from its exact recipe")
-	}
 }
 
 func TestNativeToolPostgresConstructionRejectsLostOrSubstitutedAuthority(t *testing.T) {

@@ -93,7 +93,7 @@ func requireSittingPreviewReentry(t *testing.T, ctx context.Context, config, dir
 		}
 	}()
 	go func() {
-		done <- cliapp.Execute(command, []string{"--config", config, "channel", "connect", "whatsapp", retained.operation.AccountReference}, writer, sittingPromptWriter{Writer: errOut, prompts: prompts}, nil, nil, factory)
+		done <- cliapp.Execute(command, []string{"--config", config, "channel", "connect", "whatsapp", retained.operation.AccountReference}, writer, sittingPromptWriter{Writer: errOut, prompts: prompts}, nil, nil, fixtureRegistration(factory))
 	}()
 	select {
 	case <-login.held:
@@ -266,13 +266,17 @@ func requireSittingPreviewReentry(t *testing.T, ctx context.Context, config, dir
 		session, err := OpenChannelRegistration(call, options)
 		return sittingReentryObserver{session, listedViews}, err
 	}
-	if code := cliapp.Execute(ctx, []string{"--config", config, "channel", "list", "--json"}, listed, errOut, nil, nil, listFactory); code != 0 {
+	if code := cliapp.Execute(ctx, []string{"--config", config, "channel", "list", "--json"}, listed, errOut, nil, nil, fixtureRegistration(listFactory)); code != 0 {
 		t.Fatal("restored public account readback failed", code, errOut.String())
 	}
 	if json.Unmarshal([]byte(listed.String()), &listing) != nil || len(listing.Accounts) != 1 {
 		t.Fatal("restored account list did not return exactly one registration")
 	}
-	registered := listing.Accounts[0]
+	selected, found := ChannelRegistrations().Select(listing.Accounts[0].Operation.Provider)
+	if !found {
+		t.Fatal("restored account readback has no exact installed provider facts")
+	}
+	registered := listing.Accounts[0].WithProviderFacts(selected.Facts)
 	if registered.Operation.OperationID != before.OperationID || registered.Operation.AccountReference != before.AccountReference || !registered.Operation.AccountConfirmed || registered.Operation.Phase != channelonboarding.PhaseSucceeded || registered.Binding == nil || registered.Binding.ExternalAccountRef != "15551234568@s.whatsapp.net" {
 		t.Fatal("restored approval lost its retained account or exact operator")
 	}

@@ -34,7 +34,7 @@ func (rt *Runtime) validateRegisteredStandingCredential(ctx context.Context, evi
 	}
 	original := evidence.operation
 	ref := channelonboarding.AccountReference{Provider: original.Provider, Account: original.AccountReference}
-	current, err := channelonboarding.RegisteredAccount(ctx, store.DeploymentChannelOperations(), ref)
+	current, err := channelonboarding.RegisteredAccount(ctx, store.DeploymentChannelOperations(), ref, original.ProviderFacts())
 	if err != nil {
 		return err
 	}
@@ -43,7 +43,7 @@ func (rt *Runtime) validateRegisteredStandingCredential(ctx context.Context, evi
 		!slices.Equal(current.CredentialAdmissions, original.CredentialAdmissions) || evidence.holder.BundleHash != rt.Options.SourceArtifactFact.BundleHash() {
 		return channelonboarding.ErrRevisionConflict
 	}
-	holders, err := rt.AccountHolders(ctx, evidence.holder.RunID, ref)
+	holders, err := rt.AccountHolders(ctx, evidence.holder.RunID, ref, original.ProviderFacts())
 	if err != nil {
 		return err
 	}

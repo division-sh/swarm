@@ -27,23 +27,23 @@ func sessionStandingBindingCurrent(ctx context.Context, r runner, expected domai
 		return false, err
 	}
 	if expected.Posture != domain.ActivationSessionConnection || expected.OperationID == "" ||
-		expected.Revision < 1 || !expected.AccountConnection() && expected.BindingRevision < 1 || expected.ValidateSessionAccount() != nil {
+		expected.Revision < 1 || !expected.AccountConnection(r.providerFact(expected.Provider)) && expected.BindingRevision < 1 || expected.ValidateSessionAccount(r.providerFact(expected.Provider)) != nil {
 		return false, nil
 	}
 	var current bool
 	err := r.mutate(ctx, "observe session standing binding", func(ctx context.Context, tx *sql.Tx) error {
-		op, found, err := loadOperation(ctx, tx, r.dialect(), expected.OperationID, true)
+		op, found, err := loadOperation(r, ctx, tx, r.dialect(), expected.OperationID, true)
 		if err != nil || !found {
 			return err
 		}
-		if !sessionStandingOperationMatches(expected, op) {
+		if !sessionStandingOperationMatches(r, expected, op) {
 			return nil
 		}
 		if err := channeldelivery.LockPrincipalTx(ctx, tx, op.PrincipalID, r.dialect() == dialectPostgres); err != nil {
 			return err
 		}
-		if op.AccountConnection() {
-			current, err = sessionStandingActivationCurrent(ctx, tx, r.dialect(), op, operatorchannel.Binding{})
+		if op.AccountConnection(r.providerFact(op.Provider)) {
+			current, err = sessionStandingActivationCurrent(r, ctx, tx, r.dialect(), op, operatorchannel.Binding{})
 			return err
 		}
 		binding, found, err := identityowner.LockBindingTx(ctx, tx, r.dialect() == dialectPostgres, op.Interface)
@@ -64,7 +64,7 @@ func sessionStandingBindingCurrent(ctx context.Context, r runner, expected domai
 			}
 			return err
 		}
-		current, err = sessionStandingActivationCurrent(ctx, tx, r.dialect(), op, binding)
+		current, err = sessionStandingActivationCurrent(r, ctx, tx, r.dialect(), op, binding)
 		return err
 	})
 	if err != nil {
@@ -73,8 +73,8 @@ func sessionStandingBindingCurrent(ctx context.Context, r runner, expected domai
 	return current, nil
 }
 
-func sessionStandingActivationCurrent(ctx context.Context, tx *sql.Tx, d dialect, op domain.Operation, binding operatorchannel.Binding) (bool, error) {
-	activeAccount := op.AccountConnection() && op.ActivationRevision > 0
+func sessionStandingActivationCurrent(nativeOwner providerFactReader, ctx context.Context, tx *sql.Tx, d dialect, op domain.Operation, binding operatorchannel.Binding) (bool, error) {
+	activeAccount := op.AccountConnection(nativeOwner.providerFact(op.Provider)) && op.ActivationRevision > 0
 	if !op.Phase.RequiresExecutableTarget(op.Posture) && !activeAccount || op.Phase == domain.PhasePublishingActivation {
 		return true, nil
 	}
@@ -85,19 +85,19 @@ func sessionStandingActivationCurrent(ctx context.Context, tx *sql.Tx, d dialect
 	responsibility := domain.AdmissionResponsibility{OperationID: op.OperationID, OperationRevision: activation.OperationRevision,
 		ActivationRevision: op.ActivationRevision, Coordinate: op.Coordinate, TargetSelector: op.TargetSelector,
 		Provider: op.Provider, Credentials: op.CredentialAdmissions, SessionAccount: op.SessionAccount}
-	if op.AccountConnection() {
-		return responsibility.MatchesAccountConnection(op, activation), nil
+	if op.AccountConnection(nativeOwner.providerFact(op.Provider)) {
+		return responsibility.MatchesAccountConnection(op, activation, nativeOwner.providerFact(op.Provider)), nil
 	}
-	return responsibility.MatchesBusinessBinding(op, activation, binding, op.BindingRevision), nil
+	return responsibility.MatchesBusinessBinding(op, activation, binding, op.BindingRevision, nativeOwner.providerFact(op.Provider)), nil
 }
 
-func sessionStandingOperationMatches(expected, op domain.Operation) bool {
-	activeAccount := expected.AccountConnection() && op.AccountConnection() && op.ActivationRevision > 0
+func sessionStandingOperationMatches(nativeOwner providerFactReader, expected, op domain.Operation) bool {
+	activeAccount := expected.AccountConnection(nativeOwner.providerFact(expected.Provider)) && op.AccountConnection(nativeOwner.providerFact(op.Provider)) && op.ActivationRevision > 0
 	if op.Phase == domain.PhaseFailed || op.Phase == domain.PhaseRetired ||
 		op.Phase != domain.PhaseAwaitingOperatorConfirmation && !op.Phase.RequiresExecutableTarget(op.Posture) && !(activeAccount && op.Phase == domain.PhaseAwaitingExternalIdentity) {
 		return false
 	}
-	return op.Posture == domain.ActivationSessionConnection && op.ValidateSessionAccount() == nil && op.SlotKey == expected.SlotKey &&
+	return op.Posture == domain.ActivationSessionConnection && op.ValidateSessionAccount(nativeOwner.providerFact(op.Provider)) == nil && op.SlotKey == expected.SlotKey &&
 		op.Revision >= expected.Revision && op.PrincipalID == expected.PrincipalID && op.Provider == expected.Provider &&
 		op.Interface.Normalized() == expected.Interface.Normalized() && op.Coordinate.MatchesDurableIdentity(expected.Coordinate) &&
 		op.TargetSelector == expected.TargetSelector && op.Ceremony == expected.Ceremony && op.BindingRevision == expected.BindingRevision &&

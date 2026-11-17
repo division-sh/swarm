@@ -1,6 +1,8 @@
 package runtimepersistence
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"context"
 	"database/sql"
 	"database/sql/driver"
@@ -58,7 +60,7 @@ func newOperatorSnapshotFixture(t *testing.T, postgres bool) operatorSnapshotFix
 		registerTestAuthorActivityCatalog(t, store)
 		f.store, f.dialect = store, authoractivityfixture.DialectPostgres
 	} else {
-		store := NewSQLiteRuntimeStoreForTest(db)
+		store := NewSQLiteRuntimeStoreForTest(db, channelfixture.Facts)
 		if err := store.BootstrapSchema(ctx, canonicalSchemaBootstrapTestRequest(t)); err != nil {
 			t.Fatal(err)
 		}

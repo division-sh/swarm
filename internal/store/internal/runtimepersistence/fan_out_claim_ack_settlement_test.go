@@ -1,6 +1,8 @@
 package runtimepersistence
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"context"
 	"database/sql"
 	"errors"
@@ -55,7 +57,7 @@ func TestFanOutClaimSettlementAcknowledgedPostCommitErrorBothStores(t *testing.T
 				if backend == "postgres" {
 					_, opened, cleanup := testutil.StartPostgres(t)
 					t.Cleanup(cleanup)
-					db, owner, postgres = opened, newPostgresStoreWithBackend(mustPostgresBackend(opened)), true
+					db, owner, postgres = opened, newPostgresStoreWithBackend(mustPostgresBackend(opened), channelfixture.Facts), true
 					owner.(*PostgresStore).acceptCurrentSchemaForTest()
 				} else {
 					store := newBootstrappedSQLiteRuntimeStoreForTest(t)

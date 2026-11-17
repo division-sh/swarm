@@ -208,7 +208,7 @@ func (s *EventPostgresOwner) CommitInboundPublication(ctx context.Context, comma
 				result.Record = existing
 				return nil
 			}
-			if err := admitPostgresInboundStandingTargetTx(txctx, s, tx, command); err != nil {
+			if err := admitPostgresInboundStandingTargetTx(txctx, s.channelChecks, s, tx, command); err != nil {
 				return err
 			}
 			if err := insertPostgresInboundPublicationPreparedTx(txctx, tx, request); err != nil {
@@ -407,8 +407,8 @@ func loadPostgresInboundPublicationChildren(ctx context.Context, db inboundPubli
 	return children, nil
 }
 
-func admitPostgresInboundStandingTargetTx(ctx context.Context, s *EventPostgresOwner, tx *sql.Tx, command runtimeinbound.CommitCommand) error {
-	if err := admitNativeInboundPublicationTx(ctx, tx, true, command); err != nil {
+func admitPostgresInboundStandingTargetTx(ctx context.Context, nativeChecks nativeChannelChecks, s *EventPostgresOwner, tx *sql.Tx, command runtimeinbound.CommitCommand) error {
+	if err := admitNativeInboundPublicationTx(ctx, nativeChecks, tx, true, command); err != nil {
 		return err
 	}
 	if err := admitInboundLandingRunTx(ctx, tx, true, command); err != nil {

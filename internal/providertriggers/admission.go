@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/channelprovider"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/packs"
@@ -103,6 +104,7 @@ type InboundAdmissionPlan struct {
 // AdmittedRequest is the authenticated, retry-stable request identity. Its
 // private projection state can only be consumed by the plan that admitted it.
 type AdmittedRequest struct {
+	providerFacts           channelprovider.Binding
 	semanticContentDigest   string
 	projectionContentDigest string
 	generation              triggergeneration.Generation
@@ -121,7 +123,7 @@ func (a AdmittedRequest) SemanticContentDigest() string { return a.semanticConte
 // This consumes the already authenticated account/capture, not a provider
 // payload's operator_account field. Store parent currentness remains separate.
 func (a AdmittedRequest) RequireDeploymentOperator(ctx context.Context, account channelonboarding.AccountReference, operationID string, revision int64, session operatorchannel.SessionAccountAdmission) error {
-	if account.Validate() != nil || a.provider != account.Provider || a.manifestAdmission == nil {
+	if account.Validate(a.providerFacts) != nil || a.provider != account.Provider || a.manifestAdmission == nil {
 		return unauthorized("deployment operator input requires its authenticated account")
 	}
 	if a.sessionInput != nil {
@@ -165,8 +167,8 @@ func (a AdmittedRequest) ProviderEventID() string {
 
 // BindReceivingAccount is called by the verified registration owner only after
 // payload authentication. It does not change the authenticated request bytes.
-func (p InboundAdmissionPlan) BindReceivingAccount(admitted AdmittedRequest, account channelonboarding.AccountReference, signingSecret string) (AdmittedRequest, error) {
-	if account.Validate() != nil || account.Provider != p.provider || p.RequestAuthentication() == RequestAuthenticationNone ||
+func (p InboundAdmissionPlan) BindReceivingAccount(admitted AdmittedRequest, account channelonboarding.AccountReference, signingSecret string, facts channelprovider.Binding) (AdmittedRequest, error) {
+	if account.Validate(facts) != nil || account.Provider != p.provider || p.RequestAuthentication() == RequestAuthenticationNone ||
 		p.Transport() == packs.ChannelTransportSession || admitted.operatorAccount != "" || admitted.Response() != nil ||
 		admitted.manifestAdmission == nil || signingSecret == "" ||
 		!hmac.Equal([]byte(signingSecret), []byte(admitted.manifestAdmission.request.Target.WebhookSecret)) {
@@ -180,6 +182,7 @@ func (p InboundAdmissionPlan) BindReceivingAccount(admitted AdmittedRequest, acc
 		return AdmittedRequest{}, err
 	}
 	admitted.operatorAccount, admitted.accountDeliveryID = account.Account, id
+	admitted.providerFacts = facts
 	return admitted, nil
 }
 
@@ -652,6 +655,7 @@ func (p InboundAdmissionPlan) AdmitSessionInput(ctx context.Context, input nativ
 		return AdmittedRequest{}, err
 	}
 	admitted.sessionInput = &input
+	admitted.providerFacts = input.ProviderFacts()
 	return admitted, nil
 }
 

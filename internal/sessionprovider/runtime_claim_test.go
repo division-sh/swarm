@@ -11,6 +11,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/operatorchannel"
+	"github.com/division-sh/swarm/tests/support/channelfixture"
 	"github.com/google/uuid"
 	"go.mau.fi/whatsmeow/types"
 )
@@ -97,7 +98,7 @@ func runtimeClaimEventFixture(t *testing.T, f *activeInputFixture, c *RuntimeCon
 	}
 	return capturedEvent{Scope: f.scope, Source: f.source, Body: body, Conversation: person, EventID: id,
 		Kind: "message", OccurrenceID: c.state.currentOccurrence().occurrenceID,
-		ReceivedAt: time.Now().UTC().Truncate(time.Microsecond)}
+		ReceivedAt: time.Now().UTC().Truncate(time.Microsecond)}.WithProviderFacts(channelfixture.For("whatsapp"))
 }
 
 func TestWhatsAppRuntimeClaimRecoveryBothStores(t *testing.T) {

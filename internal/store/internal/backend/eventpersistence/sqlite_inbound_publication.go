@@ -41,7 +41,7 @@ func (s *EventSQLiteOwner) CommitInboundPublication(ctx context.Context, command
 				result.Record = existing
 				return nil
 			}
-			if err := admitSQLiteInboundStandingTargetTx(txctx, s, tx, command); err != nil {
+			if err := admitSQLiteInboundStandingTargetTx(txctx, s.channelChecks, s, tx, command); err != nil {
 				return err
 			}
 			if err := insertSQLiteInboundPublicationPreparedTx(txctx, tx, request); err != nil {
@@ -239,8 +239,8 @@ func loadSQLiteInboundPublicationChildren(ctx context.Context, db inboundPublica
 	return children, nil
 }
 
-func admitSQLiteInboundStandingTargetTx(ctx context.Context, s *EventSQLiteOwner, tx *sql.Tx, command runtimeinbound.CommitCommand) error {
-	if err := admitNativeInboundPublicationTx(ctx, tx, false, command); err != nil {
+func admitSQLiteInboundStandingTargetTx(ctx context.Context, nativeChecks nativeChannelChecks, s *EventSQLiteOwner, tx *sql.Tx, command runtimeinbound.CommitCommand) error {
+	if err := admitNativeInboundPublicationTx(ctx, nativeChecks, tx, false, command); err != nil {
 		return err
 	}
 	if err := admitInboundLandingRunTx(ctx, tx, false, command); err != nil {
