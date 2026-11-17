@@ -36,6 +36,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -57,7 +58,7 @@ func (d *publishedJoinSourceDriver) BindGenericScheduleLifecycle(callback func(c
 	d.callback = callback
 	return nil
 }
-func (d *publishedJoinSourceDriver) RegisterGenericScheduleWakeup(_ context.Context, wakeup genericschedule.Wakeup) error {
+func (d *publishedJoinSourceDriver) RegisterGenericScheduleWakeup(_ context.Context, wakeup genericschedule.Wakeup, _ genericschedule.OwnerKind) error {
 	d.wakeup = wakeup
 	return wakeup.Validate()
 }
@@ -68,14 +69,23 @@ func (*publishedJoinSourceDriver) StopGenericScheduleWakeups(context.Context) er
 
 // Hold dispatch after the real generic publication transaction acknowledges.
 // This creates the actual already-published, unfinished cut under test.
-type publishedJoinSourceDispatch struct{ event events.Event }
+type publishedJoinSourceDispatch struct {
+	event  events.Event
+	intent engine.EmitIntent
+}
 
 func (d *publishedJoinSourceDispatch) DispatchPostCommit(_ context.Context, intents []engine.EmitIntent) error {
 	if len(intents) != 1 {
 		panic("published join fixture requires exactly one occurrence")
 	}
 	d.event = intents[0].Event
+	d.intent = intents[0]
 	return nil
+}
+
+type publishedJoinSourceFixture struct {
+	bus      *bus.EventBus
+	dispatch *publishedJoinSourceDispatch
 }
 
 const publishedJoinFlowEnv = "SWARM_PUBLISHED_JOIN_TEST_FLOW"
@@ -159,7 +169,7 @@ func publishedJoinFixture(t *testing.T) string {
 	return root
 }
 
-func seedPublishedJoinSource(t *testing.T, ctx context.Context, selected any, owner SelectedContractExecutionOwner, loaded LoadedSelectedContractSource, runID string) (string, genericschedule.Activation) {
+func seedPublishedJoinSource(t *testing.T, ctx context.Context, selected any, owner SelectedContractExecutionOwner, loaded LoadedSelectedContractSource, runID string) (string, genericschedule.Activation, publishedJoinSourceFixture) {
 	t.Helper()
 	ctx = effects.WithExecutionMode(correlation.WithRunID(correlation.WithSourceArtifactFact(ctx, loaded.SourceArtifactFact), runID), executionmode.Mock)
 	scope, err := authoractivity.BundleScopeForTarget(ctx, loaded.SourceArtifactFact.BundleHash())
@@ -350,7 +360,7 @@ func seedPublishedJoinSource(t *testing.T, ctx context.Context, selected any, ow
 	}
 	storetest.CommitSemanticEventWithRoutes(t, ctx, selected, marker, nil, pipelineobligation.ScopeSubscribed)
 	storetest.CaptureRunForkSnapshot(t, ctx, selected, runID)
-	return marker.ID(), activation
+	return marker.ID(), activation, publishedJoinSourceFixture{bus: eventBus, dispatch: dispatch}
 }
 
 func seedPublishedOrdersJoinConstruction(t *testing.T, ctx context.Context, selected any, loaded LoadedSelectedContractSource, coordinator *pipeline.PipelineCoordinator, root flowidentity.Instance, event events.Event, at time.Time) events.Event {
@@ -652,7 +662,7 @@ func TestIssue642PublishedJoinContinuesExactDeliveryBothStores(t *testing.T) {
 			}
 			t.Cleanup(catalog.Release)
 			sourceRun := uuid.NewString()
-			marker, source := seedPublishedJoinSource(t, ctx, selected, owner, loaded, sourceRun)
+			marker, source, sourceFixture := seedPublishedJoinSource(t, ctx, selected, owner, loaded, sourceRun)
 			plan, err := owner.ports.fork.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: sourceRun, At: marker})
 			if err != nil || len(plan.JoinSchedules) != 1 || plan.JoinSchedules[0].CurrentEventID != source.CurrentEventID {
 				t.Fatalf("published fixed cut: %+v err=%v", plan, err)
@@ -757,6 +767,54 @@ func TestIssue642PublishedJoinContinuesExactDeliveryBothStores(t *testing.T) {
 			sourceAfter, err := storetest.ReadSelectedForkSourceDomain(wait, selected, sourceRun)
 			if err != nil || !reflect.DeepEqual(sourceBefore, sourceAfter) {
 				t.Fatalf("published occurrence execution changed source business facts: %v", err)
+			}
+			sourceDelivery := pendingSourceDeliveryForReboot(t, wait, selected, sourceAfter, sourceRun)
+			beforeSourceSettlement, err := owner.ports.busDurable.DeliveryLifecycle.SummarizeRun(wait, sourceRun)
+			if err != nil || beforeSourceSettlement.Pending != 1 || beforeSourceSettlement.Delivered+1 != beforeSourceSettlement.Total {
+				t.Fatalf("original cut lacks exactly one pending delivery: %+v err=%v", beforeSourceSettlement, err)
+			}
+			controlCtx := runForkOriginalContextForTest(t, ctx, owner.ports.contexts.capability)
+			controller := runcontrol.NewController(selected.(runcontrol.Store), sourceFixture.bus, runcontrol.Options{})
+			sourceFixture.bus.SetRunDispatchGate(controller)
+			defer sourceFixture.bus.SetRunDispatchGate(nil)
+			if _, err := controller.Pause(controlCtx, runcontrol.TransitionRequest{RunID: child, Reason: "source_continue_proof", ControlledBy: "run.fork"}); err != nil {
+				t.Fatal(err)
+			}
+			if err := sourceFixture.bus.EngineDispatcher().DispatchPostCommit(controlCtx, []engine.EmitIntent{sourceFixture.dispatch.intent}); err != nil {
+				t.Fatalf("park committed source publication before Continue: %v", err)
+			}
+			continued, err := controller.Continue(controlCtx, runcontrol.TransitionRequest{RunID: sourceRun, Reason: "source_continue_proof", ControlledBy: "run.fork"})
+			if err != nil || continued.Recovery.Err != nil {
+				t.Fatalf("continue original pending delivery: %+v err=%v", continued, err)
+			}
+			grant, err := liveRuntime.CurrentStartupGrantEvidence()
+			if err != nil {
+				t.Fatal(err)
+			}
+			continuedAuthority, err := deliverylifecycle.NewNormalExecutionAuthority(loaded.SourceArtifactFact, grant.GrantID, grant.RuntimeGeneration)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := owner.ports.busDurable.DeliveryLifecycle.ActivateDeliveryAuthority(controlCtx, continuedAuthority); err != nil {
+				t.Fatal(err)
+			}
+			if err := sourceFixture.bus.SetDeliveryAuthority(continuedAuthority); err != nil {
+				t.Fatal(err)
+			}
+			pendingEvent := storetest.LoadCanonicalEventRecord(t, wait, selected, sourceDelivery.EventID)
+			if outcome := sourceFixture.bus.DispatchDeliveryContinuation(controlCtx, pendingEvent, sourceDelivery.Route); outcome.Failure() != nil {
+				t.Fatalf("continue original exact delivery: %v", outcome.Failure())
+			}
+			settled, err := selected.(deliverylifecycle.Store).Snapshot(wait, sourceDelivery.DeliveryID)
+			if err != nil || settled.Status != deliverylifecycle.StatusDelivered || settled.RunID != sourceRun {
+				t.Fatalf("original pending delivery did not settle once: status=%s run=%s recovery=%+v err=%v", settled.Status, settled.RunID, continued.Recovery, err)
+			}
+			sourceSettlement, err := owner.ports.busDurable.DeliveryLifecycle.SummarizeRun(wait, sourceRun)
+			if err != nil || sourceSettlement.Total != beforeSourceSettlement.Total || sourceSettlement.Delivered != beforeSourceSettlement.Delivered+1 || sourceSettlement.Pending != 0 {
+				t.Fatalf("continued original did not settle only its pending delivery: before=%+v after=%+v err=%v", beforeSourceSettlement, sourceSettlement, err)
+			}
+			if count, err := storetest.ReadLifecycleEventCardinality(wait, selected, sourceRun, "platform.join_complete"); err != nil || count != 1 {
+				t.Fatalf("continued original repeated its committed publication: count=%d err=%v", count, err)
 			}
 			retry, found, err := operations.LoadForkOperation(wait, operation.Actor, operation.IdempotencyKey, operation.TransportHash)
 			if err != nil || !found || !reflect.DeepEqual(acknowledged, retry) {

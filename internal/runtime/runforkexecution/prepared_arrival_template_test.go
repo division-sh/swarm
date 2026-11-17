@@ -194,6 +194,7 @@ func testPreparedTemplateArrivalTimeoutBothStores(t *testing.T, selectedDelay st
 			startupCtx := authoractivity.WithScope(startupEntry, authoractivity.BundleScope(runForkTestRuntimeInstanceID, target.SourceArtifactFact.BundleHash()))
 			liveRuntime, liveContexts := liveForkRuntimeFixtureWithStartupContext(t, ctx, startupCtx, selected, owner, target, sourceRun, executionposture.MockOnly)
 			preservedSource := joinLiveForkFixtureClock(t, ctx, liveRuntime, selected, sourceRun, source.ID)
+			joinLiveForkFixtureClockCallback(t, ctx, liveRuntime, selected, sourceRun, preservedSource)
 			sourceCount, err := storetest.ReadLifecycleEventCardinality(ctx, selected, sourceRun, "platform.join_timeout")
 			if err != nil {
 				t.Fatal(err)

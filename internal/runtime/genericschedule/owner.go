@@ -52,7 +52,7 @@ type PreparationCommit struct {
 
 type Scheduler interface {
 	BindGenericScheduleLifecycle(func(context.Context, Wakeup)) error
-	RegisterGenericScheduleWakeup(context.Context, Wakeup) error
+	RegisterGenericScheduleWakeup(context.Context, Wakeup, OwnerKind) error
 	RetireGenericScheduleWakeup(Wakeup) error
 	StopGenericScheduleWakeups(context.Context) error
 }
@@ -367,7 +367,7 @@ func (l *Lifecycle) ReconcileWakeup(ctx context.Context, activationID string) (o
 	if err != nil || !claimed {
 		return err
 	}
-	if err := l.scheduler.RegisterGenericScheduleWakeup(ctx, wakeup); err != nil {
+	if err := l.scheduler.RegisterGenericScheduleWakeup(ctx, wakeup, activation.Command.OwnerKind); err != nil {
 		return errors.Join(err, l.releaseWakeup(context.WithoutCancel(ctx), wakeup))
 	}
 	return nil
@@ -440,12 +440,20 @@ func (l *Lifecycle) handleWakeup(ctx context.Context, wakeup Wakeup) {
 }
 
 func (l *Lifecycle) fire(ctx context.Context, wakeup Wakeup) (outcome CommitResult, outcomeErr error) {
-	prepare, err := l.admitOccurrencePreparation(ctx, wakeup)
+	activation, prepare, err := l.admitOccurrencePreparation(ctx, wakeup)
 	if err != nil {
 		return CommitResult{Outcome: CommitRetry}, err
 	}
 	if !prepare {
 		return CommitResult{Outcome: CommitTerminal}, nil
+	}
+	lease, err := firingExecutionLease(ctx, activation.Command)
+	if err != nil {
+		return CommitResult{Outcome: CommitRetry}, err
+	}
+	if lease != nil {
+		ctx = lease.Context()
+		defer func() { outcomeErr = errors.Join(outcomeErr, lease.Done()) }()
 	}
 	commit, prepareErr := l.store.PrepareGenericScheduleOccurrence(ctx, wakeup)
 	if !commit.Acknowledged {
@@ -467,7 +475,7 @@ func (l *Lifecycle) fire(ctx context.Context, wakeup Wakeup) (outcome CommitResu
 	case PrepareTerminal:
 		return CommitResult{Outcome: CommitTerminal, Next: prepared.Activation}, nil
 	}
-	activation := prepared.Activation
+	activation = prepared.Activation
 	occurrence := prepared.Occurrence
 	if err := validateInstanceExecutionOwner(ctx, activation.Command); err != nil {
 		return CommitResult{Outcome: CommitRetry}, err
@@ -545,26 +553,26 @@ func (l *Lifecycle) validateInstanceHandoffOwner(command AdmissionCommand) error
 	return nil
 }
 
-func (l *Lifecycle) admitOccurrencePreparation(ctx context.Context, wakeup Wakeup) (bool, error) {
+func (l *Lifecycle) admitOccurrencePreparation(ctx context.Context, wakeup Wakeup) (Activation, bool, error) {
 	activation, found, loadErr := l.store.LoadGenericScheduleActivation(ctx, wakeup.ActivationID())
 	if loadErr != nil && !activation.Command.ExecutionMode.Valid() {
-		return false, loadErr
+		return Activation{}, false, loadErr
 	}
 	if !found && loadErr == nil {
-		return false, nil
+		return Activation{}, false, nil
 	}
 	if err := l.posture.Admit(activation.Command.ExecutionMode, "generic schedule occurrence preparation"); err != nil {
-		return false, err
+		return Activation{}, false, err
 	}
 	if loadErr == nil {
 		if err := l.validateInstanceHandoffOwner(activation.Command); err != nil {
-			return false, err
+			return Activation{}, false, err
 		}
 		if err := validateInstanceExecutionOwner(ctx, activation.Command); err != nil {
-			return false, err
+			return Activation{}, false, err
 		}
 	}
-	return true, nil
+	return activation, true, nil
 }
 
 func occurrenceEvent(activation Activation, occurrence Occurrence, payload []byte) (events.Event, error) {

@@ -234,7 +234,7 @@ func (s *RunForkPostgresOwner) MaterializeRunFork(ctx context.Context, req runfo
 		return struct{}{}, err
 	})
 	if !result.Acknowledged() {
-		return runfork.RunForkMaterialization{}, result.Err()
+		return runfork.RunForkMaterialization{}, classifyRunForkNativeResult(result)
 	}
 	return materialization, errors.Join(result.Err(), s.publishChannelChanges(result.Acknowledged(), changes.Changed))
 }
@@ -392,7 +392,7 @@ func (s *RunForkSQLiteOwner) MaterializeRunFork(ctx context.Context, req runfork
 		return struct{}{}, err
 	})
 	if !result.Acknowledged() {
-		return runfork.RunForkMaterialization{}, result.Err()
+		return runfork.RunForkMaterialization{}, classifyRunForkNativeResult(result)
 	}
 	return materialization, errors.Join(result.Err(), s.publishChannelChanges(result.Acknowledged(), changes.Changed))
 }

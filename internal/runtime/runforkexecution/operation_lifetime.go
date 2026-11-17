@@ -47,6 +47,7 @@ func beginSelectedContractOperation(ctx context.Context) (*selectedContractOpera
 		return nil, fmt.Errorf("admit selected-contract operation: %w", err)
 	}
 	preparing, cancel := context.WithCancelCause(ctx)
+	owned, cancelOwned := context.WithCancelCause(lease.Context())
 	bridgeDone := make(chan struct{})
 	stop := context.AfterFunc(lease.Context(), func() {
 		defer close(bridgeDone)
@@ -57,7 +58,6 @@ func beginSelectedContractOperation(ctx context.Context) (*selectedContractOpera
 			<-bridgeDone
 		}
 	}
-	owned, cancelOwned := context.WithCancelCause(lease.Context())
 	op := &selectedContractOperation{process: process, preparation: lease, cancel: cancel, cancelOwned: cancelOwned, stop: stopAndJoin}
 	op.preparing = context.WithValue(preparing, selectedOperationContextKey{}, op)
 	op.owned = context.WithValue(owned, selectedOperationContextKey{}, op)

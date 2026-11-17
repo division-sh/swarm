@@ -9,6 +9,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/google/uuid"
 )
 
@@ -38,8 +39,15 @@ type gate struct {
 	publicCompletions uint64
 	drained           chan struct{}
 	transientDrained  chan struct{}
+	runs              map[string]*runWork
 	ctx               context.Context
 	cancel            context.CancelCauseFunc
+}
+
+type runWork struct {
+	active      uint64
+	transitions uint64
+	drained     chan struct{}
 }
 
 func newGate(parent context.Context) *gate {
@@ -63,10 +71,52 @@ type Lease struct {
 	parent           *Lease
 	transient        bool
 	publicCompletion bool
+	runIDs           []string
 	settled          bool
 }
 
 type acceptedLeaseContextKey struct{}
+
+func (l *Lease) ownsRun(runID string) bool {
+	for _, owned := range l.runIDs {
+		if owned == runID {
+			return true
+		}
+	}
+	return false
+}
+
+// HasAcceptedRun reports only a still-live admitted lease. Publication claims
+// use this to preserve descendants of work accepted before a source fork fence.
+func HasAcceptedRun(ctx context.Context, runID string) bool {
+	if ctx == nil || runID == "" {
+		return false
+	}
+	lease, _ := ctx.Value(acceptedLeaseContextKey{}).(*Lease)
+	if lease == nil {
+		return false
+	}
+	lease.mu.Lock()
+	defer lease.mu.Unlock()
+	return !lease.settled && lease.ownsRun(runID)
+}
+
+func leaseRunIDs(ctx context.Context) []string {
+	var inherited []string
+	if parent, _ := ctx.Value(acceptedLeaseContextKey{}).(*Lease); parent != nil {
+		inherited = parent.runIDs
+	}
+	runID := strings.TrimSpace(correlation.RunIDFromContext(ctx))
+	if runID == "" {
+		return append([]string(nil), inherited...)
+	}
+	for _, existing := range inherited {
+		if existing == runID {
+			return append([]string(nil), inherited...)
+		}
+	}
+	return append(append([]string(nil), inherited...), runID)
+}
 
 // CarryAcceptedLease transfers only the opaque work admission into a rebuilt
 // receiver context. The destination owner still checks the lease's gate.
@@ -110,14 +160,16 @@ func (g *gate) beginAcceptedDescendant(parent context.Context, dispatch, transie
 		return g.beginOwned(parent, transient, nil, false, dispatch)
 	}
 	ancestor.mu.Lock()
-	defer ancestor.mu.Unlock()
 	if ancestor.settled || ancestor.gate != g || !transient && (!ancestor.transient || parent.Err() != nil || ancestor.ctx.Err() != nil) {
+		ancestor.mu.Unlock()
 		return g.beginOwned(parent, transient, nil, false, dispatch)
 	}
 	// A standing scanner cannot start fresh work after dispatch closes. A live
 	// transient parent already owns its firing/publication and its descendants.
 	dispatch = dispatch && !ancestor.transient
-	return g.beginOwned(parent, transient, ancestor, false, dispatch)
+	lease, err := g.beginOwned(parent, transient, ancestor, false, dispatch)
+	ancestor.mu.Unlock()
+	return lease, err
 }
 
 func (g *gate) beginWithParent(parent context.Context, transient bool, ancestor *Lease) (*Lease, error) {
@@ -130,6 +182,23 @@ func (g *gate) beginOwned(parent context.Context, transient bool, ancestor *Leas
 	}
 	if parent == nil {
 		parent = context.Background()
+	}
+	runIDs := leaseRunIDs(parent)
+	// Standing custody is joined at occurrence retirement, not at a run's
+	// admitted-work cut. Its ambient run context does not admit run work.
+	if !transient {
+		runIDs = nil
+	}
+	var acceptedRunParent *Lease
+	if ancestor == nil {
+		acceptedRunParent, _ = parent.Value(acceptedLeaseContextKey{}).(*Lease)
+		for acceptedRunParent != nil && acceptedRunParent.gate != g {
+			acceptedRunParent = acceptedRunParent.parent
+		}
+		if acceptedRunParent != nil {
+			acceptedRunParent.mu.Lock()
+			defer acceptedRunParent.mu.Unlock()
+		}
 	}
 	g.mu.Lock()
 	if g.ctx.Err() != nil {
@@ -154,6 +223,10 @@ func (g *gate) beginOwned(parent context.Context, transient bool, ancestor *Leas
 		g.mu.Unlock()
 		return nil, ErrPublicCompletionCapacity
 	}
+	if err := g.checkRunAdmissionLocked(runIDs, ancestor, acceptedRunParent); err != nil {
+		g.mu.Unlock()
+		return nil, err
+	}
 	if publicCompletion {
 		g.publicCompletions++
 	}
@@ -161,6 +234,7 @@ func (g *gate) beginOwned(parent context.Context, transient bool, ancestor *Leas
 		g.drained = make(chan struct{})
 	}
 	g.active++
+	g.addRunWorkLocked(runIDs)
 	if transient {
 		if g.activeTransient == 0 {
 			g.transientDrained = make(chan struct{})
@@ -170,7 +244,7 @@ func (g *gate) beginOwned(parent context.Context, transient bool, ancestor *Leas
 	g.mu.Unlock()
 
 	ctx, cancel := context.WithCancelCause(parent)
-	lease := &Lease{gate: g, ctx: ctx, cancel: cancel, transient: transient, publicCompletion: publicCompletion}
+	lease := &Lease{gate: g, ctx: ctx, cancel: cancel, transient: transient, publicCompletion: publicCompletion, runIDs: runIDs}
 	lease.ctx = context.WithValue(ctx, acceptedLeaseContextKey{}, lease)
 	lease.stop = context.AfterFunc(g.ctx, func() {
 		cause := error(ErrRetired)
@@ -180,6 +254,91 @@ func (g *gate) beginOwned(parent context.Context, transient bool, ancestor *Leas
 		cancel(cause)
 	})
 	return lease, nil
+}
+
+func (g *gate) checkRunAdmissionLocked(runIDs []string, ancestor, acceptedRunParent *Lease) error {
+	for _, runID := range runIDs {
+		inherited := ancestor != nil && ancestor.ownsRun(runID)
+		inherited = inherited || acceptedRunParent != nil && !acceptedRunParent.settled && acceptedRunParent.ownsRun(runID)
+		if state := g.runs[runID]; state != nil && state.transitions != 0 && !inherited {
+			return ErrAdmissionFenced
+		}
+	}
+	return nil
+}
+
+func (g *gate) addRunWorkLocked(runIDs []string) {
+	for _, runID := range runIDs {
+		if g.runs == nil {
+			g.runs = make(map[string]*runWork)
+		}
+		state := g.runs[runID]
+		if state == nil {
+			state = &runWork{drained: make(chan struct{})}
+			g.runs[runID] = state
+		} else if state.active == 0 {
+			state.drained = make(chan struct{})
+		}
+		state.active++
+	}
+}
+
+func (g *gate) beginRunTransition(ctx context.Context, runID string) (func(), error) {
+	if g == nil {
+		return nil, errors.New("work occurrence is required")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return nil, errors.New("run transition requires a run ID")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	g.mu.Lock()
+	if g.state == gateRetired || g.ctx.Err() != nil {
+		g.mu.Unlock()
+		return nil, ErrRetired
+	}
+	if g.runs == nil {
+		g.runs = make(map[string]*runWork)
+	}
+	state := g.runs[runID]
+	if state == nil {
+		state = &runWork{drained: make(chan struct{})}
+		close(state.drained)
+		g.runs[runID] = state
+	}
+	state.transitions++
+	drained := state.drained
+	g.mu.Unlock()
+	var once sync.Once
+	done := func() {
+		once.Do(func() {
+			g.mu.Lock()
+			defer g.mu.Unlock()
+			state.transitions--
+			if state.transitions == 0 && state.active == 0 {
+				delete(g.runs, runID)
+			}
+		})
+	}
+	select {
+	case <-drained:
+		if err := ctx.Err(); err != nil {
+			done()
+			return nil, err
+		}
+		return done, nil
+	case <-ctx.Done():
+		done()
+		return nil, ctx.Err()
+	case <-g.ctx.Done():
+		done()
+		return nil, ErrRetired
+	}
 }
 
 func (l *Lease) Context() context.Context {
@@ -226,6 +385,20 @@ func (l *Lease) Done() error {
 				}
 			}
 			g.active--
+			for _, runID := range l.runIDs {
+				state := g.runs[runID]
+				if state == nil || state.active == 0 {
+					settleErr = errors.Join(settleErr, errors.New("run work occurrence accounting underflow"))
+					continue
+				}
+				state.active--
+				if state.active == 0 {
+					close(state.drained)
+					if state.transitions == 0 {
+						delete(g.runs, runID)
+					}
+				}
+			}
 			if g.active == 0 {
 				close(g.drained)
 			}
@@ -1066,6 +1239,15 @@ func (r *RuntimeOccurrence) WaitForQuiescence(ctx context.Context) error {
 		return nil
 	}
 	return r.occurrence.gate.waitTransient(ctx)
+}
+
+// BeginRunTransition fences only fresh work for one run and joins its already
+// admitted leases, including descendants carried by those leases.
+func (r *RuntimeOccurrence) BeginRunTransition(ctx context.Context, runID string) (func(), error) {
+	if r == nil {
+		return nil, errors.New("runtime occurrence is required")
+	}
+	return r.occurrence.gate.beginRunTransition(ctx, runID)
 }
 
 func (r *RuntimeOccurrence) RetireAndWait(ctx context.Context) (*RuntimeRetirementReceipt, error) {

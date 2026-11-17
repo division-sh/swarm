@@ -401,7 +401,7 @@ func (s *EventPostgresOwner) CommitAPIEventPublication(ctx context.Context, comm
 	if err != nil {
 		return result, err
 	}
-	outcome := runPostgresEventMutationResult(ctx, s, true, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runtimebus.CommittedAPIEventPublication, error) {
+	outcome := runPostgresEventMutationResult(ctx, s, command.RunCreation != nil || publicationNeedsCandidateHandoff(command.Publication), func(txctx context.Context, attempt *mutationprotocol.Attempt) (runtimebus.CommittedAPIEventPublication, error) {
 		var result runtimebus.CommittedAPIEventPublication
 		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
 			if err := requireAPIEventLiveRunTx(txctx, tx, command.LiveRun, true); err != nil {
@@ -486,12 +486,16 @@ func (s *EventPostgresOwner) CommitAPIEventPublication(ctx context.Context, comm
 	})
 	var acknowledged bool
 	result, acknowledged = outcome.Value()
+	return s.finishPostgresAPIEventPublication(ctx, command.Publication, result, acknowledged, outcome.Err())
+}
+
+func (s *EventPostgresOwner) finishPostgresAPIEventPublication(ctx context.Context, publication runtimebus.PublicationCommand, result runtimebus.CommittedAPIEventPublication, acknowledged bool, outcomeErr error) (runtimebus.CommittedAPIEventPublication, error) {
 	if !acknowledged {
-		return result, classifyPublicationFailure(ctx, s, command.Publication, outcome.Err())
+		return result, classifyPublicationFailure(ctx, s, publication, outcomeErr)
 	}
 	result.Acknowledged = true
 	result.Publication = result.Publication.WithCommitAcknowledgment()
-	return result, errors.Join(outcome.Err(), result.Validate(), s.publishChannelChanges(acknowledged, result.Publication.ChannelCardsChanged()))
+	return result, errors.Join(outcomeErr, result.Validate(), s.publishChannelChanges(acknowledged, result.Publication.ChannelCardsChanged()))
 }
 
 func (s *EventSQLiteOwner) CommitAPIEventPublication(ctx context.Context, command runtimebus.APIEventPublicationCommand) (result runtimebus.CommittedAPIEventPublication, err error) {
@@ -513,7 +517,7 @@ func (s *EventSQLiteOwner) CommitAPIEventPublication(ctx context.Context, comman
 	if err != nil {
 		return result, err
 	}
-	outcome := runSQLiteEventMutationResult(ctx, s, "sqlite API event publication commit", true, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runtimebus.CommittedAPIEventPublication, error) {
+	outcome := runSQLiteEventMutationResult(ctx, s, "sqlite API event publication commit", command.RunCreation != nil || publicationNeedsCandidateHandoff(command.Publication), func(txctx context.Context, attempt *mutationprotocol.Attempt) (runtimebus.CommittedAPIEventPublication, error) {
 		var result runtimebus.CommittedAPIEventPublication
 		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
 			if err := requireAPIEventLiveRunTx(txctx, tx, command.LiveRun, false); err != nil {
@@ -794,6 +798,22 @@ func publicationLiveScope(command runtimebus.PublicationCommand) runlifecycle.Li
 	return runlifecycle.LiveRunScope{}
 }
 
+// A queued existing-run publication writes durable event/delivery evidence but
+// cannot request an executable completion candidate in this transaction.
+func publicationNeedsCandidateHandoff(command runtimebus.PublicationCommand) bool {
+	return command.Commit.Event.RunDisposition() == events.AdmittedRunCreateAuthorized ||
+		len(command.Activations) != 0 || command.DynamicFlowCreation != nil
+}
+
+func inboundNeedsCandidateHandoff(publications []runtimebus.PublicationCommand) bool {
+	for _, publication := range publications {
+		if publicationNeedsCandidateHandoff(publication) {
+			return true
+		}
+	}
+	return false
+}
+
 type publicationRunCreationFailure struct{ cause error }
 
 func (e *publicationRunCreationFailure) Error() string { return e.cause.Error() }
@@ -821,14 +841,14 @@ func (s *EventSQLiteOwner) CommitPublicationTx(ctx context.Context, attempt *mut
 
 func (s *EventPostgresOwner) CommitPublication(ctx context.Context, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
 	result, err := commitPublication(ctx, s, func(ctx context.Context, fn func(context.Context, *mutationprotocol.Attempt) (runtimebus.CommittedPublication, error)) mutationprotocol.Result[runtimebus.CommittedPublication] {
-		return runPostgresEventMutationResult(ctx, s, true, fn)
+		return runPostgresEventMutationResult(ctx, s, publicationNeedsCandidateHandoff(command), fn)
 	}, command)
 	return result, errors.Join(err, s.publishChannelChanges(result.Acknowledged, result.ChannelCardsChanged()))
 }
 
 func (s *EventSQLiteOwner) CommitPublication(ctx context.Context, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
 	result, err := commitPublication(ctx, s, func(ctx context.Context, fn func(context.Context, *mutationprotocol.Attempt) (runtimebus.CommittedPublication, error)) mutationprotocol.Result[runtimebus.CommittedPublication] {
-		return runSQLiteEventMutationResult(ctx, s, "sqlite publication commit", true, fn)
+		return runSQLiteEventMutationResult(ctx, s, "sqlite publication commit", publicationNeedsCandidateHandoff(command), fn)
 	}, command)
 	return result, errors.Join(err, s.publishChannelChanges(result.Acknowledged, result.ChannelCardsChanged()))
 }

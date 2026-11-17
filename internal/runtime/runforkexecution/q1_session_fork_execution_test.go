@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -16,8 +17,10 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/operatorread"
+	rootruntime "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/runforkreadiness"
 
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
@@ -36,9 +39,29 @@ import (
 	"github.com/google/uuid"
 )
 
+type pausedSourceMaterializationGuard struct {
+	SelectedContractForkLifecycle
+	seen   *atomic.Int32
+	reader interface {
+		LoadRunLifecycleSnapshot(context.Context, string) (bus.RunLifecycleSnapshot, error)
+	}
+}
+
+func (g pausedSourceMaterializationGuard) MaterializeRunForkForSelectedContractExecution(ctx context.Context, req runforkreadiness.MaterializeRequest) (runfork.RunForkMaterialization, error) {
+	g.seen.Add(1)
+	snapshot, err := g.reader.LoadRunLifecycleSnapshot(ctx, req.SourceRunID)
+	if err != nil {
+		return runfork.RunForkMaterialization{}, err
+	}
+	if snapshot.Status != "paused" {
+		return runfork.RunForkMaterialization{}, fmt.Errorf("live fork materialized before source pause: run=%s status=%s", req.SourceRunID, snapshot.Status)
+	}
+	return g.SelectedContractForkLifecycle.MaterializeRunForkForSelectedContractExecution(ctx, req)
+}
+
 func proveSelectedQ1SessionSiblingReforkBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
-		for _, variant := range []string{"sibling_then_refork", "refork_without_sibling", "frozen_source_advanced_cut"} {
+		for _, variant := range []string{"sibling_then_refork", "refork_without_sibling", "frozen_source_advanced_cut", "running_source"} {
 			t.Run(backend+"/"+variant, func(t *testing.T) {
 				ctx := runForkTestContext(t)
 				var selected startupownership.Store
@@ -102,9 +125,20 @@ func proveSelectedQ1SessionSiblingReforkBothStores(t *testing.T) {
 				route := selectedExecutionTestAgentRoute(t, runID, "test-agent", runID)
 				route.Target = events.MustExistingEntityTarget(events.RouteIdentity{FlowID: root.TemplateID, FlowInstance: root.InstancePath, EntityID: root.EntityID})
 				storetest.CommitSemanticEventWithRoutes(t, ctx, selected, input, []events.DeliveryRoute{route}, "subscribed")
-				ordinary, liveContexts := liveForkRuntimeFixture(t, ctx, selected, owner, loaded, runID, executionposture.Live, SelectedContractAgentRuntimeOptions{
+				agentOptions := SelectedContractAgentRuntimeOptions{
 					Config: selectedForkAPIProviderConfig(selection.BackendOpenAICompatible, "request-A", provider.URL), ProviderCredentials: credentialStore,
-				})
+				}
+				var ordinary *rootruntime.Runtime
+				var liveContexts *rootruntime.RuntimeContextManager
+				if variant == "running_source" {
+					ordinary, liveContexts = ordinaryForkRuntimeFixture(t, ctx, selected, owner, loaded, executionposture.Live, agentOptions)
+					availability, err := owner.ports.fork.LoadRunBundleAvailability(ctx, runID)
+					if err != nil || availability.Status != "live" {
+						t.Fatalf("running-source fork setup lost its live source: %+v err=%v", availability, err)
+					}
+				} else {
+					ordinary, liveContexts = liveForkRuntimeFixture(t, ctx, selected, owner, loaded, runID, executionposture.Live, agentOptions)
+				}
 				use, _, err := liveContexts.AcquireBundleHash(ctx, loaded.SourceArtifactFact.BundleHash())
 				if err != nil || use == nil {
 					t.Fatalf("acquire original source constructor: %v", err)
@@ -158,13 +192,24 @@ func proveSelectedQ1SessionSiblingReforkBothStores(t *testing.T) {
 				execute := func(sourceID, point, sourceInput string) selectedQ1ExecutedFork {
 					t.Helper()
 					callsBefore, lookupBefore := providerCalls.Load(), lookupCalls.Load()
+					var materializations atomic.Int32
+					guardedOwner := owner
+					guardedPorts := *owner.ports
+					guardedPorts.fork = pausedSourceMaterializationGuard{
+						SelectedContractForkLifecycle: owner.ports.fork,
+						seen:                          &materializations,
+						reader: selected.(interface {
+							LoadRunLifecycleSnapshot(context.Context, string) (bus.RunLifecycleSnapshot, error)
+						}),
+					}
+					guardedOwner.ports = &guardedPorts
 					operation := runfork.ForkOperationRequest{
 						OperationID: uuid.NewString(), Actor: "bearer:q1-operator", IdempotencyKey: uuid.NewString(), TransportHash: "sha256:q1-" + sourceID + ":" + point,
 						SourceRunID: sourceID, ForkEventID: point, TargetBundleHash: loaded.SourceArtifactFact.BundleHash(),
 						ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source), TargetRootReference: loaded.RootedSource.Admission().Reference(),
 					}
 					request := SelectedContractExecutionRequest{
-						SourceRunID: sourceID, At: point, Owner: owner, SourceLoader: loader,
+						SourceRunID: sourceID, At: point, Owner: guardedOwner, SourceLoader: loader,
 						LiveRuntime: ordinary, LiveContexts: liveContexts, LiveRuns: selected.(runlifecycle.LiveRunReader),
 						ForkOperation:     &operation,
 						ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source),
@@ -172,6 +217,9 @@ func proveSelectedQ1SessionSiblingReforkBothStores(t *testing.T) {
 							ProcessCapability: selectedContractTestProcessCapability(t, ctx, selected), QuiescenceTimeout: selectedForkCapabilityProofQuiescenceTimeout},
 					}
 					result, err := executeLiveSelectedContractRunFork(ctx, request)
+					if materializations.Load() != 1 {
+						t.Fatalf("selected fork materialization guard reached %d times, want one", materializations.Load())
+					}
 					if err != nil {
 						t.Fatalf("selected session fork: source=%s point=%s provider_delta=%d lookup_delta=%d err=%v", sourceID, point, providerCalls.Load()-callsBefore, lookupCalls.Load()-lookupBefore, err)
 					}

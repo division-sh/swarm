@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/apiidempotency"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
@@ -25,6 +26,48 @@ const (
 
 var runForkTestArtifact = mustAPITestSourceArtifactNamed("run-fork")
 var runForkTestBundleHash = runForkTestArtifact.BundleHash()
+
+func TestRunForkErrorKeepsCleanConflictSeparateFromJoinedAndUnconfirmedOutcomes(t *testing.T) {
+	clean := runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict, "run_fork_write_conflict", "run-fork", "write", nil, errors.New("sealed native rollback"))
+	for _, tc := range []struct {
+		name      string
+		err       error
+		class     runtimefailures.Class
+		code      string
+		retryable bool
+		causes    []string
+	}{
+		{"clean_rollback", clean, runtimefailures.ClassLifecycleConflict, "run_fork_write_conflict", true, []string{"write was rolled back", "same request"}},
+		{"retirement_joined", errors.Join(clean, errors.New("dynamic flow runtime readiness retains predecessor retirement")), runtimefailures.ClassOutcomeUncertain, "run_fork_commit_unconfirmed", false, []string{"another writer changed the run", "previous runtime could not be safely retired"}},
+		{"readback_joined", &runForkOutcomeReadbackFailure{execution: clean, readback: errors.New("read unavailable")}, runtimefailures.ClassOutcomeUncertain, "run_fork_commit_unconfirmed", false, []string{"another writer changed the run", "durable fork outcome could not be read"}},
+		{"unknown_readback", &runForkOutcomeReadbackFailure{readback: errors.New("read unavailable")}, runtimefailures.ClassOutcomeUncertain, "run_fork_commit_unconfirmed", false, []string{"may or may not have been written", "check the fork operation"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := runForkError(runForkTestSourceRunID, runForkTestEventID, tc.err)
+			if !errors.Is(err, tc.err) && tc.name != "clean_rollback" {
+				t.Fatalf("original failure was lost: %v", err)
+			}
+			failure := runtimefailures.Normalize(err, "api", "run.fork")
+			if failure.Class != tc.class || failure.Detail.Code != tc.code || failure.Retryable != tc.retryable || len(failure.Detail.Attributes) != 0 {
+				t.Fatalf("fork failure = %+v", failure)
+			}
+			for _, cause := range tc.causes {
+				if !strings.Contains(failure.Message, cause) {
+					t.Fatalf("fork failure message %q omitted %q", failure.Message, cause)
+				}
+			}
+			if err := runtimefailures.ValidateEnvelope(failure); err != nil {
+				t.Fatalf("fork failure envelope invalid: %v", err)
+			}
+			if tc.name == "readback_joined" {
+				failure.Message = "unreviewed raw cause: secret"
+				if err := runtimefailures.ValidateEnvelope(failure); err == nil {
+					t.Fatal("unreviewed cause text entered the public failure envelope")
+				}
+			}
+		})
+	}
+}
 
 func TestValidateRunForkExecutionResultRejectsContradictorySourceOutcome(t *testing.T) {
 	for _, result := range []RunForkExecutionResult{
@@ -398,7 +441,7 @@ func (o *recordingRunForkOperations) activate(request runfork.ForkOperationReque
 		Result: &runfork.ForkOperationResult{
 			SourceRunID: result.SourceRunID, SourceRunStatus: result.SourceRunStatus, SourceFrozen: result.SourceFrozen,
 			ForkRunID: result.ForkRunID, ForkEventID: result.ForkEventID, ForkPoint: point, ForkRunStatus: result.ForkRunStatus,
-			BundleHash: result.BundleHash, ExecutedEventCount: result.ExecutedEventCount, DataPins: result.DataPins,
+			BundleHash: result.BundleHash, DataPins: result.DataPins,
 		},
 	}
 	if err := record.Validate(); err != nil {

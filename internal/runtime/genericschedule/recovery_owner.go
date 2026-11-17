@@ -33,6 +33,25 @@ func instanceExecutionLease(ctx context.Context, command AdmissionCommand) (*wor
 	return owner.Begin(ctx)
 }
 
+// An idle generic clock is standing custody. Only its firing callback admits
+// finite work for a run, so a selected fork joins started work, not its timer.
+func firingExecutionLease(ctx context.Context, command AdmissionCommand) (*worklifetime.Lease, error) {
+	if command.OwnerKind == OwnerInstance {
+		return instanceExecutionLease(ctx, command)
+	}
+	if command.RunID == "" {
+		return nil, nil
+	}
+	owner, ok := worklifetime.OccurrenceFromContext(ctx)
+	if !ok || owner == nil {
+		return nil, errors.New("run-scoped schedule fire requires its runtime work occurrence")
+	}
+	if existing := correlation.RunIDFromContext(ctx); existing != "" && existing != command.RunID {
+		return nil, errors.New("run-scoped schedule fire has a foreign run")
+	}
+	return owner.Begin(correlation.WithRunID(ctx, command.RunID))
+}
+
 func recoveryOwnerRefused(err error) bool {
 	return errors.Is(err, errInstanceExecutionOwner) || errors.Is(err, worklifetime.ErrRetired) || errors.Is(err, worklifetime.ErrAdmissionFenced)
 }

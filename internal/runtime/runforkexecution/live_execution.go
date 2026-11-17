@@ -7,9 +7,12 @@ import (
 	"sync"
 
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
+	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverycontinuation"
 	"github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -17,53 +20,84 @@ import (
 	"github.com/division-sh/swarm/internal/sourceartifact"
 )
 
+type sourcePause struct {
+	predecessor *runlifecycle.LiveRun
+	paused      bool
+}
+
 // Preparation must refuse before predecessor retirement. Once execution starts,
 // its existing owner handles preparation disposal and transaction revalidation.
-func executePreparedLiveFork(ctx context.Context, req SelectedContractExecutionRequest, prepared *PreparedSelectedFork) (out SelectedContractExecutionResult, finalErr error) {
+func executePreparedLiveFork(ctx context.Context, req SelectedContractExecutionRequest, prepared **PreparedSelectedFork) (out SelectedContractExecutionResult, finalErr error) {
+	current := *prepared
 	executed := false
 	defer func() {
-		if !executed {
-			finalErr = errors.Join(finalErr, req.Owner.completePreparation(prepared))
+		if !executed && current != nil {
+			finalErr = errors.Join(finalErr, req.Owner.completePreparation(current))
 		}
 	}()
 	execute := func(context.Context) error {
 		executed = true
-		out, finalErr = executePreparedSelectedContractRunFork(ctx, req, prepared)
+		out, finalErr = executePreparedSelectedContractRunFork(ctx, req, current)
 		return finalErr
 	}
 	if req.LiveRuns == nil || req.LiveContexts == nil {
 		return out, errors.New("live fork requires its durable flow selector and runtime contexts")
 	}
-	scope, err := req.LiveRuns.LoadRunLiveScope(ctx, prepared.plan.SourceRunID)
-	if err != nil {
-		return out, err
-	}
-	if err := scope.Validate(); err != nil {
-		return out, err
-	}
-	live, found, err := req.LiveRuns.LoadLiveRun(ctx, scope)
-	if err != nil {
-		return out, err
-	}
-	if found && !req.liveSelectionHeld {
-		releaseSelection := req.LiveContexts.BeginLiveRunSelection()
-		defer releaseSelection()
-		req.liveSelectionHeld = true
-		live, found, err = req.LiveRuns.LoadLiveRun(ctx, scope)
+	var paused sourcePause
+	if req.Recovery == nil {
+		var err error
+		paused, err = pauseSelectedSourceBeforeLiveFork(ctx, req, current)
 		if err != nil {
 			return out, err
 		}
+		req.requirePausedSource = paused.paused
+		if paused.paused {
+			transitionOwner, ok := req.Owner.ports.pipelineObligations.(pipelineobligation.ParentTransitionOwner)
+			if !ok {
+				return out, errors.New("live fork requires selected-store run transition admission")
+			}
+			transition, err := transitionOwner.BeginSourceForkTransition(ctx, current.plan.SourceRunID)
+			if err != nil {
+				return out, err
+			}
+			defer transition.Done()
+			releaseSourceWork, err := joinSelectedSourceWork(ctx, req, current.plan.SourceRunID, paused.predecessor != nil)
+			if err != nil {
+				return out, err
+			}
+			defer func() { finalErr = errors.Join(finalErr, releaseSourceWork()) }()
+			// Already-admitted work may have published after the first claim drain.
+			// Once its occurrence has joined, this second readback closes that cut.
+			cutTransition, err := transitionOwner.BeginSourceForkTransition(ctx, current.plan.SourceRunID)
+			if err != nil {
+				return out, err
+			}
+			defer cutTransition.Done()
+			point := current.plan.ForkPoint
+			req.fixedPoint = &point
+			req.ForkOperation = current.forkOperation
+			refreshed, err := req.Owner.refreshPrepared(ctx, req, current)
+			if err != nil {
+				return out, err
+			}
+			current = refreshed
+			*prepared = current
+		}
+	}
+	live, found, releaseSelection, err := selectLiveForkSource(ctx, &req, current, paused)
+	if releaseSelection != nil {
+		defer releaseSelection()
+	}
+	if err != nil {
+		return out, err
 	}
 	if found {
-		use, err := acquireLivePredecessor(ctx, req.LiveContexts, live)
+		use, err := acquireSelectedLivePredecessor(ctx, req.LiveContexts, live, current)
 		if err != nil {
 			return out, err
 		}
 		parked, parkCtx := use.Runtime(), use.WorkContext()
-		if live.Source.Matches(prepared.loadedSource.SourceArtifactFact) && use.Context.RootAdmission.Reference() != prepared.loadedSource.RootedSource.Admission().Reference() {
-			return out, errors.Join(errors.New("live predecessor has a different admitted root"), use.Done())
-		}
-		if live.Source.Matches(prepared.loadedSource.SourceArtifactFact) {
+		if live.Source.Matches(current.loadedSource.SourceArtifactFact) {
 			releaseUse := sync.OnceValue(use.Done)
 			defer func() { finalErr = errors.Join(finalErr, releaseUse()) }()
 			req.LiveRuntime = parked
@@ -81,8 +115,9 @@ func executePreparedLiveFork(ctx context.Context, req SelectedContractExecutionR
 			defer func() { finalErr = errors.Join(finalErr, releaseUse()) }()
 			acquire := req.AcquireLiveRuntime
 			paused := false
+			alreadyPaused := req.requirePausedSource && live.RunID == current.plan.SourceRunID
 			req.AcquireLiveRuntime = func(ctx context.Context, root sourceartifact.RootAdmissionReference) (*runtimepkg.RuntimeContextUse, error) {
-				use, sourcePaused, err := pauseLiveSourceAndAcquire(ctx, pauseCtx, parked, live.RunID, root, releaseUse, acquire)
+				use, sourcePaused, err := pauseLiveSourceAndAcquire(ctx, pauseCtx, parked, live.RunID, alreadyPaused, root, releaseUse, acquire)
 				paused = sourcePaused
 				return use, err
 			}
@@ -105,15 +140,213 @@ func executePreparedLiveFork(ctx context.Context, req SelectedContractExecutionR
 	return out, finalErr
 }
 
-func pauseLiveSourceAndAcquire(ctx, pauseCtx context.Context, parked *runtimepkg.Runtime, runID string, root sourceartifact.RootAdmissionReference, release func() error, acquire func(context.Context, sourceartifact.RootAdmissionReference) (*runtimepkg.RuntimeContextUse, error)) (*runtimepkg.RuntimeContextUse, bool, error) {
+func acquireSelectedLivePredecessor(ctx context.Context, contexts *runtimepkg.RuntimeContextManager, live runlifecycle.LiveRun, current *PreparedSelectedFork) (*runtimepkg.RuntimeContextUse, error) {
+	use, err := acquireLivePredecessor(ctx, contexts, live)
+	if err != nil {
+		return nil, err
+	}
+	if live.Source.Matches(current.loadedSource.SourceArtifactFact) && use.Context.RootAdmission.Reference() != current.loadedSource.RootedSource.Admission().Reference() {
+		return nil, errors.Join(errors.New("live predecessor has a different admitted root"), use.Done())
+	}
+	return use, nil
+}
+
+func selectLiveForkSource(ctx context.Context, req *SelectedContractExecutionRequest, current *PreparedSelectedFork, paused sourcePause) (runlifecycle.LiveRun, bool, func(), error) {
+	scope, err := req.LiveRuns.LoadRunLiveScope(ctx, current.plan.SourceRunID)
+	if err != nil {
+		return runlifecycle.LiveRun{}, false, nil, err
+	}
+	if err := scope.Validate(); err != nil {
+		return runlifecycle.LiveRun{}, false, nil, err
+	}
+	live, found, err := req.LiveRuns.LoadLiveRun(ctx, scope)
+	if err != nil {
+		return runlifecycle.LiveRun{}, false, nil, err
+	}
+	var releaseSelection func()
+	transferred := false
+	defer func() {
+		if releaseSelection != nil && !transferred {
+			releaseSelection()
+		}
+	}()
+	if found && paused.predecessor == nil && !req.liveSelectionHeld {
+		releaseSelection = req.LiveContexts.BeginLiveRunSelection()
+		req.liveSelectionHeld = true
+		live, found, err = req.LiveRuns.LoadLiveRun(ctx, scope)
+		if err != nil {
+			return runlifecycle.LiveRun{}, false, nil, err
+		}
+	}
+	if paused.predecessor != nil {
+		if found {
+			return runlifecycle.LiveRun{}, false, nil, fmt.Errorf("live fork source changed after pause: source=%s live=%s", paused.predecessor.RunID, live.RunID)
+		}
+		live, found = *paused.predecessor, true
+	} else if req.Recovery == nil && found && live.RunID == current.plan.SourceRunID {
+		return runlifecycle.LiveRun{}, false, nil, fmt.Errorf("paused fork source %s became live before materialization", live.RunID)
+	}
+	transferred = true
+	return live, found, releaseSelection, nil
+}
+
+func joinSelectedSourceWork(ctx context.Context, req SelectedContractExecutionRequest, runID string, wasLive bool) (func() error, error) {
+	use, lookup, availability, err := req.LiveContexts.AcquireRun(ctx, runID)
+	if err != nil {
+		if use != nil {
+			err = errors.Join(err, use.Done())
+		}
+		return nil, err
+	}
+	if !lookup.Loaded() {
+		if wasLive {
+			return nil, errors.New("live fork source runtime was unloaded before its work joined")
+		}
+		return func() error { return nil }, nil
+	}
+	if !availability.Available() || use == nil || use.Runtime() == nil {
+		if use != nil {
+			return nil, errors.Join(errors.New("live fork source has no admitted runtime occurrence"), use.Done())
+		}
+		return nil, errors.New("live fork source has no admitted runtime occurrence")
+	}
+	occurrence := use.Runtime().WorkOccurrence()
+	if occurrence == nil {
+		return nil, errors.Join(errors.New("live fork source runtime has no work occurrence"), use.Done())
+	}
+	if err := use.Done(); err != nil {
+		return nil, err
+	}
+	done, err := occurrence.BeginRunTransition(ctx, runID)
+	if err != nil {
+		return nil, err
+	}
+	return func() error { done(); return nil }, nil
+}
+
+func pauseSelectedSourceBeforeLiveFork(ctx context.Context, req SelectedContractExecutionRequest, prepared *PreparedSelectedFork) (sourcePause, error) {
+	control, ok := req.LiveRuns.(runcontrol.Store)
+	if !ok {
+		return sourcePause{}, errors.New("live fork requires its selected run-control owner")
+	}
+	sourceID := prepared.plan.SourceRunID
+	source := prepared.originalSource.SourceArtifactFact
+	if err := source.Validate(); err != nil {
+		return sourcePause{}, fmt.Errorf("live fork original source: %w", err)
+	}
+	scope, err := req.LiveRuns.LoadRunLiveScope(ctx, sourceID)
+	if err != nil {
+		return sourcePause{}, err
+	}
+	if err := scope.Validate(); err != nil {
+		return sourcePause{}, err
+	}
+	live, found, err := req.LiveRuns.LoadLiveRun(ctx, scope)
+	if err != nil {
+		return sourcePause{}, err
+	}
+	availability, err := req.Owner.ports.fork.LoadRunBundleAvailability(ctx, sourceID)
+	if err != nil {
+		return sourcePause{}, err
+	}
+	if !availability.Available() || availability.RunID != sourceID || availability.BundleHash != source.BundleHash() {
+		return sourcePause{}, fmt.Errorf("live fork source differs from its exact admitted bundle: %s", availability.DetailString())
+	}
+	selectedSource := found && live.RunID == sourceID
+	pausedLanding := false
+	if availability.Status == "paused" {
+		landingReader, ok := req.LiveRuns.(runlifecycle.LandingRunReader)
+		if !ok {
+			return sourcePause{}, errors.New("paused fork source requires its landing-run reader")
+		}
+		landing, selected, err := landingReader.LoadLandingRun(ctx, scope)
+		if err != nil {
+			return sourcePause{}, err
+		}
+		pausedLanding = selected && landing.RunID == sourceID && landing.State == runlifecycle.StatePaused
+	}
+	if !selectedSource && !pausedLanding {
+		// A retained historical source is not the flow's live run to pause.
+		return sourcePause{}, nil
+	}
+	return pauseSelectedSourceControl(ctx, req, prepared, control, live, selectedSource, availability)
+}
+
+func pauseSelectedSourceControl(ctx context.Context, req SelectedContractExecutionRequest, prepared *PreparedSelectedFork, control runcontrol.Store, live runlifecycle.LiveRun, selectedSource bool, availability runbundle.Availability) (result sourcePause, finalErr error) {
+	sourceID := prepared.plan.SourceRunID
+	source := prepared.originalSource.SourceArtifactFact
+	ctx = correlation.WithRunID(correlation.WithSourceArtifactFact(ctx, source), sourceID)
+	if scope, present := authoractivity.ScopeFromContext(ctx); present && scope.Kind == authoractivity.ScopeBundle {
+		ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(scope.RuntimeInstanceID, source.BundleHash()))
+	}
+	parked, err := control.RunDispatchParked(ctx, sourceID)
+	if err != nil {
+		return sourcePause{}, fmt.Errorf("read live fork source control: %w", err)
+	}
+	if parked {
+		if availability.Status != "paused" {
+			return sourcePause{}, fmt.Errorf("live fork source changed during paused readback: run=%s status=%s", sourceID, availability.Status)
+		}
+		result := sourcePause{paused: true}
+		if selectedSource {
+			result.predecessor = &live
+		}
+		return result, nil
+	}
+	if !selectedSource {
+		return sourcePause{}, fmt.Errorf("retained paused fork source %s lacks its admitted paused control", sourceID)
+	}
+	if availability.Status != "running" && availability.Status != "live" {
+		return sourcePause{}, fmt.Errorf("live fork source is not pausable: run=%s status=%s", sourceID, availability.Status)
+	}
+	use, lookup, admitted, err := req.LiveContexts.AcquireRun(ctx, sourceID)
+	if err != nil {
+		return sourcePause{}, errors.Join(err, use.Done())
+	}
+	if !lookup.Loaded() || !admitted.Available() || use == nil || use.Runtime() == nil ||
+		!use.Context.SourceArtifactFact.Matches(source) || admitted.RootReference != availability.RootReference {
+		return sourcePause{}, errors.Join(errors.New("live fork source requires its original admitted runtime"), use.Done())
+	}
+	defer func() { finalErr = errors.Join(finalErr, use.Done()) }()
+	pauseCtx := correlation.WithRunID(correlation.WithSourceArtifactFact(use.WorkContext(), source), sourceID)
+	_, err = runcontrol.NewController(control, nil, runcontrol.Options{}).Pause(pauseCtx, runcontrol.TransitionRequest{
+		RunID: sourceID, Reason: "fork_live_switch", ControlledBy: "run.fork",
+	})
+	if err != nil {
+		return sourcePause{}, err
+	}
+	parked, err = control.RunDispatchParked(pauseCtx, sourceID)
+	if err != nil {
+		return sourcePause{}, fmt.Errorf("read paused fork source control: %w", err)
+	}
+	availability, err = req.Owner.ports.fork.LoadRunBundleAvailability(pauseCtx, sourceID)
+	if err != nil {
+		return sourcePause{}, fmt.Errorf("read paused fork source availability: %w", err)
+	}
+	if !parked || availability.Status != "paused" || availability.BundleHash != source.BundleHash() {
+		return sourcePause{}, fmt.Errorf("live fork source changed during pause readback: %s", availability.DetailString())
+	}
+	return sourcePause{predecessor: &live, paused: true}, nil
+}
+
+func pauseLiveSourceAndAcquire(ctx, pauseCtx context.Context, parked *runtimepkg.Runtime, runID string, alreadyPaused bool, root sourceartifact.RootAdmissionReference, release func() error, acquire func(context.Context, sourceartifact.RootAdmissionReference) (*runtimepkg.RuntimeContextUse, error)) (*runtimepkg.RuntimeContextUse, bool, error) {
 	if acquire == nil || parked.RunControl == nil {
 		return nil, false, errors.New("bundle swap requires its existing runtime and run-control owners")
 	}
-	// Materialization and selected dispatch have settled before this callback.
-	result, err := parked.RunControl.Pause(pauseCtx, runcontrol.TransitionRequest{RunID: runID, Reason: "fork bundle swap", ControlledBy: "run.fork"})
-	paused := result.Status == runcontrol.StatusPaused
-	if err != nil {
-		return nil, paused, err
+	paused := false
+	if alreadyPaused {
+		var err error
+		paused, err = parked.RunControl.QueueableRunDispatchParked(pauseCtx, runID)
+		if err != nil || !paused {
+			return nil, paused, errors.Join(err, errors.New("fork source continued before bundle swap"))
+		}
+	} else {
+		// A different live predecessor still takes its original pause at handoff.
+		result, err := parked.RunControl.Pause(pauseCtx, runcontrol.TransitionRequest{RunID: runID, Reason: "fork bundle swap", ControlledBy: "run.fork"})
+		paused = result.Status == runcontrol.StatusPaused
+		if err != nil {
+			return nil, paused, err
+		}
 	}
 	if err := release(); err != nil {
 		return nil, paused, err
@@ -226,6 +459,11 @@ func (c selectedContractForkLocalRuntimeContainer) activateLive(p *PreparedSelec
 	// Stop actors and join accepted work while their selected grant still exists.
 	// Shutdown retires that grant and therefore belongs after the native handoff.
 	if err := runtime.stopExecutionWork(); err != nil {
+		return out, err
+	}
+	// A stopped producer cannot add another selected publication. Drain any
+	// committed event that reached the pipeline after the earlier quiescence cut.
+	if err := runtime.bus.RecoverSelectedRunPipelineToExhaustion(c.attachment.ctx, c.req.ForkRunID); err != nil {
 		return out, err
 	}
 	return c.activateLiveHandoff(p, req, out)

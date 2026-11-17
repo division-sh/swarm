@@ -126,6 +126,10 @@ release approval or a promise of old-store migration.
 - Fork selects the live flow run; compatible live bundle upgrades are admitted
   at startup. Fixed-cut work retains its admitted source, and unsafe transitions
   refuse rather than discard work. (#2810, #2812)
+- `run.fork` no longer returns `executed_event_count` in the API or CLI output.
+  Existing stored fork results keep their historical value. An older command
+  against a newer server prints `executed_event_count=0`; cross-version CLI
+  behavior is not promised. (#3047)
 - Flat `state.yaml` owns state declarations. Own-flow `writes` is a field list
   or scalar `all`; fieldless flows need no invented state row or state tool.
   State readers select the flow contract instead of a global entity type.

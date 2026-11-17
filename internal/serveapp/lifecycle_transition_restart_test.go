@@ -256,8 +256,7 @@ func TestServedCompiledGateFrozenTransitionEvidenceOnBothStores(t *testing.T) {
 			if len(history) != 1 || history[0].From != "approved" || history[0].To != "done" {
 				t.Fatalf("frozen transition history=%#v", history)
 			}
-			retainedPrefix := readLifecycleTransitionAtCut(t, rt.ReceiverStateReader, seed.RunID, entityID, prefix[0].TriggerEventID)
-			requireLifecycleGateRestartMembers(t, "completed pre-upgrade transition at its fixed cut", prefix[0], retainedPrefix)
+			settledEvidence := readLifecycleGateRestartEvidence(t, rt.GateRestartReadback, seed.RunID)
 			gateRecord := readLifecycleTransitionAtCut(t, rt.ReceiverStateReader, seed.RunID, entityID, history[0].TriggerEventID)
 			if gateRecord.From != "review" || gateRecord.To != "approved" || gateRecord.Evidence.FlowID() != "." {
 				t.Fatalf("frozen historical gate transition=%#v", gateRecord)
@@ -266,10 +265,14 @@ func TestServedCompiledGateFrozenTransitionEvidenceOnBothStores(t *testing.T) {
 			if !ok || compiled.Edge().Source != "gate" || compiled.Edge().DecisionID != "review_decision" || compiled.Edge().Verdict != "approve" {
 				t.Fatalf("frozen selected gate cause=%#v", compiled)
 			}
+			if answered := settledEvidence.Cards[params["card_id"].(string)]; answered.CardID != params["card_id"] || answered.DecisionEventID == "" || answered.DecisionEventID != gateRecord.TriggerEventID || answered.Verdict != params["verdict"] {
+				t.Fatalf("historical decision cut differs from actual successor answer: gate=%+v answered=%+v", gateRecord, answered)
+			}
+			retainedPrefix := readLifecycleTransitionAtCut(t, rt.ReceiverStateReader, seed.RunID, entityID, gateRecord.TriggerEventID)
+			requireLifecycleGateRestartMembers(t, "completed pre-upgrade transition at its fixed cut", prefix[0], retainedPrefix)
 			requireLifecycleEventCount(t, rt, seed.RunID, "work.completed", 1)
 			requireLifecycleEventCount(t, rt, seed.RunID, "work.changed", 0)
 			settled := lifecycleStoredSnapshot(t, rt, seed.RunID)
-			settledEvidence := readLifecycleGateRestartEvidence(t, rt.GateRestartReadback, seed.RunID)
 			conflict := map[string]any{"card_id": params["card_id"], "verdict": "reject", "observed_content_hash": params["observed_content_hash"], "idempotency_key": "contradictory-decision"}
 			requireServedJSONRPCError(t, rt.Endpoint, "mailbox.decide", conflict)
 			if got := lifecycleStoredSnapshot(t, rt, seed.RunID); got != settled {

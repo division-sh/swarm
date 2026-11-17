@@ -36,7 +36,7 @@ func TestServedCompiledTransitionStaticForkEvidenceOnBothStores(t *testing.T) {
 			before := lifecycleStoredSnapshot(t, rt, seed.RunID)
 			params := map[string]any{"source_run_id": seed.RunID, "fork_event_id": frontier.EventID, "idempotency_key": "static-fork"}
 			fork := requireSelectedForkExecutionRPCResult(t, rt.Endpoint, params)
-			if fork.ForkRunID == "" || fork.ForkRunID == seed.RunID || fork.ExecutedEventCount != 1 || fork.ForkRunStatus != "live" || fork.SourceRunStatus != "paused" || fork.SourceFrozen {
+			if fork.ForkRunID == "" || fork.ForkRunID == seed.RunID || fork.ForkRunStatus != "live" || fork.SourceRunStatus != "paused" || fork.SourceFrozen {
 				t.Fatalf("invalid static fork result: %+v", fork)
 			}
 			childEvent := waitServedSelectedForkFrontier(t, rt.ReceiverStateReader, rt.ReadRunDeliveries, fork.ForkRunID, frontier.EventID)

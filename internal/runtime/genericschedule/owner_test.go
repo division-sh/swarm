@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -528,7 +529,7 @@ func (s *restoreScheduler) BindGenericScheduleLifecycle(callback func(context.Co
 	s.callback = callback
 	return nil
 }
-func (s *restoreScheduler) RegisterGenericScheduleWakeup(_ context.Context, wakeup Wakeup) error {
+func (s *restoreScheduler) RegisterGenericScheduleWakeup(_ context.Context, wakeup Wakeup, _ OwnerKind) error {
 	s.registered = append(s.registered, wakeup)
 	return nil
 }
@@ -616,6 +617,7 @@ type lifecycleProofStore struct {
 	prepared      PreparedOccurrence
 	prepareErr    error
 	prepareReject bool
+	prepareCalls  int
 	commit        func(CommitCommand) (CommitResult, error)
 	commitCalls   int
 	released      []Wakeup
@@ -641,6 +643,7 @@ func (s *lifecycleProofStore) ListActiveGenericScheduleActivations(context.Conte
 	return []Activation{s.activation}, nil
 }
 func (s *lifecycleProofStore) PrepareGenericScheduleOccurrence(context.Context, Wakeup) (PreparationCommit, error) {
+	s.prepareCalls++
 	return PreparationCommit{Result: s.prepared, Acknowledged: !s.prepareReject}, s.prepareErr
 }
 func (s *lifecycleProofStore) CommitGenericScheduleOccurrence(_ context.Context, command CommitCommand) (CommitResult, error) {
@@ -690,7 +693,7 @@ type lifecycleProofScheduler struct {
 	registerSeen chan error
 }
 
-func (s *lifecycleProofScheduler) RegisterGenericScheduleWakeup(ctx context.Context, wakeup Wakeup) error {
+func (s *lifecycleProofScheduler) RegisterGenericScheduleWakeup(ctx context.Context, wakeup Wakeup, owner OwnerKind) error {
 	if s.order != nil {
 		*s.order = append(*s.order, "register")
 	}
@@ -700,7 +703,7 @@ func (s *lifecycleProofScheduler) RegisterGenericScheduleWakeup(ctx context.Cont
 		s.registerErrs = s.registerErrs[1:]
 	}
 	if result == nil {
-		result = s.restoreScheduler.RegisterGenericScheduleWakeup(ctx, wakeup)
+		result = s.restoreScheduler.RegisterGenericScheduleWakeup(ctx, wakeup, owner)
 	}
 	if s.registerSeen != nil {
 		s.registerSeen <- result
@@ -1129,7 +1132,18 @@ func TestLifecyclePreparationAcknowledgementControlsOccurrenceSettlement(t *test
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, err = lifecycle.fire(correlation.WithSourceArtifactFact(context.Background(), fact), wakeup)
+			runOwner, _ := instanceRecoveryWorkOwner(t, activation.Command.RunID)
+			ctx := correlation.WithSourceArtifactFact(correlation.WithRunID(t.Context(), activation.Command.RunID), fact)
+			standing, err := runOwner.BeginStanding(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() {
+				if err := standing.Done(); err != nil {
+					t.Error(err)
+				}
+			}()
+			_, err = lifecycle.fire(worklifetime.WithOccurrence(standing.Context(), runOwner), wakeup)
 			want := 0
 			if acknowledged {
 				want = 1

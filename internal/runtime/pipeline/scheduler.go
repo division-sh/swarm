@@ -199,18 +199,23 @@ func (s *Scheduler) registerWorkflowTimerWakeup(ctx context.Context, wakeup Work
 	if err != nil {
 		return err
 	}
-	return s.registerProjection(ctx, projection)
+	return s.registerProjection(ctx, projection, true)
 }
 
-func (s *Scheduler) RegisterGenericScheduleWakeup(ctx context.Context, wakeup runtimegenericschedule.Wakeup) error {
+func (s *Scheduler) RegisterGenericScheduleWakeup(ctx context.Context, wakeup runtimegenericschedule.Wakeup, owner runtimegenericschedule.OwnerKind) error {
+	switch owner {
+	case runtimegenericschedule.OwnerAgent, runtimegenericschedule.OwnerSystem, runtimegenericschedule.OwnerInstance:
+	default:
+		return errors.New("generic schedule wakeup requires its admitted owner kind")
+	}
 	projection, err := newGenericActivationScheduledProjection(wakeup)
 	if err != nil {
 		return err
 	}
-	return s.registerProjection(ctx, projection)
+	return s.registerProjection(ctx, projection, true)
 }
 
-func (s *Scheduler) registerProjection(ctx context.Context, projection scheduledProjection) error {
+func (s *Scheduler) registerProjection(ctx context.Context, projection scheduledProjection, standing bool) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -242,7 +247,13 @@ func (s *Scheduler) registerProjection(ctx context.Context, projection scheduled
 		if contextual, ok := worklifetime.OccurrenceFromContext(ctx); ok {
 			owner = contextual
 		}
-		lease, err := owner.Begin(context.WithoutCancel(ctx))
+		var lease *worklifetime.Lease
+		var err error
+		if standing {
+			lease, err = owner.BeginStanding(context.WithoutCancel(ctx))
+		} else {
+			lease, err = owner.Begin(context.WithoutCancel(ctx))
+		}
 		if err != nil {
 			return fmt.Errorf("admit scheduled task: %w", err)
 		}

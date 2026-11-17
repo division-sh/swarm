@@ -19,6 +19,63 @@ type recoveryRegistration struct {
 	wakeup Wakeup
 }
 
+func TestRunScopedGenericFireLeaseJoinsForkAndRefusesFence(t *testing.T) {
+	for _, kind := range []OwnerKind{OwnerAgent, OwnerSystem} {
+		t.Run(string(kind), func(t *testing.T) {
+			runID := uuid.NewString()
+			owner, _ := instanceRecoveryWorkOwner(t, runID)
+			ctx := worklifetime.WithOccurrence(correlation.WithRunID(t.Context(), runID), owner)
+			standing, err := owner.BeginStanding(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = standing.Done() }()
+			command := AdmissionCommand{OwnerKind: kind, RunID: runID}
+			fire, err := firingExecutionLease(worklifetime.WithOccurrence(standing.Context(), owner), command)
+			if err != nil {
+				t.Fatal(err)
+			}
+			fireReleased := false
+			defer func() {
+				if !fireReleased {
+					_ = fire.Done()
+				}
+			}()
+			wait, cancel := context.WithTimeout(t.Context(), time.Second)
+			defer cancel()
+			type transition struct {
+				release func()
+				err     error
+			}
+			joined := make(chan transition, 1)
+			go func() {
+				release, err := owner.BeginRunTransition(wait, runID)
+				joined <- transition{release: release, err: err}
+			}()
+			select {
+			case result := <-joined:
+				if result.release != nil {
+					result.release()
+				}
+				t.Fatalf("fork crossed admitted %s callback: %v", kind, result.err)
+			case <-time.After(20 * time.Millisecond):
+			}
+			if err := fire.Done(); err != nil {
+				t.Fatal(err)
+			}
+			fireReleased = true
+			result := <-joined
+			if result.err != nil {
+				t.Fatal(result.err)
+			}
+			defer result.release()
+			if _, err := firingExecutionLease(ctx, command); !errors.Is(err, worklifetime.ErrAdmissionFenced) {
+				t.Fatalf("fenced %s callback = %v, want run admission refusal", kind, err)
+			}
+		})
+	}
+}
+
 type recoveryOwnershipScheduler struct {
 	restoreScheduler
 	mu       sync.Mutex
@@ -26,19 +83,19 @@ type recoveryOwnershipScheduler struct {
 	seen     chan recoveryRegistration
 }
 
-func (s *recoveryOwnershipScheduler) RegisterGenericScheduleWakeup(ctx context.Context, wakeup Wakeup) error {
-	owner, _ := worklifetime.OccurrenceFromContext(ctx)
+func (s *recoveryOwnershipScheduler) RegisterGenericScheduleWakeup(ctx context.Context, wakeup Wakeup, owner OwnerKind) error {
+	occurrence, _ := worklifetime.OccurrenceFromContext(ctx)
 	s.mu.Lock()
 	fail := s.failures > 0
 	if fail {
 		s.failures--
 	}
 	s.mu.Unlock()
-	s.seen <- recoveryRegistration{owner: owner, err: ctx.Err(), wakeup: wakeup}
+	s.seen <- recoveryRegistration{owner: occurrence, err: ctx.Err(), wakeup: wakeup}
 	if fail {
 		return errors.New("injected registration failure")
 	}
-	return s.restoreScheduler.RegisterGenericScheduleWakeup(ctx, wakeup)
+	return s.restoreScheduler.RegisterGenericScheduleWakeup(ctx, wakeup, owner)
 }
 
 type recoveryOwnershipStore struct {

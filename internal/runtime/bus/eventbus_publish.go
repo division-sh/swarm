@@ -720,7 +720,7 @@ func (eb *EventBus) prepareClosedPublication(ctx context.Context, publication ev
 	claim := publication.publicationClaim
 	if claim == nil {
 		var err error
-		claim, err = eb.claimPipelinePublication(ctx, publication.admitted.ID())
+		claim, err = eb.claimPipelinePublication(runtimepipelineobligation.WithPublicationRun(ctx, publication.admitted.Event().RunID()), publication.admitted.ID())
 		if err != nil {
 			return PreparedPublish{}, PublicationCommand{}, err
 		}
@@ -1123,6 +1123,9 @@ func (p PreparedPublish) WithCommitOutcome(outcome EventAppendOutcome) (Prepared
 	if err := validateEventAppendOutcome(outcome); err != nil {
 		return PreparedPublish{}, err
 	}
+	if err := p.publicationClaim.publicationCommitted(); err != nil {
+		return PreparedPublish{}, err
+	}
 	p.exactDuplicate = outcome == EventAppendExactDuplicate
 	return p, nil
 }
@@ -1236,7 +1239,7 @@ func (eb *EventBus) PrepareSelectedForkPublish(ctx context.Context, evt events.E
 		return PreparedPublish{}, err
 	}
 	authorScope, hasAuthorScope := runtimeauthoractivity.ScopeFromContext(preparedCtx)
-	publicationClaim, err := eb.claimPipelinePublication(preparedCtx, evt.ID())
+	publicationClaim, err := eb.claimPipelinePublication(runtimepipelineobligation.WithPublicationRun(preparedCtx, evt.RunID()), evt.ID())
 	if err != nil {
 		return PreparedPublish{}, err
 	}
