@@ -114,13 +114,13 @@ func TestInboundStopPreparationFencesFreshDispatchWithoutCancelingAcceptedBothSt
 			s.shutdownOptions = runtime.DefaultShutdownOptions()
 			_ = s.prepareInboundStop()
 			defer s.inboundStopCancel()
-			fresh, err := rt.WorkOccurrence().Begin(t.Context())
+			fresh, err := rt.WorkOccurrence().BeginDispatch(t.Context())
 			if fresh != nil {
 				if err := fresh.Done(); err != nil {
 					t.Error(err)
 				}
 			}
-			if fresh != nil || !errors.Is(err, worklifetime.ErrAdmissionFenced) {
+			if fresh != nil || !errors.Is(err, worklifetime.ErrDispatchClosed) {
 				t.Fatalf("preparation admitted fresh dispatch before dependency drain: %v", err)
 			}
 			if accepted.Context().Err() != nil {
