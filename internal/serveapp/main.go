@@ -1154,6 +1154,7 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 		cancelShutdown := func() {}
 		if supervisor != nil && runtimeContextManager != nil {
 			shutdownCtx = supervisor.prepareInboundStop()
+			cancelShutdown = supervisor.inboundStopCancel
 		} else {
 			shutdownCtx, cancelShutdown = context.WithTimeout(context.Background(), opts.ShutdownGrace)
 		}
