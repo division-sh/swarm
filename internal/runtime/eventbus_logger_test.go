@@ -121,14 +121,17 @@ func TestRuntimePayloadAdmitter_AllowsValidSchemaPayload(t *testing.T) {
 			if err != nil || !found {
 				t.Fatalf("declared schema missing: %t %v", found, err)
 			}
-			for _, cell := range []struct{ event, payload string }{
-				{scope.event, `{"target_account_id":"target","note":null}`},
-				{scope.event, `{"target_account_id":false}`},
-				{"fixture.untyped", `{}`},
+			for _, cell := range []struct {
+				event, payload string
+				invalid        bool
+			}{
+				{scope.event, `{"target_account_id":"target","note":null}`, false},
+				{scope.event, `{"target_account_id":false}`, true},
+				{"fixture.untyped", `{}`, false},
 			} {
 				event := eventtest.ChildForProducerWithRoutingSource(uuid.NewString(), events.EventType(scope.instance+"/"+cell.event), producer, "", []byte(cell.payload), 1, events.LineageFromEvent(parent), events.EventEnvelope{EntityID: "entity-proof"}, source, time.Time{})
 				admission, err := admit(context.Background(), event, events.AuthoredPayloadProducer(scope.flow))
-				if strings.Contains(cell.payload, "false") {
+				if cell.invalid {
 					if err == nil || admission.Valid() {
 						t.Fatalf("nested schema violation gained persistence admission: %+v %v", admission, err)
 					}
@@ -143,7 +146,7 @@ func TestRuntimePayloadAdmitter_AllowsValidSchemaPayload(t *testing.T) {
 					}
 					continue
 				}
-				if admission.Binding().SchemaClass() != events.PayloadSchemaAuthored || admission.Binding().SchemaDigest() != schema.AcceptanceSchemaDigest() || admission.Binding().FlowID() != scope.flow || strings.Contains(string(admission.Payload()), "note") {
+				if admission.Binding().SchemaClass() != events.PayloadSchemaAuthored || admission.Binding().SchemaDigest() != schema.AcceptanceSchemaDigest() || admission.Binding().FlowID() != scope.flow || !bytes.Equal(admission.Payload(), []byte(`{"target_account_id":"target"}`)) {
 					t.Fatalf("nested occurrence lost class/digest/optional normalization: %+v payload=%s", admission.Binding(), admission.Payload())
 				}
 			}

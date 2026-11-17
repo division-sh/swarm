@@ -21,11 +21,54 @@ func TestConformanceReporterRebalancePreservesActualPlans(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Run("hundred-member whole-parent placement", func(t *testing.T) {
+		const root = "TestFanOutDeliveryBarrierCompletesThroughRealEventBusAndPublicReadbackOnBothBackends"
+		const destination = "conformance-2394-reporter-window"
+		before := policy
+		before.Units = maps.Clone(policy.Units)
+		first := before.Units["conformance-1"]
+		first.Run = "^Test([FH].*|NumericFanOutReporterShapeCompletesAndPreservesSemanticRejectionsOnBothBackends)$"
+		before.Units["conformance-1"] = first
+		window := before.Units[destination]
+		window.Run = "^TestIssue2394ReporterFiveHundredServingWindowBothStores$"
+		window.RequiredChildren = maps.Clone(window.RequiredChildren)
+		delete(window.RequiredChildren, root)
+		before.Units[destination] = window
+		moved := TestRoot{Package: policy.Module + "/internal/runtime/conformance", Name: root}
+		for _, venue := range []string{VenueCI, VenueLocal} {
+			for _, tier := range []string{ProfileCore, ProfileLifecycle, ProfileFull} {
+				var plans [2]RunPlan
+				for i, selected := range []Policy{before, policy} {
+					plan, err := BuildPlan(selected, model, packages, tier, "hundred-member placement", "same-source", BuildOptions{Venue: venue})
+					if err == nil {
+						err = BindExecution(&plan, inventory, parity, selected)
+					}
+					if err != nil {
+						t.Fatal(err)
+					}
+					plans[i] = plan
+				}
+				oldOwners, newOwners := conformancePlanOwners(plans[0]), conformancePlanOwners(plans[1])
+				if tier == ProfileCore {
+					if !reflect.DeepEqual(plans[0].Units, plans[1].Units) || len(newOwners[moved]) != 0 {
+						t.Fatal("barrier move changed core")
+					}
+				} else if !slices.Equal(oldOwners[moved], []string{"conformance-1"}) || !slices.Equal(newOwners[moved], []string{destination}) {
+					t.Fatalf("barrier whole-parent ownership changed incorrectly: %v -> %v", oldOwners[moved], newOwners[moved])
+				}
+				delete(oldOwners, moved)
+				delete(newOwners, moved)
+				if !reflect.DeepEqual(oldOwners, newOwners) || !slices.Equal(plans[0].Packages, plans[1].Packages) || len(plans[0].Units) != len(plans[1].Units) {
+					t.Fatal("barrier move changed another Test/Example/Fuzz owner or package/unit")
+				}
+			}
+		}
+	})
 	// Restore only the two pre-rebalance selectors on the current native census.
 	original := policy
 	original.Units = maps.Clone(policy.Units)
 	first := original.Units["conformance-1"]
-	first.Run = "^Test[FH].*$"
+	first.Run = strings.Replace(first.Run, "|"+strings.TrimPrefix(conformanceRebalancedReporterRoot, "Test"), "", 1)
 	original.Units["conformance-1"] = first
 	second := original.Units["conformance-2"]
 	second.Skip = ""
