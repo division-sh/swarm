@@ -12,6 +12,7 @@ import (
 
 	"github.com/bytecodealliance/wasmtime-go/v46"
 	"github.com/division-sh/swarm/internal/operatorread"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/computemodule"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/credentials"
@@ -88,6 +89,7 @@ func TestComputeModuleSecretInputNativeBoundaryBothStores(t *testing.T) {
 			if err := fixture.Runtime.Bus.WaitForQuiescence(ctx); err != nil {
 				t.Fatal(err)
 			}
+			var traces []computemodule.ReplayEnvelope
 			for _, query := range []string{
 				"SELECT CAST(payload AS TEXT) FROM events",
 				"SELECT CAST(failure AS TEXT) FROM event_deliveries WHERE failure IS NOT NULL",
@@ -108,11 +110,30 @@ func TestComputeModuleSecretInputNativeBoundaryBothStores(t *testing.T) {
 							t.Fatal("native journal/failure/log retained injected input")
 						}
 					}
+					if query == "SELECT CAST(payload AS TEXT) FROM events" {
+						var payload map[string]any
+						if err := canonicaljson.DecodeInto([]byte(encoded), &payload); err != nil {
+							rows.Close()
+							t.Fatal(err)
+						}
+						detail, _ := payload["details"].(map[string]any)
+						if detail["action"] == computemodule.ReplayEvidenceAction {
+							loaded, err := computemodule.DecodeReplayEvidenceDetail(detail)
+							if err != nil {
+								rows.Close()
+								t.Fatal(err)
+							}
+							traces = append(traces, loaded...)
+						}
+					}
 				}
 				err = rows.Err()
 				if closeErr := rows.Close(); err != nil || closeErr != nil {
 					t.Fatalf("read/close native evidence: %v / %v", err, closeErr)
 				}
+			}
+			if len(traces) != 2 || traces[0].InputHash != traces[1].InputHash || traces[0].OutputHash == traces[1].OutputHash {
+				t.Fatal("native replay evidence changed safe input identity or lost ordinary output identity")
 			}
 			if code := process.stop(); code != 0 {
 				t.Fatal("native boundary shutdown did not join", code)
