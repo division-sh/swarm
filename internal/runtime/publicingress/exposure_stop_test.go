@@ -105,3 +105,54 @@ func TestExposureStopJoinsGenerationWriterBeforeFinalRevocation(t *testing.T) {
 		})
 	}
 }
+
+func TestExposureSealRetainsListenerAndRejectsFreshUpdates(t *testing.T) {
+	listener, readiness := reserveTestListener(t), NewReadinessOwner(true)
+	var probes, generations atomic.Int32
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		probes.Add(1)
+		clone := request.Clone(request.Context())
+		clone.URL.Scheme, clone.URL.Host = "http", listener.Addr().String()
+		return http.DefaultTransport.RoundTrip(clone)
+	})}
+	controller, err := NewController(Options{Mode: ModeExternalOrigin, PublicOrigin: "https://hooks.example.test",
+		Listener: listener, ListenAddress: listener.Addr().String(), HTTPClient: client, Readiness: readiness,
+		Handler:      http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusAccepted) }),
+		OnGeneration: func(context.Context, Generation) error { generations.Add(1); return nil }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := controller.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = controller.Stop(context.Background()) }()
+	controller.SealUpdates(t.Context())
+	select {
+	case <-controller.UpdateAdmissionClosed():
+	default:
+		t.Fatal("update admission remains open after seal")
+	}
+	if selected, reachability, registration := controller.RenewRegistrations(t.Context()); selected || !errors.Is(reachability, context.Canceled) || registration != nil {
+		t.Fatalf("fresh update admitted after seal: selected=%t probe=%v registration=%v", selected, reachability, registration)
+	}
+	if probes.Load() != 1 || generations.Load() != 1 {
+		t.Fatal("closed update performed probe or generation work")
+	}
+	response, err := client.Post("https://hooks.example.test/webhooks/support/telegram", "application/json", strings.NewReader(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = response.Body.Close()
+	if response.StatusCode != http.StatusAccepted || readiness.Snapshot(time.Now()).Exposure == nil {
+		t.Fatal("update seal withdrew the retained listener or exposure")
+	}
+	if err := controller.CloseListener(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if readiness.Snapshot(time.Now()).Exposure == nil {
+		t.Fatal("listener cutoff revoked exposure before entered callback join")
+	}
+	if err := controller.Stop(t.Context()); err != nil || readiness.Snapshot(time.Now()).Exposure != nil {
+		t.Fatalf("final teardown failed or retained exposure: %v", err)
+	}
+}
