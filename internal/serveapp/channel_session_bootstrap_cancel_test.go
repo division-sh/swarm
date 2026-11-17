@@ -255,6 +255,9 @@ func TestServeBootstrapOriginalCallerCancellationBothStores(t *testing.T) {
 			if err := connection.Close(join); err != nil {
 				t.Fatal("original cleanup failed to join", err)
 			}
+			if err := f.owner.WaitForQuiescence(join); err != nil {
+				t.Fatal("original cleanup failed to join", err)
+			}
 			if f.owner.ActiveCount() != 0 {
 				t.Fatal("completed SDK join retained counted work")
 			}

@@ -466,7 +466,7 @@ func proveCrossInstanceNativeBoundary(t *testing.T, backend, name string, shape 
 	}
 	setReadFault(nil)
 	if name == "nested_receiver_unavailable" {
-		if count, err := storetest.SetWorkflowProjectionDraining(ctx, native, runID, target.InstancePath); err != nil || count != 1 {
+		if count, err := storetest.SetWorkflowProjectionTerminated(ctx, native, runID, target.InstancePath, at); err != nil || count != 1 {
 			t.Fatalf("unavailable receiver fixture changed %d headers: %v", count, err)
 		}
 	}
