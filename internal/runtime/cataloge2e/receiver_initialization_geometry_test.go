@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/operatorread"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -280,7 +281,11 @@ func proveCrossInstanceStaleAncestor(t *testing.T, backend catalogRuntimeBackend
 				first <- fmt.Errorf("stale-ancestor fixture did not select the final receiver: %+v", routes)
 				return
 			}
-			first <- h.rt.Pipeline.MarkTerminated(ctx, catalogExactWorkflowRoute(changedInstance.StorageRef), identity.NormalizeEntityID(changedInstance.EntityID), time.Now().UTC())
+			owner := flowidentity.RunScopedFlowInstance{
+				RunID: catalogRuntimeRunID,
+				Route: flowidentity.StoredRoute(flowidentity.ScopeKey(h.rt.Options.WorkflowModule.SemanticSource(), changedInstance.WorkflowName), changedInstance.InstanceID, changedInstance.StorageRef),
+			}
+			first <- h.rt.Pipeline.MarkTerminated(ctx, owner, identity.NormalizeEntityID(changedInstance.EntityID), time.Now().UTC())
 		case 2:
 			retry <- struct{}{}
 			select {
