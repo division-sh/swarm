@@ -21,6 +21,7 @@ import (
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
+	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 	"github.com/google/uuid"
 )
 
@@ -1070,6 +1071,32 @@ func TestPipelineEnginePayloadShaper_RejectsEnvelopeOnlyRequiredFieldOnDeclarati
 }
 
 func TestValidatePipelineEmitPayload_RejectsEnumViolationOnDeclarativeSurface(t *testing.T) {
+	t.Run("nested declared full payload", func(t *testing.T) {
+		repo := canonicalrouting.RepoRoot(t)
+		bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, canonicalrouting.CopyNestedEventSchema(t), runtimecontracts.DefaultPlatformSpecFile(repo))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, scope := range []struct{ flow, event string }{
+			{"account/ticket", "account/ti-a/ticket/ti-t/ticket.cross"},
+			{"account/audit", "account/ti-a/audit/audit.ready"},
+		} {
+			for _, cell := range []struct {
+				payload map[string]any
+				valid   bool
+			}{
+				{map[string]any{"target_account_id": "target"}, true},
+				{map[string]any{"target_account_id": false}, false},
+				{map[string]any{}, false},
+			} {
+				err := validatePipelineEmitPayload(semanticview.Wrap(bundle), scope.flow, scope.event, cell.payload, nil, runtimeengine.EmitSurfaceDeclarative)
+				var failure *runtimeengine.EmitPayloadContractError
+				if cell.valid && err != nil || !cell.valid && (!errors.As(err, &failure) || failure.Kind != runtimeengine.EmitPayloadSchemaMismatch) {
+					t.Fatalf("nested full payload %s %#v: %v", scope.event, cell.payload, err)
+				}
+			}
+		}
+	})
 	source := loadWorkflowTempSource(t, map[string]string{
 
 		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",

@@ -8,6 +8,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
+	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 	"gopkg.in/yaml.v3"
 )
 
@@ -32,6 +33,36 @@ func TestSemanticSourceEventProofConsumesEffectiveReceiverCarries(t *testing.T) 
 }
 
 func TestResolveEventSchemaBindsConcreteTemplateInstanceToAuthoredDeclaration(t *testing.T) {
+	t.Run("nested keyed and keyless", func(t *testing.T) {
+		repo := canonicalrouting.RepoRoot(t)
+		bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, canonicalrouting.CopyNestedEventSchema(t), runtimecontracts.DefaultPlatformSpecFile(repo))
+		if err != nil {
+			t.Fatal(err)
+		}
+		source := Wrap(bundle)
+		for _, scope := range []struct{ flow, event, occurrence string }{
+			{"account/ticket", "ticket.cross", "account/ti-a/ticket/ti-t/ticket.cross"},
+			{"account/audit", "audit.ready", "account/ti-a/audit/audit.ready"},
+		} {
+			local := ResolveEventSchema(source, scope.flow, scope.event)
+			got := ResolveEventSchema(source, scope.flow, scope.occurrence)
+			proof := ResolveFlowEventProof(source, scope.flow, scope.occurrence)
+			nodeID := "cross-reporter"
+			if scope.flow == "account/audit" {
+				nodeID = "audit"
+			}
+			node := identitytest.ExecutableNode(t, scope.flow, nodeID)
+			nodeProof := ResolveExecutableNodeEventProof(source, node, scope.occurrence)
+			if !got.HasSchema || !got.HasCompiled || got.Classification != runtimecontracts.CompiledEventSchemaAuthored || got.CompiledSchema.FlowPath() != scope.flow ||
+				got.CompiledSchema.AcceptanceSchemaDigest() != local.CompiledSchema.AcceptanceSchemaDigest() || !proof.HasSchema || !nodeProof.HasSchema {
+				t.Fatalf("nested occurrence lost schema/proof: resolution=%+v flow=%+v node=%+v", got, proof, nodeProof)
+			}
+		}
+		got := ResolveEventSchema(source, "account/audit", "account/ti-a/audit/ticket.done")
+		if !got.HasCompiled || got.CompiledSchema.FlowPath() != "account/ticket" {
+			t.Fatalf("connected input lost producer ownership: %+v", got)
+		}
+	})
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	root := filepath.Join(repoRoot, "examples", "routing", "fan-in", "stream")
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
