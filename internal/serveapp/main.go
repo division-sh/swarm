@@ -1163,8 +1163,7 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 		defer cancelShutdown()
 		deadline, _ := shutdownCtx.Deadline()
 		storyFollower.StopAndWait()
-		shutdownErr := publicExposure.Stop(shutdownCtx)
-		shutdownErr = errors.Join(shutdownErr, channelWorker.Drain(shutdownCtx))
+		shutdownErr := channelWorker.Drain(shutdownCtx)
 		if !httpServersStarted {
 			// Before Serve owns the listeners, startup failure still needs to
 			// release them. Active listeners belong exclusively to HTTP shutdown.
@@ -1189,10 +1188,15 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 				}
 			}
 		}
+		publicExposure.SealUpdates(shutdownCtx)
+		shutdownErr = errors.Join(shutdownErr, publicExposure.CloseListener(shutdownCtx))
 		shutdownErr = errors.Join(shutdownErr, shutdownHTTPServer(shutdownCtx, "mcp", mcpServer))
 		shutdownErr = errors.Join(shutdownErr, apiProbe.Close(shutdownCtx))
 		if retained != nil {
 			shutdownErr = errors.Join(shutdownErr, runtimeContextManager.CloseInboundRequests(shutdownCtx))
+		}
+		shutdownErr = errors.Join(shutdownErr, publicExposure.Stop(shutdownCtx))
+		if retained != nil {
 			shutdownErr = errors.Join(shutdownErr, retained.Finish())
 		}
 		cancelRuntime()
@@ -1995,7 +1999,7 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 			presenter.fail(22, "public_ingress", err)
 			return 1
 		}
-		if err := publicExposure.Start(ctx); err != nil {
+		if err := publicExposure.Start(runtimeCtx); err != nil {
 			presenter.fail(22, "public_ingress", err)
 			return 1
 		}
@@ -2009,7 +2013,7 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 		return 1
 	}
 	if publicIngressEnabled {
-		if err := startServePublicIngressRenewal(ctx, processWorkOwner, publicExposure, reconcilePublicIngress); err != nil {
+		if err := startServePublicIngressRenewal(runtimeCtx, processWorkOwner, publicExposure); err != nil {
 			presenter.fail(22, "public_ingress", err)
 			return 1
 		}
