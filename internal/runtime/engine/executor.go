@@ -9,7 +9,6 @@ import (
 	"slices"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimeaccumulator "github.com/division-sh/swarm/internal/runtime/accumulator"
@@ -1374,65 +1373,9 @@ func (e *Executor) computeModuleValue(frame *executionFrame, spec *runtimecontra
 	if privateInput && (module.Kind != "wasm" || len(plan.Input) == 0) {
 		return nil, fail(computemodule.CodeABI, nil)
 	}
-	current := e.currentContext(frame)
-	inputs := map[string]any{}
-	for name, rawPath := range plan.Input {
-		name = strings.TrimSpace(name)
-		if name == "" {
-			continue
-		}
-		path, ok := plan.InputPaths[name]
-		if !ok {
-			path = paths.Parse(rawPath)
-		}
-		if path.IsZero() {
-			return nil, fail(computemodule.CodeABI, fmt.Errorf("input.%s has no mapped source path", name))
-		}
-		value, exists := current.Lookup(path)
-		if !exists {
-			return nil, fail(computemodule.CodeABI, fmt.Errorf("input.%s source %s is missing", name, path.String()))
-		}
-		inputs[name] = value
-	}
-	var inputHash string
-	if privateInput {
-		for name, key := range plan.SecretInput {
-			if _, overlaps := inputs[name]; overlaps || strings.TrimSpace(key) == "" {
-				return nil, fail(computemodule.CodeABI, nil)
-			}
-		}
-		safe, err := computemodule.CanonicalJSONBytes(map[string]any{"input": inputs, "secret_input": plan.SecretInput})
-		if err != nil {
-			return nil, fail(computemodule.CodeABI, err)
-		}
-		inputHash = computemodule.HashBytes(append([]byte("compute_module:secret_input:v1\x00"), safe...))
-		if e.deps.ComputeSecretInputs == nil {
-			return nil, fail(computemodule.CodeABI, nil)
-		}
-		values, err := e.deps.ComputeSecretInputs(frame.ctx, plan.SecretInput)
-		if err != nil {
-			return nil, fail(computemodule.CodeABI, err)
-		}
-		if len(values) != len(plan.SecretInput) {
-			return nil, fail(computemodule.CodeABI, nil)
-		}
-		for name := range plan.SecretInput {
-			value, present := values[name]
-			if !present || strings.TrimSpace(value) == "" || !utf8.ValidString(value) {
-				return nil, fail(computemodule.CodeABI, nil)
-			}
-			inputs[name] = value
-		}
-	}
-	if err := eventschema.ValidatePayloadAgainstSchema(module.InputSchema, inputs); err != nil {
-		return nil, fail(computemodule.CodeABI, fmt.Errorf("input schema violation: %w", err))
-	}
-	inputBytes, err := computemodule.CanonicalJSONBytes(inputs)
+	inputBytes, inputHash, err := e.computeModuleInputs(frame, plan, module, moduleID, rowID)
 	if err != nil {
-		return nil, fail(computemodule.CodeABI, err)
-	}
-	if !privateInput {
-		inputHash = computemodule.HashBytes(inputBytes)
+		return nil, err
 	}
 	moduleBytes, _, err := runtimecontracts.PolicyModuleBytes(bundle, module)
 	if err != nil {

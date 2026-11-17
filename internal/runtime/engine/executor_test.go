@@ -17,6 +17,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytecodealliance/wasmtime-go/v46"
+
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeaccumulator "github.com/division-sh/swarm/internal/runtime/accumulator"
@@ -2165,6 +2167,45 @@ func TestExecutor_PythonModuleOutputSchemaFailureStopsBeforeEmit(t *testing.T) {
 }
 
 func TestExecutor_ComputeModuleReplayTraceComparison(t *testing.T) {
+	t.Run("rotated_ignored_key_is_not_unchanged_key_proof", func(t *testing.T) {
+		source, module := sourceWithStructuredRendererModule(t)
+		const output = `{"content":"fixed","format":"yaml","line_count":1}`
+		wat := fmt.Sprintf(`(module (memory (export "memory") 1 1)
+  (data (i32.const 0) "%s")
+  (func (export "alloc") (param i32) (result i32) i32.const 4096)
+  (func (export "compute") (param i32 i32) (result i64) i64.const %d))`, strings.ReplaceAll(output, `"`, `\22`), len(output))
+		wasm, err := wasmtime.Wat2Wasm(wat)
+		if err != nil {
+			t.Fatal(err)
+		}
+		root := t.TempDir()
+		if err := os.WriteFile(filepath.Join(root, "constant.wasm"), wasm, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		bundle, _ := semanticview.Bundle(source)
+		module.Path, module.Digest = "constant.wasm", computemodule.HashBytes(wasm)
+		bundle.SourceArtifact = mustEngineSourceArtifact(t, root)
+		bundle.FlowTree.Root.Tools["structured_renderer"] = runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerWasm), runtimecontracts.WithToolModule(module))
+		exec := newStructuredRendererExecutor(t, semanticview.Wrap(bundle))
+		value := "first-private-key"
+		exec.deps.ComputeSecretInputs = func(context.Context, map[string]string) (map[string]string, error) {
+			return map[string]string{"owner": value}, nil
+		}
+		spec := structuredRendererModuleSpec()
+		delete(spec.Input, "owner")
+		spec.SecretInput = map[string]string{"owner": "named_key"}
+		req := structuredRendererExecutionRequest(t, spec)
+		first, err := exec.ExecuteSemanticFixture(context.Background(), req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.ExpectedComputeModuleTraces = first.ComputeModuleTraces
+		value = "different-length-and-value-key"
+		second, err := exec.ExecuteSemanticFixture(context.Background(), req)
+		if err != nil || len(first.ComputeModuleTraces) != 1 || len(second.ComputeModuleTraces) != 1 || first.ComputeModuleTraces[0] != second.ComputeModuleTraces[0] {
+			t.Fatalf("result equivalence became a secret commitment: %v", err)
+		}
+	})
 	t.Run("secret_input_identity_rotation_and_author_output", func(t *testing.T) {
 		source, _ := sourceWithStructuredRendererModule(t)
 		exec := newStructuredRendererExecutor(t, source)
