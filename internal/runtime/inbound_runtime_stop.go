@@ -75,7 +75,9 @@ func (s *InboundRuntimeStop) Open(prior error) error {
 	s.openOnce.Do(func() {
 		s.result = errors.Join(s.result, prior)
 		if s.result == nil {
-			s.result = s.manager.OpenStoredInbound()
+			if !s.completedCutoff() {
+				s.result = s.manager.OpenStoredInbound()
+			}
 		} else {
 			s.manager.inboundPhaseMu.Lock()
 			s.manager.inboundSealErr = s.result
@@ -84,6 +86,21 @@ func (s *InboundRuntimeStop) Open(prior error) error {
 		}
 	})
 	return s.result
+}
+
+func (s *InboundRuntimeStop) completedCutoff() bool {
+	m := s.manager
+	m.inboundPhaseMu.RLock()
+	defer m.inboundPhaseMu.RUnlock()
+	if !m.inboundStopping || !m.inboundFinalSet || m.inboundSealErr != nil || m.inboundStoreOnly {
+		return false
+	}
+	select {
+	case <-m.inboundSealDone:
+		return m.inboundRequests.closedAndDrained()
+	default:
+		return false
+	}
 }
 
 func (s *InboundRuntimeStop) Drain() {
