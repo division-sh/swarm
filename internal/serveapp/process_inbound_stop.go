@@ -14,11 +14,13 @@ func (s *processLifecycleSupervisor) prepareInboundStop() context.Context {
 		s.inboundStopCtx, s.inboundStopCancel = context.WithTimeout(context.Background(), s.shutdownOptions.Grace)
 	}
 	s.stopping, s.apiReady = true, false
-	manager, ctx := s.runtimeContexts, s.inboundStopCtx
+	manager, current, ctx := s.runtimeContexts, s.currentRT, s.inboundStopCtx
 	s.mu.Unlock()
 	if manager != nil {
 		manager.PrepareInboundStop()
+		manager.CloseFreshDispatch()
 	}
+	current.CloseFreshDispatch()
 	return ctx
 }
 
