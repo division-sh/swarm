@@ -153,6 +153,9 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 						} else if postChannelSourceControl(t, callback, signing, card, token, messageID) == http.StatusAccepted {
 							waitChannelRejectedCallback(t, db, token)
 						}
+						if operation == "new_process" {
+							assertChangedOfferPublicReplacement(t, h, observation, card, seed.RunID, hash, identity.SourceArtifacts[0].BundleHash, messageID)
+						}
 						var decisions int
 						want := 0
 						if operation == "new_process_equal" {
@@ -561,15 +564,19 @@ func runRegisteredSourceLifecycle(t *testing.T, h *channelOnboardingE2EHarness, 
 					t.Fatalf("equal offer did not admit exactly one current-source answer: count=%d err=%v", decisions, err)
 				}
 			} else {
+				if header.Run.BundleHash != identity.SourceArtifacts[0].BundleHash || reissued != 1 {
+					t.Fatalf("changed offer did not issue exactly one current-source card: run=%+v count=%d", header.Run, reissued)
+				}
 				cliFailure := registeredChannelMailboxCLI(t, h, false, "decide", card, "approve", "--idempotency-key", "unloaded-cli-"+card)
 				t.Logf("changed-source CLI refusal backend=%s: %s", backend, strings.TrimSpace(cliFailure))
 				callback, signing, _ := h.provider.Registration()
 				postChannelSourceControl(t, callback, signing, card, token, messageID)
 				waitObservedChannelRejectedCallback(t, observation, token)
 				refused := readRegisteredChannelCard(t, h, card)
-				if refused.Status != decisioncard.StatusPending || refused.Verdict != "" || refused.DecisionEventID != "" || refused.BundleHash != hash || !bytes.Equal(refused.Snapshot, before.Snapshot) {
-					t.Fatalf("refusing an unavailable source consumed or changed its card: %+v", refused)
+				if refused.Status != decisioncard.StatusSuperseded || refused.SupersededReason != decisioncard.SupersededByUpdate || refused.Verdict != "" || refused.DecisionEventID != "" || refused.BundleHash != hash || !bytes.Equal(refused.Snapshot, before.Snapshot) {
+					t.Fatalf("retired card lost immutable issuance or accepted a late control: %+v", refused)
 				}
+				successor := assertChangedOfferPublicReplacement(t, h, observation, card, seed.RunID, hash, identity.SourceArtifacts[0].BundleHash, messageID)
 				decisions, err := observation.EventCardinality(t.Context(), seed.RunID, "mailbox.card_decided")
 				if err != nil || decisions != 0 {
 					t.Fatalf("replacement source admitted a predecessor control: count=%d err=%v", decisions, err)
@@ -588,7 +595,25 @@ func runRegisteredSourceLifecycle(t *testing.T, h *channelOnboardingE2EHarness, 
 					"id": "restored-source-" + card, "from": map[string]any{"id": 7000},
 					"message": map[string]any{"message_id": messageID, "chat": map[string]any{"id": 1001, "type": "private"}}, "data": token,
 				}})
-				waitObservedChannelDecision(t, h, card)
+				waitObservedChannelRejectedCallback(t, observation, token)
+				returned := waitChannelPublicCard(t, h, seed.RunID, decisioncard.AnchorKindStageGate, "chat/reviews")
+				if returned == card || returned == successor {
+					t.Fatal("restoring A revived a retired card instead of a new empty issuance")
+				}
+				returnedMessage := waitObservedChannelReceipt(t, observation, returned)
+				returnedToken, found := telegramCallbackToken(h.provider.Delivery(returnedMessage-1), "Approve")
+				if !found || returnedToken == token {
+					t.Fatal("restored contract reused old channel control")
+				}
+				postChannelSourceControl(t, callback, signing, returned, returnedToken, returnedMessage)
+				waitObservedChannelDecision(t, h, returned)
+				if old := readRegisteredChannelCard(t, h, card); old.Status != decisioncard.StatusSuperseded || old.DecisionEventID != "" {
+					t.Fatal("restoring source reactivated the old card")
+				}
+				refusal := registeredChannelMailboxCLI(t, h, false, "decide", card, "approve", "--idempotency-key", "restored-old-"+card)
+				if !strings.Contains(refusal, "MAILBOX_CARD_SUPERSEDED") {
+					t.Fatalf("fresh matching-source old-card request lost terminal refusal: %s", refusal)
+				}
 				if decisions, err = observation.EventCardinality(t.Context(), seed.RunID, "mailbox.card_decided"); err != nil || decisions != 1 {
 					t.Fatalf("restored source did not admit exactly one later answer: count=%d err=%v", decisions, err)
 				}
@@ -820,6 +845,25 @@ func runRegisteredSourceLifecycle(t *testing.T, h *channelOnboardingE2EHarness, 
 	if after := readChannelSourceHistory(t, observation, card); after != frozenHistory {
 		t.Fatal("registered source lifecycle changed its historical render/receipt evidence")
 	}
+}
+
+func assertChangedOfferPublicReplacement(t *testing.T, h *channelOnboardingE2EHarness, observation storetest.ChannelObservation, oldID, runID, oldHash, nextHash string, oldMessage int) string {
+	t.Helper()
+	old := readRegisteredChannelCard(t, h, oldID)
+	if old.Status != decisioncard.StatusSuperseded || old.SupersededReason != decisioncard.SupersededByUpdate || old.BundleHash != oldHash || old.DecisionEventID != "" {
+		t.Fatalf("old public card was not withdrawn: %+v", old)
+	}
+	nextID := waitChannelPublicCard(t, h, runID, decisioncard.AnchorKindStageGate, "chat/reviews")
+	next := readRegisteredChannelCard(t, h, nextID)
+	if nextID == oldID || next.BundleHash != nextHash || next.Status != decisioncard.StatusPending || len(next.Fields) != 0 || next.DecisionEventID != "" {
+		t.Fatalf("new public card did not start standalone and empty: %+v", next)
+	}
+	message := waitObservedChannelReceipt(t, observation, nextID)
+	if message == oldMessage {
+		t.Fatal("replacement silently retargeted the old message")
+	}
+	waitChannelReceiptText(t, h, oldMessage, "Replaced by a new card after an update. No action was taken.", true)
+	return nextID
 }
 
 func waitRegisteredSourceQualification(t *testing.T, h *channelOnboardingE2EHarness, observation storetest.ChannelObservation, read func(context.Context, channelnative.TransportParent) (channelnative.Qualification, error)) channelnative.Qualification {

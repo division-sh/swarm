@@ -95,6 +95,24 @@ func (a Activation) Validate() error {
 	return nil
 }
 
+// Replacement identities depend only on the exact predecessor and candidate,
+// never retry time. The predecessor is input evidence, not a stored relation.
+func Replacement(previous Activation, decisionID, bundleHash, routes string, now time.Time) (Activation, error) {
+	if err := previous.Validate(); err != nil {
+		return Activation{}, err
+	}
+	if previous.Status != StatusOpen || now.IsZero() {
+		return Activation{}, fmt.Errorf("gate replacement requires an open predecessor and issuance time")
+	}
+	key := strings.Join([]string{previous.ActivationID, previous.CardID, decisionID, bundleHash, routes}, "\x00")
+	next := previous
+	next.ActivationID = uuid.NewSHA1(uuid.NameSpaceOID, []byte("swarm.gate.update.v1\x00"+key)).String()
+	next.CardID = uuid.NewSHA1(uuid.NameSpaceOID, []byte("swarm.gate.update.card.v1\x00"+key)).String()
+	next.DecisionID, next.BundleHash, next.RoutesJSON = decisionID, bundleHash, routes
+	next.OpenedAt, next.UpdatedAt = now.UTC(), now.UTC()
+	return next, next.Validate()
+}
+
 func (a Activation) Key() string {
 	parts := []string{strings.TrimSpace(a.FlowID), strings.TrimSpace(a.DecisionID)}
 	for i := range parts {

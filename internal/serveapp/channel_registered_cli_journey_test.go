@@ -25,14 +25,15 @@ func registeredChannelMailboxCLI(t *testing.T, h *channelOnboardingE2EHarness, w
 }
 
 type registeredChannelCard struct {
-	CardID          string          `json:"card_id"`
-	RunID           string          `json:"run_id"`
-	BundleHash      string          `json:"bundle_hash"`
-	Status          string          `json:"status"`
-	Verdict         string          `json:"verdict"`
-	Snapshot        json.RawMessage `json:"snapshot"`
-	Fields          map[string]any  `json:"fields"`
-	DecisionEventID string          `json:"decision_event_id"`
+	CardID           string          `json:"card_id"`
+	RunID            string          `json:"run_id"`
+	BundleHash       string          `json:"bundle_hash"`
+	Status           string          `json:"status"`
+	Verdict          string          `json:"verdict"`
+	Snapshot         json.RawMessage `json:"snapshot"`
+	Fields           map[string]any  `json:"fields"`
+	DecisionEventID  string          `json:"decision_event_id"`
+	SupersededReason string          `json:"superseded_reason"`
 }
 
 func readRegisteredChannelCard(t *testing.T, h *channelOnboardingE2EHarness, id string) registeredChannelCard {
