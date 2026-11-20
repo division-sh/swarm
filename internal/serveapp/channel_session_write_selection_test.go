@@ -78,7 +78,12 @@ func TestServeSessionWriteSelectionUsesOriginalOwnerBothStores(t *testing.T) {
 func TestChannelDeliveryReconciliationFinalUsesOriginalNonWebhookOwnerBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			f, op, _ := pairedServeSessionObserver(t, backend)
+			f := newServeBootstrapTestFixture(t, backend)
+			authenticated := serveBootstrapWireFixture(t, "paired", f.owner)
+			seedServePairedDevice(t, f)
+			before := f.selections.Load()
+			op := finishPairedServeSessionObserver(t, f, authenticated)
+			original := f.adapter.connection(op.OperationID)
 			plan, err := packs.NewOutboundBindingPlan("owned_native_write", f.candidate.Plan, "100000000002@s.whatsapp.net", nil)
 			if err != nil {
 				t.Fatal(err)
@@ -96,12 +101,14 @@ func TestChannelDeliveryReconciliationFinalUsesOriginalNonWebhookOwnerBothStores
 					return selected, plan, nil
 				}},
 			}
-			before := f.selections.Load()
 			if _, _, err := d.selectedPresentation(f.ctx, channeldelivery.Candidate{
 				SourceKind: "response", RequestParent: parent, BindingRevision: binding.Revision,
 				Audience: channeldelivery.Audience{InterfaceKey: binding.Interface.Key()},
 			}, true); err != nil || f.selections.Load() != before+1 {
 				t.Fatalf("final non-webhook selection did not use its original session owner: selections=%d err=%v", f.selections.Load(), err)
+			}
+			if original == nil || f.adapter.connection(op.OperationID) != original {
+				t.Fatal("final non-webhook selection changed the paired connection")
 			}
 		})
 	}
