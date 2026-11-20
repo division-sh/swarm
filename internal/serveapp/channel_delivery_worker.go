@@ -72,12 +72,12 @@ func (d *serveChannelDeliveryDispatcher) reconcileDeliveries(ctx context.Context
 			return errors.Join(failures, err)
 		}
 		for _, candidate := range plans {
-			preparation, dispatch := d.reconcileDelivery(ctx, candidate, final)
+			preparation, failure := d.reconcileDelivery(ctx, candidate, final)
 			if final {
 				preparationFailures = errors.Join(preparationFailures, preparation)
 				preparation = nil
 			}
-			failures = errors.Join(failures, preparation, dispatch)
+			failures = errors.Join(failures, preparation, failure)
 		}
 		if len(plans) < 200 {
 			break
@@ -91,11 +91,11 @@ func (d *serveChannelDeliveryDispatcher) reconcileDeliveries(ctx context.Context
 	return failures
 }
 
-// Preparation failures belong to the row scan, not to an attempted send.
-func (d *serveChannelDeliveryDispatcher) reconcileDelivery(ctx context.Context, candidate runtimechanneldelivery.Candidate, final bool) (preparation, dispatch error) {
+// Only presentation selection and render preparation have the scan's log-only disposition.
+func (d *serveChannelDeliveryDispatcher) reconcileDelivery(ctx context.Context, candidate runtimechanneldelivery.Candidate, final bool) (preparation, failure error) {
 	current, found, err := d.store.GetCurrentChannelDeliveryPlan(ctx, candidate.DeliveryID)
 	if err != nil || !found {
-		return err, nil
+		return nil, err
 	}
 	candidate = current
 	if candidate.RecoveryPending {
@@ -105,7 +105,7 @@ func (d *serveChannelDeliveryDispatcher) reconcileDelivery(ctx context.Context, 
 		return nil, nil
 	}
 	if candidate.State != "planned" && candidate.State != "rendered" && candidate.State != "sent" {
-		return fmt.Errorf("channel delivery %s has unsupported state %q", candidate.DeliveryID, candidate.State), nil
+		return nil, fmt.Errorf("channel delivery %s has unsupported state %q", candidate.DeliveryID, candidate.State)
 	}
 	bounds, capabilities, err := d.selectedPresentation(ctx, candidate, final)
 	if err != nil {
@@ -120,7 +120,7 @@ func (d *serveChannelDeliveryDispatcher) reconcileDelivery(ctx context.Context, 
 	}
 	current, found, err = d.store.GetCurrentChannelDeliveryPlan(ctx, candidate.DeliveryID)
 	if err != nil {
-		return fmt.Errorf("read channel delivery %s: %w", candidate.DeliveryID, err), nil
+		return nil, fmt.Errorf("read channel delivery %s: %w", candidate.DeliveryID, err)
 	}
 	if !found || current.RecoveryPending || current.CurrentRenderID != prepared.RenderID {
 		return nil, nil
@@ -136,16 +136,16 @@ func (d *serveChannelDeliveryDispatcher) reconcileDelivery(ctx context.Context, 
 	}
 	receipt, found, err := d.store.GetCurrentChannelSentReceipt(ctx, candidate.DeliveryID, current.CurrentReceiptID)
 	if err != nil {
-		return fmt.Errorf("read channel delivery receipt %s: %w", current.CurrentReceiptID, err), nil
+		return nil, fmt.Errorf("read channel delivery receipt %s: %w", current.CurrentReceiptID, err)
 	}
 	if !found {
-		return fmt.Errorf("current channel delivery receipt %s is absent", current.CurrentReceiptID), nil
+		return nil, fmt.Errorf("current channel delivery receipt %s is absent", current.CurrentReceiptID)
 	}
 	if receipt.RenderID == prepared.RenderID {
 		return nil, nil
 	}
 	if current.State != "rendered" {
-		return fmt.Errorf("channel delivery %s has a changed render outside edit state", candidate.DeliveryID), nil
+		return nil, fmt.Errorf("channel delivery %s has a changed render outside edit state", candidate.DeliveryID)
 	}
 	if err := d.dispatchEdit(ctx, current, prepared, receipt); err != nil {
 		return nil, fmt.Errorf("edit channel delivery %s: %w", candidate.DeliveryID, err)
