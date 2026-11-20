@@ -20,6 +20,7 @@ type InboundRuntimeStop struct {
 	drainOnce  sync.Once
 	finishOnce sync.Once
 	result     error
+	outputSafe bool
 }
 
 type inboundRuntimeStopEntry struct {
@@ -109,14 +110,17 @@ func (s *InboundRuntimeStop) completedCutoff() bool {
 	}
 }
 
-func (s *InboundRuntimeStop) Drain() {
+func (s *InboundRuntimeStop) Drain() bool {
 	s.drainOnce.Do(func() {
+		s.outputSafe = s.result == nil
 		for _, held := range s.entries {
 			if !held.completed && held.admissionErr == nil {
 				held.result = held.runtime.drainStopLocked(s.ctx, s.grace)
 			}
+			s.outputSafe = s.outputSafe && held.admissionErr == nil && held.result == nil
 		}
 	})
+	return s.outputSafe
 }
 
 func (s *InboundRuntimeStop) Finish() error {

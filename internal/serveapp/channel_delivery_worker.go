@@ -562,11 +562,13 @@ type channelDeliveryWorkerOptions struct {
 }
 
 type serveChannelDeliveryWorker struct {
-	owner   *worklifetime.Process
-	workCtx context.Context
-	cancel  context.CancelFunc
-	done    chan struct{}
-	err     error
+	dispatcher *serveChannelDeliveryDispatcher
+	ready      <-chan struct{}
+	owner      *worklifetime.Process
+	workCtx    context.Context
+	cancel     context.CancelFunc
+	done       chan struct{}
+	err        error
 }
 
 func (w *serveChannelDeliveryWorker) beginSend(ctx context.Context) (*worklifetime.Lease, error) {
@@ -588,10 +590,16 @@ func (w *serveChannelDeliveryWorker) finishSend(selectionCtx context.Context, le
 }
 
 func (w *serveChannelDeliveryWorker) Drain(ctx context.Context) error {
+	if w != nil {
+		defer w.cancel()
+	}
+	return w.joinSelection(ctx)
+}
+
+func (w *serveChannelDeliveryWorker) joinSelection(ctx context.Context) error {
 	if w == nil {
 		return nil
 	}
-	defer w.cancel()
 	select {
 	case <-w.done:
 		return w.err
@@ -600,6 +608,38 @@ func (w *serveChannelDeliveryWorker) Drain(ctx context.Context) error {
 		<-w.done
 		return errors.Join(ctx.Err(), w.err)
 	}
+}
+
+// The host calls this only after joining the selector and the accepted producers.
+func (w *serveChannelDeliveryWorker) finishOutput(ctx context.Context, outputSafe bool) (result error) {
+	if w == nil {
+		return nil
+	}
+	defer w.cancel()
+	select {
+	case <-w.ready:
+	default:
+		return nil
+	}
+	if !outputSafe {
+		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	deadline, bounded := ctx.Deadline()
+	if !bounded {
+		return fmt.Errorf("final channel output pass requires the original shutdown deadline")
+	}
+	outputCtx, cancel := context.WithDeadline(w.workCtx, deadline)
+	defer cancel()
+	w.workCtx = outputCtx
+	lease, err := w.owner.Begin(outputCtx)
+	if err != nil {
+		return err
+	}
+	defer func() { result = errors.Join(result, lease.Done()) }()
+	return errors.Join(w.dispatcher.reconcileDeliveries(lease.Context()), outputCtx.Err())
 }
 
 func (options channelDeliveryWorkerOptions) observeSessionDiagnostics(ctx context.Context) error {
@@ -647,14 +687,16 @@ func startServeChannelDelivery(ctx context.Context, owner *worklifetime.Process,
 		drainContext = ctx
 	}
 	workCtx, cancel := context.WithCancel(drainContext)
-	worker := &serveChannelDeliveryWorker{owner: owner, workCtx: workCtx, cancel: cancel, done: make(chan struct{})}
+	worker := &serveChannelDeliveryWorker{owner: owner, workCtx: workCtx, cancel: cancel, done: make(chan struct{}), dispatcher: dispatcher, ready: options.runtimeReady}
 	dispatcher.worker = worker
 	if options.started != nil {
 		options.started(dispatcher.store, subscription.Mark)
 	}
 	go func() {
 		defer close(worker.done)
-		defer cancel()
+		if options.drainContext == nil {
+			defer cancel()
+		}
 		defer func() { worker.err = errors.Join(worker.err, lease.Done()) }()
 		defer subscription.Close()
 		workCtx := lease.Context()

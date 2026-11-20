@@ -1163,7 +1163,7 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 		defer cancelShutdown()
 		deadline, _ := shutdownCtx.Deadline()
 		storyFollower.StopAndWait()
-		shutdownErr := channelWorker.Drain(shutdownCtx)
+		shutdownErr := channelWorker.joinSelection(shutdownCtx)
 		if !httpServersStarted {
 			// Before Serve owns the listeners, startup failure still needs to
 			// release them. Active listeners belong exclusively to HTTP shutdown.
@@ -1173,9 +1173,10 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 		}
 		shutdownErr = errors.Join(shutdownErr, resetRecovery.Close(shutdownCtx))
 		var retained *serveInboundStop
+		outputSafe := false
 		if supervisor != nil && runtimeContextManager != nil {
 			retained = supervisor.beginInboundStop(publicExposure)
-			retained.contexts.Drain()
+			outputSafe = retained.contexts.Drain()
 		} else if supervisor != nil {
 			publicExposure.SealUpdates(shutdownCtx)
 			shutdownErr = errors.Join(shutdownErr, supervisor.ShutdownProcessWithOptions(context.Background(), runtime.ShutdownOptions{Grace: remainingServeShutdownGrace(opts.ShutdownGrace, deadline)}))
@@ -1190,6 +1191,7 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 				}
 			}
 		}
+		shutdownErr = errors.Join(shutdownErr, channelWorker.finishOutput(shutdownCtx, outputSafe))
 		shutdownErr = errors.Join(shutdownErr, publicExposure.CloseListener(shutdownCtx))
 		shutdownErr = errors.Join(shutdownErr, shutdownHTTPServer(shutdownCtx, "mcp", mcpServer))
 		shutdownErr = errors.Join(shutdownErr, apiProbe.Close(shutdownCtx))

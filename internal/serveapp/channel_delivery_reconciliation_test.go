@@ -20,6 +20,7 @@ type channelWorkerControlStore struct {
 	actions   func(context.Context) error
 	texts     func() error
 	subscribe func(context.Context) (*render.ReconcileSubscription, error)
+	delivery  func(context.Context) error
 }
 
 func (s *channelWorkerControlStore) SubscribeChannelReconciliation(ctx context.Context) (*render.ReconcileSubscription, error) {
@@ -33,7 +34,10 @@ func (s *channelWorkerControlStore) CurrentChannelCardChangeCursor(context.Conte
 	return 0, false, nil
 }
 
-func (s *channelWorkerControlStore) CurrentChannelDeliveryParent(context.Context) (channelnative.TransportParent, bool, error) {
+func (s *channelWorkerControlStore) CurrentChannelDeliveryParent(ctx context.Context) (channelnative.TransportParent, bool, error) {
+	if s.delivery != nil {
+		return channelnative.TransportParent{}, false, s.delivery(ctx)
+	}
 	return channelnative.TransportParent{}, false, nil
 }
 
@@ -66,6 +70,38 @@ func channelWorkerControlDispatcher(store *channelWorkerControlStore) *serveChan
 	return &serveChannelDeliveryDispatcher{
 		store: store, cards: channelWorkerControlCards{},
 		mailbox: channelWorkerControlMailbox{}, proposedEffects: channelWorkerControlProposed{},
+	}
+}
+
+func TestChannelWorkerFinalOutputUsesOriginalDeadline(t *testing.T) {
+	process := worklifetime.NewProcess()
+	work, stop := context.WithCancel(t.Context())
+	defer stop()
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	deadline, _ := ctx.Deadline()
+	ready := make(chan struct{})
+	close(ready)
+	failure := errors.New("independent final output failure")
+	passes := 0
+	w := &serveChannelDeliveryWorker{owner: process, workCtx: work, cancel: stop, ready: ready}
+	w.dispatcher = channelWorkerControlDispatcher(&channelWorkerControlStore{
+		actions: func(context.Context) error { t.Fatal("final output selected an input action"); return nil },
+		texts:   func() error { t.Fatal("final output selected input text"); return nil },
+		delivery: func(selection context.Context) error {
+			passes++
+			lease, err := w.beginSend(selection)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got, ok := lease.Context().Deadline(); !ok || !got.Equal(deadline) {
+				t.Errorf("final send deadline=%v, want original %v", got, deadline)
+			}
+			return w.finishSend(selection, lease, failure)
+		},
+	})
+	if err := w.finishOutput(ctx, true); !errors.Is(err, failure) || passes != 1 || process.ActiveCount() != 0 || work.Err() == nil {
+		t.Fatalf("final output did not join once: passes=%d active=%d work=%v error=%v", passes, process.ActiveCount(), work.Err(), err)
 	}
 }
 
