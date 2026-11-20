@@ -62,7 +62,7 @@ func proveInboundStopRegistrationWriter(t *testing.T, backend servedparity.Backe
 		t.Fatal(err)
 	}
 	binding, err := packs.NewOutboundBindingPlanWithRegistration("writer-control", candidate.Plan, "420079", nil,
-		candidate.Plan.CredentialStoreKeys(), candidate.Target.Selector)
+		map[string]string{candidate.ProviderCredentialRole: "telegram.telegram_bot_token", candidate.SigningCredentialRole: "telegram.webhook_signing_secret"}, candidate.Target.Selector)
 	if err != nil {
 		t.Fatal(err)
 	}
