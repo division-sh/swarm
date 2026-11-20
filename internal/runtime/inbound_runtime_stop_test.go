@@ -4,8 +4,35 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/runbundle"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 )
+
+func TestRegistrationHolderDiscoveryFailsClosedOnlyDuringRetainedStop(t *testing.T) {
+	source, err := correlation.NewSourceArtifactFact(runtimeContextTestHashA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate := StandingActivation{BundleHash: source.BundleHash(), RunID: "unchecked", FlowPath: "chat"}
+	manager := &RuntimeContextManager{
+		availability: fakeRunBundleAvailability{rows: map[string]runbundle.Availability{candidate.RunID: {ErrorCode: "unavailable"}}},
+		landingRuns: runtimeTestLandingRuns{candidate.FlowPath: {
+			LiveRun: runlifecycle.LiveRun{RunID: candidate.RunID, Source: source}, State: runlifecycle.StateLive,
+		}},
+	}
+	ref := channelonboarding.AccountReference{Provider: "telegram", Account: "420079"}
+	if rows, err := manager.activationAccountHolders(t.Context(), candidate, ref, true); len(rows) != 0 || err != nil {
+		t.Fatalf("ordinary currentness changed discovery: rows=%v err=%v", rows, err)
+	}
+	// Supply the retained phase directly to exercise only the failed read.
+	manager.inboundStopObservation = &InboundRuntimeStop{manager: manager}
+	if rows, err := manager.activationAccountHolders(t.Context(), candidate, ref, true); len(rows) != 0 || !errors.Is(err, channelonboarding.ErrRevisionConflict) {
+		t.Fatalf("retained currentness skipped an unchecked live contender: rows=%v err=%v", rows, err)
+	}
+}
 
 func TestStoredInboundCompletedCutoffRequiresPreparationAndJoin(t *testing.T) {
 	failure := errors.New("independent stop preparation failure")
