@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/division-sh/swarm/internal/runtime"
+	"github.com/division-sh/swarm/internal/runtime/publicingress"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 )
 
@@ -29,7 +30,7 @@ type serveInboundStop struct {
 	contexts   *runtime.InboundRuntimeStop
 }
 
-func (s *processLifecycleSupervisor) beginInboundStop() *serveInboundStop {
+func (s *processLifecycleSupervisor) beginInboundStop(exposure *publicingress.Controller) *serveInboundStop {
 	ctx := s.prepareInboundStop()
 	s.shutdownMu.Lock()
 	s.operationMu.Lock()
@@ -47,6 +48,8 @@ func (s *processLifecycleSupervisor) beginInboundStop() *serveInboundStop {
 		preparationErr = errors.Join(preparationErr, selected.DrainSelectedContexts(ctx))
 		preparationErr = errors.Join(preparationErr, selected.RetireSelectedContexts(context.WithoutCancel(ctx)))
 	}
+	// Admitted registration writers still need ordinary runtime acquisition.
+	exposure.SealUpdates(ctx)
 	s.operationMu.Lock()
 	if s.processCapability != nil {
 		if result, terminal := s.processCapability.TerminalResult(); terminal && result.Cause != runtimestartupownership.TerminalReleased {
