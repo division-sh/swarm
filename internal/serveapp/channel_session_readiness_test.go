@@ -25,6 +25,16 @@ func pairedServeSessionObserver(t *testing.T, backend string) (*serveBootstrapTe
 	f := newServeBootstrapTestFixture(t, backend)
 	authenticated := serveBootstrapWireFixture(t, "paired", f.owner)
 	seedServePairedDevice(t, f)
+	op := finishPairedServeSessionObserver(t, f, authenticated)
+	observer, ok := any(f.adapter).(serveSessionObserver)
+	if !ok {
+		t.Fatal("the concrete serve owner does not expose owned session observation")
+	}
+	return f, op, observer
+}
+
+func finishPairedServeSessionObserver(t *testing.T, f *serveBootstrapTestFixture, authenticated <-chan struct{}) channelonboarding.Operation {
+	t.Helper()
 	if err := awaitServeSessionBootstrapFixture(f.ctx, f.adapter, f.op, f.candidate, true); err != nil {
 		t.Fatal(err)
 	}
@@ -41,11 +51,7 @@ func pairedServeSessionObserver(t *testing.T, backend string) (*serveBootstrapTe
 	if err != nil {
 		t.Fatal(err)
 	}
-	observer, ok := any(f.adapter).(serveSessionObserver)
-	if !ok {
-		t.Fatal("the concrete serve owner does not expose owned session observation")
-	}
-	return f, op, observer
+	return op
 }
 
 func TestServePairedSessionObservationCancelsPendingResumeBothStores(t *testing.T) {

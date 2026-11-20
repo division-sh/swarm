@@ -38,6 +38,10 @@ var sourcePrimitiveOwners = map[string]primitiveOwner{
 	"internal/sessionprovider/channel_execution_unix.go:executeChannelSend:sdk_send:1":                      ownerOperatorInfra,
 	"internal/sessionprovider/runtime_logout_unix.go:executeSessionLogout:sdk_logout:1":                     ownerOperatorInfra,
 	"internal/runtime/context_manager.go:Done:http_do:1":                                                    ownerRuntimeDependency,
+	"internal/runtime/inbound_runtime_stop.go:Open:http_do:1":                                               ownerRuntimeDependency, // sync.Once intake disposition, not HTTP.
+	"internal/runtime/inbound_runtime_stop.go:Drain:http_do:1":                                              ownerRuntimeDependency, // sync.Once retained runtime drain, not HTTP.
+	"internal/runtime/inbound_runtime_stop.go:Finish:http_do:1":                                             ownerRuntimeDependency, // sync.Once terminal join, not HTTP.
+	"internal/runtime/inbound_stop.go:Done:http_do:1":                                                       ownerRuntimeDependency, // sync.Once publication settlement, not HTTP.
 	"internal/runtime/channelactivation/owner.go:Release:http_do:1":                                         ownerRuntimeDependency,
 	"internal/runtime/channelactivation/presentation.go:Acquire:http_do:1":                                  ownerRuntimeDependency, // sync.Once request release, not HTTP.
 	"internal/runtime/bus/eventbus.go:acquire:http_do:1":                                                    ownerRuntimeDependency,
@@ -92,6 +96,7 @@ var sourcePrimitiveOwners = map[string]primitiveOwner{
 	"internal/runtime/publicingress/exposure.go:Launch:process_launch:1":                                    ownerOperatorInfra,
 	"internal/runtime/publicingress/exposure.go:PreflightCloudflared:process_launch:1":                      ownerOperatorInfra,
 	"internal/runtime/publicingress/exposure.go:Stop:http_do:1":                                             ownerOperatorInfra,
+	"internal/runtime/publicingress/exposure.go:SealUpdates:http_do:1":                                      ownerRuntimeDependency, // sync.Once retained writer join, not HTTP.
 	"internal/runtime/publicingress/exposure.go:probePublicRoute:http_do:1":                                 ownerOperatorInfra,
 	"internal/runtime/publicingress/exposure.go:readQuickTunnelEndpoints:http_do:1":                         ownerOperatorInfra,
 	"internal/runtime/publicingress/exposure.go:readQuickTunnelEndpoints:http_do:2":                         ownerOperatorInfra,

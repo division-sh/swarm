@@ -262,6 +262,14 @@ func TestChannelDeliveryReconciliationFinalDoesNotFreezeWithoutCurrentReceiver(t
 type channelDeliveryPreparationFailureStore struct {
 	channelDeliveryWorkerStore
 	scanFailure error
+	planFailure error
+}
+
+func (s *channelDeliveryPreparationFailureStore) GetCurrentChannelDeliveryPlan(ctx context.Context, id string) (runtimechanneldelivery.Candidate, bool, error) {
+	if id == "unreadable" {
+		return runtimechanneldelivery.Candidate{}, false, s.planFailure
+	}
+	return s.channelDeliveryWorkerStore.GetCurrentChannelDeliveryPlan(ctx, id)
 }
 
 func (s *channelDeliveryPreparationFailureStore) ListCurrentChannelDeliveryPlans(_ context.Context, cursor string, limit int) ([]runtimechanneldelivery.Candidate, error) {
@@ -270,6 +278,7 @@ func (s *channelDeliveryPreparationFailureStore) ListCurrentChannelDeliveryPlans
 	}
 	plans := make([]runtimechanneldelivery.Candidate, limit)
 	plans[0] = runtimechanneldelivery.Candidate{DeliveryID: "sent"}
+	plans[1].DeliveryID = "unreadable"
 	plans[limit-1].DeliveryID = "next"
 	return plans, nil
 }
@@ -280,10 +289,11 @@ func TestChannelDeliveryReconciliationFinalLogsPreparationButReturnsScanFailure(
 	log.SetOutput(&notes)
 	t.Cleanup(func() { log.SetOutput(prior) })
 	failure := errors.New("independent scan failure")
-	store := &channelDeliveryPreparationFailureStore{scanFailure: failure}
+	planFailure := errors.New("presentation bounds")
+	store := &channelDeliveryPreparationFailureStore{scanFailure: failure, planFailure: planFailure}
 	d := &serveChannelDeliveryDispatcher{store: store, cards: channelDeliveryWorkerCards{}}
 	err := d.reconcileDeliveries(t.Context(), true)
-	if !errors.Is(err, failure) || strings.Contains(err.Error(), "presentation bounds") {
+	if !errors.Is(err, failure) || !errors.Is(err, planFailure) || strings.Contains(err.Error(), "select channel delivery sent presentation bounds") {
 		t.Fatalf("final result did not separate candidate preparation and scan: %v", err)
 	}
 	if !strings.Contains(notes.String(), "channel delivery reconciliation: select channel delivery sent presentation bounds") {
