@@ -1174,11 +1174,13 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 		shutdownErr = errors.Join(shutdownErr, resetRecovery.Close(shutdownCtx))
 		var retained *serveInboundStop
 		if supervisor != nil && runtimeContextManager != nil {
-			retained = supervisor.beginInboundStop()
+			retained = supervisor.beginInboundStop(publicExposure)
 			retained.contexts.Drain()
 		} else if supervisor != nil {
+			publicExposure.SealUpdates(shutdownCtx)
 			shutdownErr = errors.Join(shutdownErr, supervisor.ShutdownProcessWithOptions(context.Background(), runtime.ShutdownOptions{Grace: remainingServeShutdownGrace(opts.ShutdownGrace, deadline)}))
 		} else {
+			publicExposure.SealUpdates(shutdownCtx)
 			shutdownErr = errors.Join(shutdownErr, closeAdditionalServeRuntimeContexts(context.Background(), runtimeContexts[min(1, len(runtimeContexts)):], runtimeContextManager, opts, deadline))
 			if len(runtimeContexts) > 0 && runtimeContexts[0].runtime != nil {
 				joinErr := runtimeContexts[0].runtime.ShutdownWithOptions(runtime.ShutdownOptions{Grace: remainingServeShutdownGrace(opts.ShutdownGrace, deadline)})
@@ -1188,7 +1190,6 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 				}
 			}
 		}
-		publicExposure.SealUpdates(shutdownCtx)
 		shutdownErr = errors.Join(shutdownErr, publicExposure.CloseListener(shutdownCtx))
 		shutdownErr = errors.Join(shutdownErr, shutdownHTTPServer(shutdownCtx, "mcp", mcpServer))
 		shutdownErr = errors.Join(shutdownErr, apiProbe.Close(shutdownCtx))
