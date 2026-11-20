@@ -2194,6 +2194,14 @@ func (g CompiledConnectGraph) MatchingSourceEvent(sourceEvent SourceEvent) []Con
 	return out
 }
 
+// SortConnectPlansAncestorFirst orders an evaluation's private slice so an
+// ancestor connection can select its owner before a descendant consumes it.
+func SortConnectPlansAncestorFirst(plans []ConnectRoutePlan) {
+	sort.SliceStable(plans, func(i, j int) bool {
+		return strings.Count(plans[i].ReceiverEndpoint().Readback().FlowPath, "/") < strings.Count(plans[j].ReceiverEndpoint().Readback().FlowPath, "/")
+	})
+}
+
 func (g CompiledConnectGraph) Plans() []ConnectRoutePlan {
 	return append([]ConnectRoutePlan(nil), g.plans...)
 }

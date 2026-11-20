@@ -708,11 +708,7 @@ func (r connectRoutePlanResolver) matchedPlans(ctx context.Context, evt events.E
 			out = append(out, plan)
 		}
 	}
-	// Ancestor connections prepare/select their exact owner before descendant
-	// connections consume it. Equal-depth plans retain compiled order.
-	sort.SliceStable(out, func(i, j int) bool {
-		return strings.Count(out[i].ReceiverEndpoint().Readback().FlowPath, "/") < strings.Count(out[j].ReceiverEndpoint().Readback().FlowPath, "/")
-	})
+	runtimepinrouting.SortConnectPlansAncestorFirst(out)
 	return out
 }
 

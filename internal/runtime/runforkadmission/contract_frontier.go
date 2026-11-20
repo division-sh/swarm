@@ -566,8 +566,11 @@ func contractFrontierRouteEvaluation(routeTable *runtimebus.RouteTable, selected
 	}
 	out := contractFrontierEvaluatedRoute{}
 	seenNodes := map[string]struct{}{}
-	for _, plan := range graph.MatchingSourceEvent(sourceEvent) {
-		targets, matched, err := contractFrontierPlanTargets(selectedSource, cut, constructors, eventID, source, plan, reply)
+	plans := graph.MatchingSourceEvent(sourceEvent)
+	runtimepinrouting.SortConnectPlansAncestorFirst(plans)
+	selected := make(fixedCutConnectSelection)
+	for _, plan := range plans {
+		targets, matched, err := contractFrontierPlanTargets(selectedSource, cut, constructors, selected, eventID, source, plan, reply)
 		if err != nil {
 			return contractFrontierEvaluatedRoute{}, err
 		}
@@ -632,7 +635,7 @@ func selectedContractConnectDefinitions(table *runtimebus.RouteTable, plan runti
 	return definitions, nil
 }
 
-func contractFrontierPlanTargets(source semanticview.Source, cut runfork.RunForkPlan, constructors fixedCutConstructionIndex, eventID string, routingSource events.RoutingSource, plan runtimepinrouting.ConnectRoutePlan, reply *replycontext.Record) ([]events.RouteIdentity, bool, error) {
+func contractFrontierPlanTargets(source semanticview.Source, cut runfork.RunForkPlan, constructors fixedCutConstructionIndex, selected fixedCutConnectSelection, eventID string, routingSource events.RoutingSource, plan runtimepinrouting.ConnectRoutePlan, reply *replycontext.Record) ([]events.RouteIdentity, bool, error) {
 	runID := cut.SourceRunID
 	if plan.ReplyRole() == runtimepinrouting.ConnectReplyRoleResponse {
 		if reply == nil {
@@ -653,12 +656,12 @@ func contractFrontierPlanTargets(source semanticview.Source, cut runfork.RunFork
 		return []events.RouteIdentity{{FlowID: coordinate.FlowID(), FlowInstance: coordinate.RunID()}}, true, nil
 	}
 	if plan.RequiresRuntimeResolution() {
-		return fixedCutConnectTargets(source, cut, constructors, eventID, routingSource, plan)
+		return fixedCutConnectTargets(source, cut, constructors, selected, eventID, routingSource, plan)
 	}
 	if selector, found, err := cut.HistoricalRouteSelector(eventID); err != nil {
 		return nil, false, err
 	} else if found && len(cut.Entities) != 0 && plan.ReceiverEndpoint().Readback().FlowID != plan.Readback().FlowPath {
-		parent, err := fixedCutConnectParent(source, cut, constructors, selector, plan)
+		parent, err := fixedCutConnectParent(source, cut, constructors, selected, selector, plan)
 		if err != nil {
 			return nil, false, err
 		}

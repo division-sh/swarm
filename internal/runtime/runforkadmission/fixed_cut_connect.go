@@ -46,7 +46,7 @@ func indexFixedCutConstructions(source semanticview.Source, cut runfork.RunForkP
 	return index, nil
 }
 
-func fixedCutConnectTargets(source semanticview.Source, cut runfork.RunForkPlan, constructors fixedCutConstructionIndex, eventID string, routing events.RoutingSource, receiver pinrouting.ConnectRoutePlan) ([]events.RouteIdentity, bool, error) {
+func fixedCutConnectTargets(source semanticview.Source, cut runfork.RunForkPlan, constructors fixedCutConstructionIndex, selected fixedCutConnectSelection, eventID string, routing events.RoutingSource, receiver pinrouting.ConnectRoutePlan) ([]events.RouteIdentity, bool, error) {
 	event, found, err := cut.HistoricalRouteSelector(eventID)
 	if err != nil {
 		return nil, false, err
@@ -67,7 +67,7 @@ func fixedCutConnectTargets(source semanticview.Source, cut runfork.RunForkPlan,
 		// Minted/event-sourced key projection is a separate admitted occurrence.
 		return nil, true, nil
 	}
-	parent, err := fixedCutConnectParent(source, cut, constructors, event, receiver)
+	parent, err := fixedCutConnectParent(source, cut, constructors, selected, event, receiver)
 	if err != nil {
 		return nil, false, err
 	}
@@ -134,12 +134,53 @@ func fixedCutConnectTargets(source semanticview.Source, cut runfork.RunForkPlan,
 	// This is the lifecycle owner's selector-only leaf: exact keys plus stored
 	// construction and parent. The generic descriptor materializer infers a
 	// single-level scope from the path, which cannot describe nested constructors.
-	return []events.RouteIdentity{receiver.ReceiverRoute(matches[0].InstancePath, matches[0].EntityID)}, true, nil
+	instance := matches[0]
+	target := receiver.ReceiverRoute(instance.InstancePath, instance.EntityID)
+	selected.remember(event, receiver, instance, target)
+	return []events.RouteIdentity{target}, true, nil
 }
 
-// Walk only captured ancestry and canonical keyless descendants. A keyed
-// ancestor not selected by this exact source cannot be chosen from a census.
-func fixedCutConnectParent(source semanticview.Source, cut runfork.RunForkPlan, constructors fixedCutConstructionIndex, event events.Event, receiver pinrouting.ConnectRoutePlan) (flowidentity.Instance, error) {
+// A selection belongs to one typed occurrence, not the fixed cut's census.
+type fixedCutConnectSelection map[string][]flowidentity.Instance
+
+func (s fixedCutConnectSelection) remember(event events.Event, plan pinrouting.ConnectRoutePlan, instance flowidentity.Instance, target events.RouteIdentity) {
+	// Provider authorization is invocation-local; a captured selector cannot
+	// authorize a provider edge to supply a new construction dependency.
+	if plan.ProviderOutputAuthorization() != nil {
+		return
+	}
+	if event.RoutingSource().Kind() == events.RoutingSourceRoot {
+		switch event.AdmissionClass() {
+		case events.EventAdmissionRootIngress, events.EventAdmissionOperatorInjected, events.EventAdmissionSelectedForkReplay:
+			if explicit := event.TargetRoute(); !explicit.Empty() && (!plan.AcceptsReceiverTarget(explicit, event.RunID()) || explicit != target) {
+				return
+			}
+		}
+	}
+	s[instance.TemplateID] = append(s[instance.TemplateID], instance)
+}
+
+func (s fixedCutConnectSelection) keyedChild(parent flowidentity.Instance, flowID string) (flowidentity.Instance, error) {
+	route := flowidentity.ParentRoute{FlowID: parent.TemplateID, FlowInstance: parent.InstancePath, EntityID: parent.EntityID}
+	var child flowidentity.Instance
+	for _, candidate := range s[flowID] {
+		if candidate.ParentRoute != route {
+			continue
+		}
+		if child != (flowidentity.Instance{}) && child != candidate {
+			return flowidentity.Instance{}, fmt.Errorf("fixed selector has competing keyed ancestors for %s", flowID)
+		}
+		child = candidate
+	}
+	if child == (flowidentity.Instance{}) {
+		return child, fmt.Errorf("fixed selector requires its exact keyed ancestor %s", flowID)
+	}
+	return child, nil
+}
+
+// Walk captured ancestry, canonical keyless descendants, and keyed children
+// independently selected by an earlier edge of this exact occurrence.
+func fixedCutConnectParent(source semanticview.Source, cut runfork.RunForkPlan, constructors fixedCutConstructionIndex, selected fixedCutConnectSelection, event events.Event, receiver pinrouting.ConnectRoutePlan) (flowidentity.Instance, error) {
 	bundle, found := semanticview.Bundle(source)
 	if !found {
 		return flowidentity.Instance{}, fmt.Errorf("fixed receiver requires admitted construction tree")
@@ -180,6 +221,14 @@ func fixedCutConnectParent(source semanticview.Source, cut runfork.RunForkPlan, 
 		descendants = append(descendants, cursor.Paths.FlowPath)
 	}
 	for i := len(descendants) - 1; i >= 0; i-- {
+		if schema, known := source.FlowSchemaByID(descendants[i]); known && !schema.Instance.Empty() {
+			child, err := selected.keyedChild(owner, descendants[i])
+			if err != nil {
+				return flowidentity.Instance{}, err
+			}
+			owner = child
+			continue
+		}
 		child, err := flowidentity.KeylessChild(source, owner, descendants[i])
 		if err != nil {
 			return flowidentity.Instance{}, err
