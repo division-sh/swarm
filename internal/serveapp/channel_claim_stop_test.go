@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -24,6 +26,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/servedparity"
 	"github.com/division-sh/swarm/internal/sessionprovider/authority"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
@@ -31,6 +34,118 @@ type heldStopClaimStore struct {
 	operatorchannel.Store
 	entered chan<- struct{}
 	release <-chan struct{}
+}
+
+func TestGracefulStopRefusesOnlyMatchedDeploymentWebhookClaimBothStores(t *testing.T) {
+	for _, backend := range servedparity.RequiredBackends {
+		t.Run(string(backend), func(t *testing.T) {
+			const token = "synthetic-stop-claim"
+			managers := make(chan *runtime.RuntimeContextManager, 1)
+			h := prepareChannelAnchorPublicJourney(t, backend, token, true, 0, func(opts *cliapp.ServeOptions) {
+				opts.TestRuntimeContextsReadyHook = func(m *runtime.RuntimeContextManager) { managers <- m }
+			})
+			h.opts.SourceRoot = writeStandingTelegramServeFixture(t, h.telegram.URL)
+			var stores *selectedStoreOwner
+			project := projectRuntimePersistenceForServe
+			projectRuntimePersistenceForServe = func(owner *selectedStoreOwner) serveRuntimePersistence {
+				stores = owner
+				return project(owner)
+			}
+			t.Cleanup(func() { projectRuntimePersistenceForServe = project })
+			h.start(t)
+			defer h.stop(t)
+			manager := <-managers
+			ctx, cancel := context.WithCancel(t.Context())
+			out, errOut, done, progress := &lockedBuffer{}, &lockedBuffer{}, make(chan int, 1), make(chan int, 1)
+			restore := installChannelOnboardingCLIInput(t, token+"\n")
+			defer restore()
+			args := channelFixtureArguments(h.opts.ConfigPath, "channel", "connect", "telegram", "420079", "--yes", "--client-language", "en", "--api-server", h.endpoint)
+			go func() {
+				code := cliapp.Execute(ctx, args, out, errOut, nil, nil, OpenChannelRegistration)
+				done <- code
+				progress <- code
+			}()
+			defer func() { cancel(); <-done }()
+			challenge := waitChannelOnboardingChallenge(t, out, errOut, progress)
+			callback, signing := waitChannelOnboardingRegistration(t, h.provider, out, errOut, progress)
+			var listed struct{ Accounts []channelonboarding.Result }
+			var listOut, listErr lockedBuffer
+			if code := cliapp.Execute(ctx, channelFixtureArguments(h.opts.ConfigPath, "channel", "list", "--api-server", h.endpoint, "--json"), &listOut, &listErr, nil, nil, OpenChannelRegistration); code != 0 || json.Unmarshal([]byte(listOut.String()), &listed) != nil {
+				t.Fatalf("cannot read exact deployment claim: exit=%d err=%s", code, listErr.String())
+			}
+			if stores == nil || len(listed.Accounts) != 1 || listed.Accounts[0].IdentityOperation == nil || listed.Accounts[0].IdentityOperation.Challenge != challenge {
+				t.Fatal("no exact pending native webhook claim at the cut")
+			}
+			parent, child := listed.Accounts[0].Operation, listed.Accounts[0].IdentityOperation
+			identities := stores.OperatorChannels()
+			before, err := identities.ListOperatorChannelOperations(ctx, child.PrincipalID)
+			if err != nil || len(before) != 1 || before[0].OperationID != child.OperationID || before[0].Challenge != challenge || before[0].State != operatorchannel.StateAwaitingClaim {
+				t.Fatalf("native claim before stop is not awaiting its exact challenge: %v", err)
+			}
+			beforeParent, err := stores.DeploymentChannels().GetChannelOnboarding(ctx, parent.OperationID)
+			if err != nil || !beforeParent.PendingDeploymentClaim(channelonboarding.AccountReference{Provider: "telegram", Account: "420079"}) {
+				t.Fatalf("native parent is not the exact pending deployment claim: %v", err)
+			}
+			accepted, _, err := manager.AcquireBundleHash(ctx, channelAnchorBundleHash(t, h.rpcEndpoint()))
+			if err != nil || accepted == nil {
+				t.Fatalf("retain exact stop fixture: %v", err)
+			}
+			defer func() { _ = accepted.Done() }()
+			h.process.cancel()
+			cut, stop := context.WithTimeout(ctx, 5*time.Second)
+			defer stop()
+			for !manager.InboundDraining() {
+				req, err := http.NewRequestWithContext(cut, http.MethodGet, h.endpoint+"/readyz", nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				res, err := http.DefaultClient.Do(req)
+				if err != nil {
+					t.Fatal(err)
+				}
+				_ = res.Body.Close()
+			}
+			ordinary := submitChannelOnboardingClaimAs(t, callback, signing, "ordinary customer input", 92, 7001, 1002, "customer")
+			if ordinary.StatusCode != http.StatusAccepted || len(ordinary.EventIDs) == 0 {
+				t.Errorf("unmatched authenticated input did not store pending: status=%d events=%d body=%s", ordinary.StatusCode, len(ordinary.EventIDs), ordinary.Body)
+			}
+			pending := 0
+			for _, id := range ordinary.EventIDs {
+				rows, err := storetest.ReadEventDeliveryDiagnosticRows(cut, h.runtime.Bus.Store(), id)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, row := range rows {
+					if row.SubscriberType == "node" {
+						if row.Status != "pending" {
+							t.Errorf("ordinary callback selected a node during stop: %v", row.Status)
+						}
+						pending++
+					}
+				}
+			}
+			if pending == 0 {
+				t.Error("ordinary callback has no native pending receiver")
+			}
+			matched := submitChannelOnboardingClaimAs(t, callback, signing, challenge, 93, 7000, 1001, "operator")
+			if matched.StatusCode != http.StatusServiceUnavailable || !strings.Contains(matched.Body, "deployment claim admission refused") || len(matched.EventIDs) != 0 {
+				t.Errorf("stop-wins matched callback escaped claim refusal: status=%d events=%d body=%s", matched.StatusCode, len(matched.EventIDs), matched.Body)
+			}
+			rows, err := identities.ListOperatorChannelOperations(cut, child.PrincipalID)
+			if err != nil || !reflect.DeepEqual(rows, before) {
+				t.Errorf("stopped callback mutated the native pending claim: rows=%d err=%v", len(rows), err)
+			}
+			afterParent, err := stores.DeploymentChannels().GetChannelOnboarding(cut, parent.OperationID)
+			if err != nil || !reflect.DeepEqual(afterParent, beforeParent) {
+				t.Errorf("stopped callback mutated the native claim parent: %v", err)
+			}
+			for _, event := range []string{"92", "93"} {
+				if _, found, err := identities.LoadOperatorChannelClaimReceipt(cut, operatorchannel.SessionClaimReceiptID(parent.OperationID, event)); err != nil || found {
+					t.Errorf("unexpected claim receipt for event %s: found=%t err=%v", event, found, err)
+				}
+			}
+		})
+	}
 }
 
 func (s heldStopClaimStore) SettleSessionChannelClaim(ctx context.Context, claim authority.Claim) (operatorchannel.ClaimSettlement, error) {
