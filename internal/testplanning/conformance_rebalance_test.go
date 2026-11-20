@@ -206,7 +206,7 @@ func TestConformanceReporterRebalanceRejectsMissingOrDuplicateOwner(t *testing.T
 				id := "conformance-1"
 				unit := changed.Units[id]
 				if defect == "missing" {
-					unit.Run = "^Test[FH].*$"
+					unit.Run = strings.Replace(unit.Run, "|"+strings.TrimPrefix(conformanceRebalancedReporterRoot, "Test"), "", 1)
 				} else {
 					id = "conformance-2"
 					unit = changed.Units[id]
