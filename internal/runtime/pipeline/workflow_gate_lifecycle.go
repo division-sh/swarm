@@ -14,6 +14,7 @@ import (
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
@@ -104,6 +105,14 @@ func workflowGateBundleHash(ctx context.Context, pc *PipelineCoordinator) string
 }
 
 func (pc *PipelineCoordinator) buildWorkflowDecisionCard(ctx context.Context, runID string, route runtimeflowidentity.Route, entityID identity.EntityID, instance WorkflowInstance, activation gateruntime.Activation, plan runtimecontracts.WorkflowGatePlan, frozenOutcomes map[string]runtimecontracts.WorkflowGateOutcomePlan) (decisioncard.Card, error) {
+	mode, err := decisioncard.CausalExecutionMode(ctx)
+	if err != nil {
+		return decisioncard.Card{}, err
+	}
+	return buildWorkflowDecisionCard(pc.SemanticSource(), pc.decisionCardCadence, mode, runID, route, entityID, instance, activation, plan, frozenOutcomes)
+}
+
+func buildWorkflowDecisionCard(source semanticview.Source, cadence decisioncard.CadencePolicy, mode executionmode.Mode, runID string, route runtimeflowidentity.Route, entityID identity.EntityID, instance WorkflowInstance, activation gateruntime.Activation, plan runtimecontracts.WorkflowGatePlan, frozenOutcomes map[string]runtimecontracts.WorkflowGateOutcomePlan) (decisioncard.Card, error) {
 	owner, err := runtimeflowidentity.NewRunScopedFlowInstance(runID, route)
 	if err != nil {
 		return decisioncard.Card{}, fmt.Errorf("validate stage-gate owner: %w", err)
@@ -117,7 +126,7 @@ func (pc *PipelineCoordinator) buildWorkflowDecisionCard(ctx context.Context, ru
 	}
 	contextSnapshot := make(map[string]any, len(plan.Context))
 	for name, expression := range plan.Context {
-		value, err := evalWorkflowGateContext(expression, route, entityID, instance, pc.SemanticSource(), plan.FlowID)
+		value, err := evalWorkflowGateContext(expression, route, entityID, instance, source, plan.FlowID)
 		if err != nil {
 			return decisioncard.Card{}, fmt.Errorf("evaluate gate %s context %s: %w", plan.Decision, name, err)
 		}
@@ -131,11 +140,7 @@ func (pc *PipelineCoordinator) buildWorkflowDecisionCard(ctx context.Context, ru
 	if err != nil {
 		return decisioncard.Card{}, err
 	}
-	executionMode, err := decisioncard.CausalExecutionMode(ctx)
-	if err != nil {
-		return decisioncard.Card{}, err
-	}
-	provenance, err := canonicaljson.FromGo(map[string]any{"source_event": activation.StartedByEvent, "flow_id": plan.FlowID, "stage": plan.Stage, "execution_mode": executionMode})
+	provenance, err := canonicaljson.FromGo(map[string]any{"source_event": activation.StartedByEvent, "flow_id": plan.FlowID, "stage": plan.Stage, "execution_mode": mode})
 	if err != nil {
 		return decisioncard.Card{}, fmt.Errorf("admit decision card provenance: %w", err)
 	}
@@ -148,7 +153,7 @@ func (pc *PipelineCoordinator) buildWorkflowDecisionCard(ctx context.Context, ru
 		sourceRoute.FlowID = anchorFlowID
 		sourceRoute.FlowInstance = route.InstancePath
 	}
-	anchorSource, err := runtimepinrouting.AdmitFlowExecutionRoutingSource(pc.SemanticSource(), runID, constructed, sourceRoute)
+	anchorSource, err := runtimepinrouting.AdmitFlowExecutionRoutingSource(source, runID, constructed, sourceRoute)
 	if err != nil {
 		return decisioncard.Card{}, fmt.Errorf("admit stage-gate owner source: %w", err)
 	}
@@ -162,10 +167,10 @@ func (pc *PipelineCoordinator) buildWorkflowDecisionCard(ctx context.Context, ru
 	}
 	card := decisioncard.Card{
 		CardID: activation.CardID, RunID: runID, Anchor: anchor,
-		ExecutionMode: executionMode,
+		ExecutionMode: mode,
 		Snapshot:      snapshot,
 		BundleHash:    activation.BundleHash, WorkflowVersion: instance.WorkflowVersion,
-		EffectiveCadence: pc.decisionCardCadence.Stamp(activation.OpenedAt),
+		EffectiveCadence: cadence.Stamp(activation.OpenedAt),
 		Provenance:       provenance,
 		CreatedAt:        activation.OpenedAt,
 	}

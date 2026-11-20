@@ -11,7 +11,20 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+
+	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 )
+
+func TestMailboxReplacementReasonUsesExactRuledSentence(t *testing.T) {
+	var out bytes.Buffer
+	writeMailboxDetailResult(&out, mailboxDetailProjection{Kind: "decision_card", DecisionCard: &mailboxDecisionCard{
+		mailboxDecisionCardSummary: mailboxDecisionCardSummary{CardID: "old-card", Status: "superseded", AnchorKind: "stage_gate"},
+		SupersededReason:           decisioncard.SupersededByUpdate,
+	}})
+	if !strings.Contains(out.String(), "Replaced by a new card after an update. No action was taken.") || strings.Contains(out.String(), "The flow moved on.") {
+		t.Fatal(out.String())
+	}
+}
 
 func TestMailboxListUsesTaggedNoticeAndDecisionCardProjection(t *testing.T) {
 	setCLIAPITestToken(t, "test-token")

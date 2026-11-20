@@ -42,6 +42,7 @@ type bundleUpgradeMutationOwner interface {
 	bundleUpgradeReadOwner
 	ReviseSourceTx(context.Context, *mutationprotocol.Attempt, runlifecycle.SourceRevisionRequest) (runlifecycle.MutationDisposition, error)
 	genericScheduleTxOwner() GenericScheduleTxOwner
+	workflowDecisionLifecycleOwner() workflowDecisionLifecycleTxOwner
 }
 
 func (s *PipelinePostgresOwner) CommitBundleUpgradeTx(ctx context.Context, attempt *mutationprotocol.Attempt, plan *runbundle.UpgradePlan) error {
@@ -94,7 +95,13 @@ func commitBundleUpgrade(ctx context.Context, attempt *mutationprotocol.Attempt,
 		if rooted.Admission().BundleHash() != source.BundleHash() {
 			return errors.New("bundle upgrade candidate root differs from its revalidated source")
 		}
+		if err := lockUpgradeGateInstances(ctx, tx, sqlite, fresh); err != nil {
+			return err
+		}
 		for _, runID := range slices.Sorted(maps.Keys(fresh.Runs)) {
+			if err := replaceUpgradeGateCards(ctx, tx, attempt, owner, sqlite, runID, fresh.Sources[fresh.Runs[runID]], candidate, plan.CardCadence); err != nil {
+				return err
+			}
 			if err := cancelRemovedUpgradeTimers(ctx, tx, attempt, sqlite, runID, fresh.Sources[fresh.Runs[runID]], candidate); err != nil {
 				return err
 			}

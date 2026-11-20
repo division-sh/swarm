@@ -30,6 +30,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimedataaccess "github.com/division-sh/swarm/internal/runtime/dataaccess"
+	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -1289,6 +1290,12 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 			presenter.fail(5, "pinned_bundle_admission", err)
 			return 3
 		}
+		bundleUpgrade.CardCadence = decisioncard.CadencePolicy{
+			FirstReminderDelay: cfg.Runtime.DecisionCardFirstReminder,
+			UrgencyDelay:       cfg.Runtime.DecisionCardUrgency,
+			ReminderInterval:   cfg.Runtime.DecisionCardReminderInterval,
+			InputDraftTTL:      cfg.Runtime.DecisionCardInputDraftTTL,
+		}.Normalize()
 	}
 	var listenerWorkspaceBackend cliapp.WorkspaceBackendSelection
 	if len(loadedBundles) == 0 {

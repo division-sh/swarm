@@ -18,6 +18,18 @@ import (
 	"github.com/google/uuid"
 )
 
+func TestChannelReplacementReasonDoesNotChangeOrdinarySupersession(t *testing.T) {
+	for _, test := range []struct{ reason, want string }{
+		{decisioncard.SupersededByUpdate, "Replaced by a new card after an update. No action was taken."},
+		{"ordinary_exit", "The flow moved on. No action was taken."},
+	} {
+		lines := cardDecisionLines(decisioncard.Card{Status: decisioncard.StatusSuperseded, SupersededReason: test.reason})
+		if len(lines) != 1 || lines[0] != test.want {
+			t.Fatalf("superseded reason %q: %v", test.reason, lines)
+		}
+	}
+}
+
 func TestChannelRenderFreezesFullOrderedCardWithoutPrivateAnswerEcho(t *testing.T) {
 	principalID := uuid.NewString()
 	audience := Audience{
