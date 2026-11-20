@@ -11,6 +11,8 @@ import (
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/packs"
+	"github.com/division-sh/swarm/internal/runtime/channeldelivery"
+	"github.com/division-sh/swarm/internal/runtime/channelnative"
 	"github.com/google/uuid"
 )
 
@@ -68,6 +70,38 @@ func TestServeSessionWriteSelectionUsesOriginalOwnerBothStores(t *testing.T) {
 			}
 			if _, err := selectServeChannelWrite(f.ctx, f.adapter, op, plan); err == nil || f.selections.Load() != 2 {
 				t.Fatal("closed owner was used or automatically reopened", err)
+			}
+		})
+	}
+}
+
+func TestChannelDeliveryReconciliationFinalUsesOriginalNonWebhookOwnerBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			f, op, _ := pairedServeSessionObserver(t, backend)
+			plan, err := packs.NewOutboundBindingPlan("owned_native_write", f.candidate.Plan, "100000000002@s.whatsapp.net", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			binding := operatorchannel.Binding{Revision: 1, ProofID: uuid.NewString(), ProofRevision: 1}
+			identity := operatorchannel.Operation{OperationID: uuid.NewString(), Revision: 1}
+			selected := channelonboarding.Result{Operation: op, Binding: &binding, IdentityOperation: &identity}
+			parent := deploymentParent(selected)
+			d := &serveChannelDeliveryDispatcher{
+				sessions: f.adapter,
+				deployment: &serveDeploymentTransport{read: func(_ context.Context, read channelnative.TransportParent) (channelonboarding.Result, packs.OutboundBindingPlan, error) {
+					if read != parent {
+						t.Fatalf("selection requested a different parent: %v", read)
+					}
+					return selected, plan, nil
+				}},
+			}
+			before := f.selections.Load()
+			if _, _, err := d.selectedPresentation(f.ctx, channeldelivery.Candidate{
+				SourceKind: "response", RequestParent: parent, BindingRevision: binding.Revision,
+				Audience: channeldelivery.Audience{InterfaceKey: binding.Interface.Key()},
+			}, true); err != nil || f.selections.Load() != before+1 {
+				t.Fatalf("final non-webhook selection did not use its original session owner: selections=%d err=%v", f.selections.Load(), err)
 			}
 		})
 	}

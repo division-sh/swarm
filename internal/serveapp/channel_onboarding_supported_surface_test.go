@@ -15,6 +15,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -445,6 +446,7 @@ func startChannelOnboardingCrashServeProcess(t *testing.T, opts cliapp.ServeOpti
 
 func startChannelOnboardingCrashServeProcessAtBoundary(t *testing.T, opts cliapp.ServeOptions, telegramBaseURL string, boundary channelonboarding.TestLifecycleBoundary) *channelOnboardingCrashServeProcess {
 	t.Helper()
+	opts = isolateDefaultServeProofDirectory(repoRootForTest(), opts)
 	if opts.PublicWebhookListener == nil {
 		t.Fatal("channel crash fixture requires an owned public listener")
 	}
@@ -456,6 +458,8 @@ func startChannelOnboardingCrashServeProcessAtBoundary(t *testing.T, opts cliapp
 	return startServedCrashProcessBeforeReadiness(t, "TestChannelOnboardingCrashServeProcessHelper", []string{
 		channelOnboardingCrashServeHelperEnv + "=1",
 		"TEST_CHANNEL_ONBOARDING_CONFIG=" + opts.ConfigPath,
+		"TEST_CHANNEL_ONBOARDING_SWARM_DIR=" + opts.SwarmDir,
+		"TEST_CHANNEL_ONBOARDING_SWARM_DIR_SET=" + strconv.FormatBool(opts.SwarmDirSet),
 		"TEST_CHANNEL_ONBOARDING_CONTRACTS=" + opts.SourceRoot,
 		"TEST_CHANNEL_ONBOARDING_STORE=" + opts.StoreMode,
 		"TEST_CHANNEL_ONBOARDING_PUBLIC_ORIGIN=" + opts.PublicWebhookBaseURL,
@@ -594,6 +598,8 @@ func TestChannelOnboardingCrashServeProcessHelper(t *testing.T) {
 	})
 	opts := cliapp.DefaultServeOptions()
 	opts.ConfigPath = os.Getenv("TEST_CHANNEL_ONBOARDING_CONFIG")
+	opts.SwarmDir = os.Getenv("TEST_CHANNEL_ONBOARDING_SWARM_DIR")
+	opts.SwarmDirSet = os.Getenv("TEST_CHANNEL_ONBOARDING_SWARM_DIR_SET") == "true"
 	opts.SourceRoot = os.Getenv("TEST_CHANNEL_ONBOARDING_CONTRACTS")
 	opts.StoreMode = os.Getenv("TEST_CHANNEL_ONBOARDING_STORE")
 	opts.StoreModeSet = true
