@@ -30,11 +30,12 @@ import (
 )
 
 type deploymentChannelSession struct {
-	opts       cliapp.ChannelRegistrationOptions
-	connection *sessionprovider.RuntimeConnection
-	offset     int64
-	business   sessionprovider.RegisteredBusinessSelector
-	opened     func(channelonboarding.Operation, *sessionprovider.RuntimeConnection) error
+	beginWebhookClaim func(context.Context) (context.Context, func(), bool)
+	opts              cliapp.ChannelRegistrationOptions
+	connection        *sessionprovider.RuntimeConnection
+	offset            int64
+	business          sessionprovider.RegisteredBusinessSelector
+	opened            func(channelonboarding.Operation, *sessionprovider.RuntimeConnection) error
 }
 
 func (c *deploymentChannelSession) AcknowledgeRegisteredOperator(ctx context.Context, op channelonboarding.Operation, child operatorchannel.Operation, binding operatorchannel.Binding) error {
@@ -331,6 +332,7 @@ func configureDeploymentRuntimeSession(value cliapp.ChannelRegistrationSession, 
 		return
 	}
 	session := value.(*deploymentChannelSession)
+	session.beginWebhookClaim = runtimeOptions.beginWebhookClaim
 	session.business = serveRegisteredBusinessSelector(runtimeOptions.manager)
 	if owner, ok := runtimeOptions.sessions.(*serveSessionBootstrap); ok {
 		session.opened = owner.registerDeploymentConnection
@@ -582,7 +584,7 @@ func (c *deploymentChannelSession) PollOperatorClaim(ctx context.Context, op cha
 }
 
 func (c *deploymentChannelSession) ConsumeWebhookClaim(ctx context.Context, account channelonboarding.AccountReference, credential func(channelonboarding.CredentialAdmission) bool, admit func(providertriggers.InboundAdmissionPlan) (providertriggers.Delivery, error), current func() bool) (bool, error) {
-	return sessionprovider.ConsumeDeploymentWebhookClaim(ctx, sessionprovider.DeploymentConnectionOptions{Operations: c.opts.Operations, Principal: c.opts.Principal, Plan: c.opts.Plan, Trigger: c.opts.Webhook}, c.opts.Identities, account, credential, admit, current)
+	return sessionprovider.ConsumeDeploymentWebhookClaim(ctx, sessionprovider.DeploymentConnectionOptions{Operations: c.opts.Operations, Principal: c.opts.Principal, Plan: c.opts.Plan, Trigger: c.opts.Webhook, BeginWebhookClaim: c.beginWebhookClaim}, c.opts.Identities, account, credential, admit, current)
 }
 
 func (c *deploymentChannelSession) VerifyRegistration(ctx context.Context, op channelonboarding.Operation) (bool, error) {

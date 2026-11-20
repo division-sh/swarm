@@ -16,6 +16,7 @@ import (
 )
 
 type DeploymentConnectionOptions struct {
+	BeginWebhookClaim  func(context.Context) (context.Context, func(), bool)
 	OperatorAccount    channelonboarding.AccountReference
 	OperatorBinding    func(context.Context, channelonboarding.Operation) (channelonboarding.Result, error)
 	RegisteredBusiness RegisteredBusinessSelector

@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providertriggers"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/sessionprovider/authority"
 )
@@ -135,6 +136,14 @@ func ConsumeDeploymentWebhookClaim(ctx context.Context, opts DeploymentConnectio
 			return false, err
 		}
 		if matched {
+			if opts.BeginWebhookClaim != nil {
+				claimCtx, finish, admitted := opts.BeginWebhookClaim(ctx)
+				if !admitted {
+					return false, worklifetime.ErrAdmissionFenced
+				}
+				defer finish()
+				ctx = claimCtx
+			}
 			err = settleDeploymentClaim(ctx, identities, op, claim, valid)
 			return err == nil, err
 		}
