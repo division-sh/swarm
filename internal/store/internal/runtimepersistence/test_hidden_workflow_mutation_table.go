@@ -2,7 +2,7 @@ package runtimepersistence
 
 import (
 	"context"
-	"database/sql"
+	"fmt"
 )
 
 // Preserve the complete table and dependent keys while making the exact native
@@ -11,12 +11,15 @@ func HideWorkflowMutationTableForTest(ctx context.Context, selected any, hidden 
 	if err := validateChannelObservationOwner(selected); err != nil {
 		return err
 	}
-	statement := "ALTER TABLE entity_mutations RENAME TO pipeline_hidden_entity_mutations"
-	if !hidden {
-		statement = "ALTER TABLE pipeline_hidden_entity_mutations RENAME TO entity_mutations"
-	}
-	return runWorkflowProjectionFault(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, statement)
+	if _, err := workflowProjectionNativePostgres(selected); err != nil {
 		return err
-	})
+	}
+	switch owner := selected.(type) {
+	case *PostgresStore:
+		return owner.pipelinePostgresOwner.HideWorkflowMutationTableForTest(ctx, hidden)
+	case *SQLiteRuntimeStore:
+		return owner.pipelineSQLiteOwner.HideWorkflowMutationTableForTest(ctx, hidden)
+	default:
+		return fmt.Errorf("workflow projection fault requires the original native owner")
+	}
 }

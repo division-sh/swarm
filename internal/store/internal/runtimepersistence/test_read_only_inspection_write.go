@@ -2,7 +2,6 @@ package runtimepersistence
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 )
 
@@ -13,8 +12,5 @@ func AttemptSQLiteInspectionTableCreationForTest(ctx context.Context, selected a
 	if !ok || owner == nil || owner.backend == nil || !owner.backend.Valid() {
 		return fmt.Errorf("inspection write control requires an initialized native sqlite observer")
 	}
-	return owner.backend.RunTransaction(ctx, "read-only observer refusal", func(ctx context.Context, tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, `CREATE TABLE snapshot_forbidden_writer (id TEXT)`)
-		return err
-	})
+	return owner.backend.AttemptInspectionTableCreationForTest(ctx)
 }

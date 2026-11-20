@@ -252,7 +252,7 @@ func TestRunForkHistoricalIdentityPublicExecutionBothStores(t *testing.T) {
 			var result apiv1.RunForkExecutionResult
 			params := map[string]any{"source_run_id": seed.RunID, "fork_event_id": frontier, "idempotency_key": "historical-restored-control"}
 			requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &result)
-			if result.ForkRunID == "" || result.ExecutedEventCount != 1 {
+			if result.ForkRunID == "" {
 				t.Fatalf("restored historical reader lost its immutable activation ACK: %#v", result)
 			}
 			childEvent := waitServedSelectedForkFrontier(t, rt.ReceiverStateReader, rt.ReadRunDeliveries, result.ForkRunID, frontier)

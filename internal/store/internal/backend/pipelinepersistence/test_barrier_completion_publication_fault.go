@@ -12,7 +12,7 @@ import (
 // transaction has changed the paired header/fields and appended authored
 // mutations. A premature insert is not faulted: the execution test must prove
 // the dead letter rather than mistaking an earlier setup error for this cut.
-func SetBarrierCompletionPublicationFaultTx(ctx context.Context, tx *sql.Tx, postgres bool, run, entity string, revision, mutations int, enabled bool) error {
+func setBarrierCompletionPublicationFaultTx(ctx context.Context, tx *sql.Tx, postgres bool, run, entity string, revision, mutations int, enabled bool) error {
 	if tx == nil || revision <= 0 || mutations < 0 {
 		return fmt.Errorf("barrier completion fault requires a transaction and existing state")
 	}
@@ -48,4 +48,16 @@ func SetBarrierCompletionPublicationFaultTx(ctx context.Context, tx *sql.Tx, pos
 		}
 	}
 	return nil
+}
+
+func (s *PipelinePostgresOwner) SetBarrierCompletionPublicationFaultForTest(ctx context.Context, run, entity string, revision, mutations int, enabled bool) error {
+	return s.backend.RunTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		return setBarrierCompletionPublicationFaultTx(ctx, tx, true, run, entity, revision, mutations, enabled)
+	})
+}
+
+func (s *PipelineSQLiteOwner) SetBarrierCompletionPublicationFaultForTest(ctx context.Context, run, entity string, revision, mutations int, enabled bool) error {
+	return s.backend.RunTransaction(ctx, "workflow projection shape fault fixture", func(ctx context.Context, tx *sql.Tx) error {
+		return setBarrierCompletionPublicationFaultTx(ctx, tx, false, run, entity, revision, mutations, enabled)
+	})
 }

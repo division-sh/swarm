@@ -47,20 +47,24 @@ func ReadReceiverConstructionHeaderForTest(ctx context.Context, tx *sql.Tx, owne
 
 // This hostile receipt deliberately contradicts an existing historical header.
 // It copies real source bytes, not executable construction or readiness authority.
-func (s *PipelinePostgresOwner) CopyReceiverConstructionReceiptForTest(ctx context.Context, tx *sql.Tx, source, destination flowidentity.RunScopedFlowInstance, sourceEntity, destinationEntity string) error {
-	run, err := s.LoadSnapshotTx(ctx, tx, destination.RunID, false)
-	if err != nil {
-		return err
-	}
-	return copyReceiverConstructionReceiptForTest(ctx, tx, source, destination, sourceEntity, destinationEntity, run, s.historicalInstances, false)
+func (s *PipelinePostgresOwner) CopyReceiverConstructionReceiptForTest(ctx context.Context, source, destination flowidentity.RunScopedFlowInstance, sourceEntity, destinationEntity string) error {
+	return s.backend.RunTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		run, err := s.LoadSnapshotTx(ctx, tx, destination.RunID, false)
+		if err != nil {
+			return err
+		}
+		return copyReceiverConstructionReceiptForTest(ctx, tx, source, destination, sourceEntity, destinationEntity, run, s.historicalInstances, false)
+	})
 }
 
-func (s *PipelineSQLiteOwner) CopyReceiverConstructionReceiptForTest(ctx context.Context, tx *sql.Tx, source, destination flowidentity.RunScopedFlowInstance, sourceEntity, destinationEntity string) error {
-	run, err := s.LoadSnapshotTx(ctx, tx, destination.RunID)
-	if err != nil {
-		return err
-	}
-	return copyReceiverConstructionReceiptForTest(ctx, tx, source, destination, sourceEntity, destinationEntity, run, s.historicalInstances, true)
+func (s *PipelineSQLiteOwner) CopyReceiverConstructionReceiptForTest(ctx context.Context, source, destination flowidentity.RunScopedFlowInstance, sourceEntity, destinationEntity string) error {
+	return s.backend.RunTransaction(ctx, "receiver physical observation fault", func(ctx context.Context, tx *sql.Tx) error {
+		run, err := s.LoadSnapshotTx(ctx, tx, destination.RunID)
+		if err != nil {
+			return err
+		}
+		return copyReceiverConstructionReceiptForTest(ctx, tx, source, destination, sourceEntity, destinationEntity, run, s.historicalInstances, true)
+	})
 }
 
 func copyReceiverConstructionReceiptForTest(ctx context.Context, tx *sql.Tx, source, destination flowidentity.RunScopedFlowInstance, sourceEntity, destinationEntity string, run runlifecycle.Snapshot, history HistoricalFlowInstanceReader, sqlite bool) error {

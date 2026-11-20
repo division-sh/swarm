@@ -274,7 +274,7 @@ func proveSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T, optio
 				return
 			}
 			fork := requireSelectedForkExecutionRPCResult(t, rt.Endpoint, params)
-			if fork.SourceRunID != seed.RunID || fork.ForkRunID == "" || fork.ForkRunID == seed.RunID || fork.ExecutedEventCount != 1 {
+			if fork.SourceRunID != seed.RunID || fork.ForkRunID == "" || fork.ForkRunID == seed.RunID {
 				t.Fatalf("public fork lost execution/source evidence: %+v", fork)
 			}
 			if replay := requireSelectedForkExecutionRPCResult(t, rt.Endpoint, params); !reflect.DeepEqual(fork, replay) {

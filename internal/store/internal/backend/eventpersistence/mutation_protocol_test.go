@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimelifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/lib/pq"
@@ -84,6 +85,19 @@ func TestStandalonePublicationCompletionCapabilityFailsClosed(t *testing.T) {
 	failing := &standaloneCompletionProbe{err: refusal}
 	if err := requestStandalonePublicationCompletion(ctx, nil, nil, failing, "event", "run"); !errors.Is(err, refusal) {
 		t.Fatalf("standalone lookup error = %v, want %v", err, refusal)
+	}
+}
+
+func TestExistingRunPublicationReservesCandidateOnlyForCandidateProducingWork(t *testing.T) {
+	pure := runtimebus.PublicationCommand{}
+	if publicationNeedsCandidateHandoff(pure) || inboundNeedsCandidateHandoff([]runtimebus.PublicationCommand{pure}) {
+		t.Fatal("pure existing-run publication reserved a started-work candidate handoff")
+	}
+	activation := runtimebus.PublicationCommand{Activations: []pipeline.FlowInstanceActivationPlan{{}}}
+	dynamic := runtimebus.PublicationCommand{DynamicFlowCreation: &pipeline.DynamicFlowRuntimeCreationOccurrenceRequest{}}
+	if !publicationNeedsCandidateHandoff(activation) || !publicationNeedsCandidateHandoff(dynamic) ||
+		!inboundNeedsCandidateHandoff([]runtimebus.PublicationCommand{pure, activation}) {
+		t.Fatal("candidate-producing publication lost its completion handoff")
 	}
 }
 

@@ -37,19 +37,18 @@ type forkCommandOptions struct {
 }
 
 type runForkResult struct {
-	SourceLabel        string            `json:"source_label"`
-	Owner              string            `json:"owner"`
-	SourceRunID        string            `json:"source_run_id"`
-	SourceRunStatus    string            `json:"source_run_status"`
-	SourceFrozen       *bool             `json:"source_frozen"`
-	ForkRunID          string            `json:"fork_run_id"`
-	ForkPointKind      string            `json:"fork_point_kind"`
-	ForkRevision       int64             `json:"fork_revision"`
-	ForkEventID        string            `json:"fork_event_id,omitempty"`
-	ForkRunStatus      string            `json:"fork_run_status"`
-	BundleHash         string            `json:"bundle_hash"`
-	ExecutedEventCount int               `json:"executed_event_count"`
-	DataPins           []durabledata.Pin `json:"data_pins"`
+	SourceLabel     string            `json:"source_label"`
+	Owner           string            `json:"owner"`
+	SourceRunID     string            `json:"source_run_id"`
+	SourceRunStatus string            `json:"source_run_status"`
+	SourceFrozen    *bool             `json:"source_frozen"`
+	ForkRunID       string            `json:"fork_run_id"`
+	ForkPointKind   string            `json:"fork_point_kind"`
+	ForkRevision    int64             `json:"fork_revision"`
+	ForkEventID     string            `json:"fork_event_id,omitempty"`
+	ForkRunStatus   string            `json:"fork_run_status"`
+	BundleHash      string            `json:"bundle_hash"`
+	DataPins        []durabledata.Pin `json:"data_pins"`
 }
 
 func newForkCommand(opts rootCommandOptions) *cobra.Command {
@@ -243,9 +242,6 @@ func validateRunForkResult(result runForkResult) error {
 			return fmt.Errorf("malformed run.fork result: %s is required", field.name)
 		}
 	}
-	if result.ExecutedEventCount < 0 {
-		return fmt.Errorf("malformed run.fork result: executed_event_count must be non-negative")
-	}
 	if result.DataPins == nil {
 		return fmt.Errorf("malformed run.fork result: data_pins is required")
 	}
@@ -298,7 +294,7 @@ func writeRunForkHuman(w io.Writer, result runForkResult) {
 	}
 	fmt.Fprintln(w)
 	fmt.Fprintf(w, "source_status=%s source_frozen=%t\n", formatCLIHumanCode(cliHumanCodeRunStatus, result.SourceRunStatus), *result.SourceFrozen)
-	fmt.Fprintf(w, "status=%s source=%s executed_event_count=%d\n", formatCLIHumanCode(cliHumanCodeRunStatus, result.ForkRunStatus), humanSourceIdentity(result.BundleHash, result.SourceLabel), result.ExecutedEventCount)
+	fmt.Fprintf(w, "status=%s source=%s\n", formatCLIHumanCode(cliHumanCodeRunStatus, result.ForkRunStatus), humanSourceIdentity(result.BundleHash, result.SourceLabel))
 	fmt.Fprintf(w, "data_pins=%d\n", len(result.DataPins))
 	fmt.Fprintf(w, "owner=%s\n", result.Owner)
 }

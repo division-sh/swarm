@@ -387,7 +387,7 @@ func Test2376ForkSourceAndPinsFollowSourceRunBothStores(t *testing.T) {
 					if err := servedB.DB.QueryRow("SELECT bundle_hash FROM runs WHERE run_id=$1", fork.ForkRunID).Scan(&durableHash); err != nil {
 						t.Fatal(err)
 					}
-					if fork.BundleHash != want || durableHash != want || fork.ExecutedEventCount != 1 {
+					if fork.BundleHash != want || durableHash != want {
 						t.Fatalf("source selection was not exact: %+v / %s want %s", fork, durableHash, want)
 					}
 					if fork.SourceFrozen || fork.SourceRunStatus != "paused" || fork.ForkRunStatus != "live" {

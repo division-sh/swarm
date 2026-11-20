@@ -5101,7 +5101,10 @@ handler_specification:
           only through the existing credential-store/import-boundary owner. Managed credentials are admitted only for
           provider_connector HTTP activities and only through `tool_model.managed_credential_store`.
           Static and managed credential values must not appear in logs, result payloads, readback, capability output, or
-          errors.
+          errors. The sole exception is an unclassified internal failure reported under explicit `swarm serve --verbose`
+          or `-v`. Its process-log diagnostic includes each wrapped/joined error's full message, which may contain
+          credential values. This does not authorize an independent request, header, payload or credential-store dump,
+          and does not relax ordinary logging, caller responses, result/error payloads, readback or capability output.
       http_execution:
           rule: Executable only for authored HTTP tools, with optional static credentials or managed
             credentials for provider_connector tools, when the activity_attempts journal is available. The runtime must
@@ -28616,7 +28619,12 @@ cli_specification:
           mutation, or other side effects if `--log-level` is supplied.
         serve_boundary: >
           `swarm serve --verbose/-v` remains owned by serve boot observability and prints the numbered boot sequence
-          to stdout. `--log-level` is not an alias for `--verbose/-v` in the promoted spec. A later serve logging
+          to stdout. For an unclassified internal API failure only, it also adds full wrapped/joined error messages and
+          one reporting-point stack to the existing correlated process-log record. Messages may contain secrets; this
+          stack is not the original failure stack and contains no arguments, locals or other goroutines. Traversal and
+          frame-buffer exhaustion are marked incomplete; these bounds do not bound message bytes or arbitrary error-method
+          execution time. Ordinary output, caller responses, classifications and retry markings remain unchanged.
+          `--log-level` is not an alias for `--verbose/-v` in the promoted spec. A later serve logging
           child may consume this owner for process diagnostics, but it MUST NOT change the boot-progress contract
           unless the serve boot owner is explicitly updated.
       stdout_stderr_boundary: >
@@ -29973,6 +29981,9 @@ cli_specification:
           With explicit `--verbose` or `-v`, the same presentation owner renders the numbered 22-step boot-progress sequence
           in canonical order. `--dev` does not imply verbose; `--dev --verbose` is meaningful. Runtime owns boot facts and
           persisted `platform.boot`; the CLI presentation never reconstructs runtime decisions from process-log prose.
+          Explicit verbose also selects the unclassified-internal-failure process-log detail described by
+          `cli_logging_policy.serve_boundary`, without altering this boot sequence. Its error messages may contain secrets,
+          and its single stack shows where the failure was reported, not where it originally occurred.
         output_boundary: >
           Human serve boot, readiness, standing-ingress, failure, and shutdown output has one writer:
           serveLifecyclePresenter. Direct log, slog, reporter, and output writers are non-authoritative and MUST NOT emit
@@ -33737,7 +33748,7 @@ api_specification:
         oneOf:
         - type: object
           additionalProperties: false
-          required: [owner, source_run_id, source_run_status, source_frozen, fork_run_id, fork_point_kind, fork_revision, fork_event_id, fork_run_status, bundle_hash, executed_event_count, data_pins]
+          required: [owner, source_run_id, source_run_status, source_frozen, fork_run_id, fork_point_kind, fork_revision, fork_event_id, fork_run_status, bundle_hash, data_pins]
           properties:
             source_label: {type: string, description: Display-only label derived from exact stored artifact bytes.}
             owner:
@@ -33756,13 +33767,12 @@ api_specification:
               description: Exact source event selected as this fork point.
             fork_run_status: {$ref: '#/components/schemas/RunStatus'}
             bundle_hash: {$ref: '#/components/schemas/BundleHash'}
-            executed_event_count: {type: integer, minimum: 0}
             data_pins:
               type: array
               items: {$ref: '#/components/schemas/ResourcePin'}
         - type: object
           additionalProperties: false
-          required: [owner, source_run_id, source_run_status, source_frozen, fork_run_id, fork_point_kind, fork_revision, fork_run_status, bundle_hash, executed_event_count, data_pins]
+          required: [owner, source_run_id, source_run_status, source_frozen, fork_run_id, fork_point_kind, fork_revision, fork_run_status, bundle_hash, data_pins]
           properties:
             source_label: {type: string, description: Display-only label derived from exact stored artifact bytes.}
             owner:
@@ -33778,7 +33788,6 @@ api_specification:
             fork_revision: {type: integer, minimum: 1}
             fork_run_status: {$ref: '#/components/schemas/RunStatus'}
             bundle_hash: {$ref: '#/components/schemas/BundleHash'}
-            executed_event_count: {type: integer, minimum: 0}
             data_pins:
               type: array
               items: {$ref: '#/components/schemas/ResourcePin'}

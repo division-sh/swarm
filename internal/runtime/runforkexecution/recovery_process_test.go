@@ -257,7 +257,7 @@ func TestSelectedForkCrashProcessHelper(t *testing.T) {
 	if timerCut {
 		eventID = seedIssue642TimerCrashSource(t, ctx, selected, owner, loaded, sourceRun)
 	} else if joinCut {
-		eventID, _ = seedPublishedJoinSource(t, ctx, selected, owner, loaded, sourceRun)
+		eventID, _, _ = seedPublishedJoinSource(t, ctx, selected, owner, loaded, sourceRun)
 	} else if armedJoinCut {
 		eventID = seedArmedArrivalCrashSource(t, ctx, selected, owner, loaded, sourceRun)
 	} else {

@@ -2229,7 +2229,7 @@ func (rt *Runtime) startSystemNodesAndWaitForSubscriptions(ctx context.Context, 
 		nodes = append(nodes, node)
 	}
 	for _, node := range nodes {
-		lease, err := rt.workOccurrence.Begin(startCtx)
+		lease, err := rt.workOccurrence.BeginStanding(startCtx)
 		if err != nil {
 			return len(nodes), fmt.Errorf("admit system node %s: %w", runtimeBackgroundNodeName(node), err)
 		}

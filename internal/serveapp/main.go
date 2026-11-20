@@ -1754,6 +1754,7 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 	)
 	apiV1Handler, err := apiv1.NewHandler(apiv1.Options{
 		AuthTokens:          apiAuth.Tokens,
+		VerboseErrors:       opts.Verbose,
 		ProcessWorkOwner:    processWorkOwner,
 		OperatorPrincipalID: operatorPrincipal.ID,
 		Handlers:            handlers,

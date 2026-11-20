@@ -34,7 +34,7 @@ func runUnpublishedArrivalCrashHelper(t *testing.T, ctx context.Context, selecte
 		t.Fatal(err)
 	}
 	ancestor := uuid.NewString()
-	marker, original := seedPublishedJoinSource(t, ctx, selected, owner, loaded, ancestor)
+	marker, original, _ := seedPublishedJoinSource(t, ctx, selected, owner, loaded, ancestor)
 	selection := runforkadmission.SelectedContractSelection(loaded.Source)
 	// This source is the real unpublished materialized cut, not an ACK before
 	// business dispatch. Its component closes without gaining live authority.

@@ -173,11 +173,21 @@ func AddWorkflowProjectionEmptyFieldsForTest(ctx context.Context, selected any, 
 }
 
 func SetWorkflowTransitionEvidenceWireForTest(ctx context.Context, selected any, run, path string, wire json.RawMessage) (int64, error) {
-	postgres, err := workflowProjectionNativePostgres(selected)
-	if err != nil {
+	if _, err := workflowProjectionNativePostgres(selected); err != nil {
 		return 0, err
 	}
-	return applyWorkflowProjectionShapeFault(ctx, selected, run, path, false, func(ctx context.Context, tx *sql.Tx, run, path string) (int64, error) {
-		return pipelinepersistence.SetWorkflowTransitionEvidenceWireForTest(ctx, tx, postgres, run, path, wire)
-	})
+	if err := validateWorkflowProjectionFaultKey(run, path, false); err != nil {
+		return 0, err
+	}
+	if _, err := workflowProjectionNativePostgres(selected); err != nil {
+		return 0, err
+	}
+	switch owner := selected.(type) {
+	case *PostgresStore:
+		return owner.pipelinePostgresOwner.SetWorkflowTransitionEvidenceWireForTest(ctx, run, path, wire)
+	case *SQLiteRuntimeStore:
+		return owner.pipelineSQLiteOwner.SetWorkflowTransitionEvidenceWireForTest(ctx, run, path, wire)
+	default:
+		return 0, fmt.Errorf("workflow projection fault requires the original native owner")
+	}
 }

@@ -1,8 +1,6 @@
 package runtimepersistence
 
 import (
-	"context"
-	"database/sql"
 	"errors"
 	"reflect"
 	"strings"
@@ -15,7 +13,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
 	"github.com/google/uuid"
 )
 
@@ -76,33 +73,7 @@ func TestProjectedReceiverReceiptCorrespondenceBothStores(t *testing.T) {
 
 func readProjectedReceiverReceiptFixture(t *testing.T, f ordinaryForkPredecessorFixture) pipeline.FlowConstructionReceipt {
 	t.Helper()
-	var receipt pipeline.FlowConstructionReceipt
-	err := runReceiverConstructionObservationFault(f.ctx, f.store, func(ctx context.Context, tx *sql.Tx) error {
-		_, postgres := f.store.(*PostgresStore)
-		header, err := pipelinepersistence.ReadReceiverConstructionHeaderForTest(ctx, tx, f.owner, f.entityID, !postgres)
-		if err != nil {
-			return err
-		}
-		var found bool
-		if store, ok := f.store.(*PostgresStore); ok {
-			run, loadErr := store.runLifecyclePostgresOwner.LoadSnapshotTx(ctx, tx, f.owner.RunID, false)
-			if loadErr != nil {
-				return loadErr
-			}
-			receipt, found, err = store.runForkPostgresOwner.ReadProjectedReceiverConstructionReceiptTx(ctx, tx, run, header)
-		} else {
-			store := f.store.(*SQLiteRuntimeStore)
-			run, loadErr := store.runLifecycleSQLiteOwner.LoadSnapshotTx(ctx, tx, f.owner.RunID)
-			if loadErr != nil {
-				return loadErr
-			}
-			receipt, found, err = store.runForkSQLiteOwner.ReadProjectedReceiverConstructionReceiptTx(ctx, tx, run, header)
-		}
-		if err == nil && !found {
-			return errors.New("fixture lacks its exact independently projected receipt")
-		}
-		return err
-	})
+	receipt, err := ReadProjectedReceiverConstructionReceiptForTest(f.ctx, f.store, f.owner, f.entityID)
 	if err != nil {
 		t.Fatal(err)
 	}

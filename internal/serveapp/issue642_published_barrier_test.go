@@ -109,7 +109,7 @@ func TestIssue642ServedPublishedBarrierReachesFinalConsumerBothStores(t *testing
 			// progress remains independently checked below.
 			if fork.SourceRunID != seed.RunID || fork.ForkRunID == seed.RunID || fork.ForkRunID == "" ||
 				fork.Owner != runfork.RunForkSelectedContractExecutionOwner || fork.ForkEventID != original.event || fork.ForkRunStatus != "live" ||
-				fork.ForkRevision != plan.ForkPoint.Revision || fork.ExecutedEventCount != 1 {
+				fork.ForkRevision != plan.ForkPoint.Revision {
 				t.Fatalf("public fork lost exact activation/cut acknowledgment: %+v", fork)
 			}
 			childID := activityidentity.ForkLineageEventID(fork.ForkRunID, original.event)
@@ -160,7 +160,7 @@ func issue642RequireServedBarrierGrandchild(t *testing.T, rt issue2564ServedFixt
 		"idempotency_key": "served-published-barrier-grandchild"})
 	if grandchild.SourceRunID != parent.ForkRunID || grandchild.ForkRunID == "" || grandchild.ForkRunID == parent.ForkRunID || grandchild.ForkRunID == parent.SourceRunID ||
 		grandchild.ForkEventID != inherited.EventID || grandchild.ForkRevision != plan.ForkPoint.Revision || grandchild.ForkRunStatus != "live" ||
-		grandchild.Owner != runfork.RunForkSelectedContractExecutionOwner || grandchild.ExecutedEventCount != 1 {
+		grandchild.Owner != runfork.RunForkSelectedContractExecutionOwner {
 		t.Fatalf("served grandchild changed the committed join cut or borrowed activation: %+v", grandchild)
 	}
 	publication := issue642WaitBarrierDeliveredEvent(t, phase, rt, activityidentity.ForkLineageEventID(grandchild.ForkRunID, inherited.EventID), producer)

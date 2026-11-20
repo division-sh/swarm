@@ -64,7 +64,7 @@ func TestServedForkRootSourceIngressBothStores(t *testing.T) {
 			params := map[string]any{"source_run_id": started.RunID, "fork_event_id": published.EventID, "idempotency_key": "root-source-fork"}
 			var fork apiv1.RunForkExecutionResult
 			requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &fork)
-			if fork.ExecutedEventCount != 1 || fork.ForkRunStatus != "live" || fork.ForkRunID == "" || fork.SourceFrozen || fork.SourceRunID != started.RunID || fork.ForkEventID != published.EventID {
+			if fork.ForkRunStatus != "live" || fork.ForkRunID == "" || fork.SourceFrozen || fork.SourceRunID != started.RunID || fork.ForkEventID != published.EventID {
 				t.Fatalf("fork result: %+v", fork)
 			}
 			waitServedSelectedForkFrontier(t, rt.ReceiverStateReader, rt.ReadRunDeliveries, fork.ForkRunID, published.EventID)
@@ -98,7 +98,7 @@ func TestServedForkRootSourceIngressBothStores(t *testing.T) {
 			requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", map[string]any{
 				"source_run_id": sibling.ForkRunID, "idempotency_key": "root-latest-state-fork",
 			}, &latest)
-			if latest.ForkPointKind != "state_revision" || latest.ForkEventID != "" || latest.ForkRevision <= 0 || latest.ExecutedEventCount != 0 || latest.ForkRunStatus != "live" || latest.SourceRunStatus != "paused" || latest.SourceFrozen {
+			if latest.ForkPointKind != "state_revision" || latest.ForkEventID != "" || latest.ForkRevision <= 0 || latest.ForkRunStatus != "live" || latest.SourceRunStatus != "paused" || latest.SourceFrozen {
 				t.Fatalf("latest did not use an input-free committed state cut: %+v", latest)
 			}
 			var replayKind, replayRoute string

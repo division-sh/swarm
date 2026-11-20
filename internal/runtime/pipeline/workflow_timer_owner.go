@@ -1082,7 +1082,7 @@ func (l *WorkflowTimerLifecycle) queueCancellation(ctx context.Context, activati
 	return l.queueWakeupReconcile(ctx, activation.Ref)
 }
 
-func (l *WorkflowTimerLifecycle) fireWakeup(ctx context.Context, wakeup WorkflowTimerWakeup) (WorkflowTimerFireOutcome, bool, error) {
+func (l *WorkflowTimerLifecycle) fireWakeup(ctx context.Context, wakeup WorkflowTimerWakeup) (outcome WorkflowTimerFireOutcome, recurrenceCommitted bool, finalErr error) {
 	store := l.store()
 	if store == nil || !store.enabled() {
 		return WorkflowTimerFireTerminal, false, fmt.Errorf("workflow timer lifecycle store is unavailable")
@@ -1097,36 +1097,19 @@ func (l *WorkflowTimerLifecycle) fireWakeup(ctx context.Context, wakeup Workflow
 		return WorkflowTimerFireTerminal, false, err
 	}
 	occurrence := wakeup.Occurrence()
-	hint, found, err := store.loadPersistedWorkflowTimerActivation(ctx, occurrence.Activation.ActivationID)
-	if err != nil {
-		return WorkflowTimerFireRetry, false, err
-	}
-	if !found {
-		return WorkflowTimerFireTerminal, false, nil
-	}
-	if hint.Status != workflowTimerStatusActive {
-		return WorkflowTimerFireTerminal, false, nil
-	}
-	if hint.Ref != occurrence.Activation {
-		return WorkflowTimerFireTerminal, false, fmt.Errorf("workflow timer wakeup does not match the persisted active coordinate")
-	}
-	if !hint.FireAt.Equal(occurrence.DueAt) {
-		return WorkflowTimerFireTerminal, false, nil
-	}
-	if err := l.posture.Admit(hint.ExecutionMode, "workflow timer occurrence preparation"); err != nil {
-		return WorkflowTimerFireRetry, false, err
-	}
-	current, err := l.workflowTimerActivationDeclarationCurrent(ctx, hint)
-	if err != nil {
-		return WorkflowTimerFireRetry, false, err
-	}
-	if !current {
-		if retireErr := l.retireWakeup(occurrence.Activation); retireErr != nil {
-			return WorkflowTimerFireRetry, false, retireErr
-		}
-		return WorkflowTimerFireTerminal, false, nil
+	hint, ready, disposition, err := l.loadCurrentFireWakeup(ctx, store, occurrence)
+	if !ready {
+		return disposition, false, err
 	}
 	ctx = runtimecorrelation.WithRunID(ctx, hint.RunID)
+	if owner, present := worklifetime.OccurrenceFromContext(ctx); present {
+		firing, err := owner.Begin(ctx)
+		if err != nil {
+			return WorkflowTimerFireRetry, false, err
+		}
+		defer func() { finalErr = errors.Join(finalErr, firing.Done()) }()
+		ctx = firing.Context()
+	}
 	firedAt := canonicalWorkflowTimerTime(time.Now())
 	if firedAt.Before(occurrence.DueAt) {
 		return WorkflowTimerFireRetry, false, fmt.Errorf(
@@ -1186,6 +1169,39 @@ func (l *WorkflowTimerLifecycle) fireWakeup(ctx context.Context, wakeup Workflow
 		err = errors.Join(err, dispatchErr)
 	}
 	return WorkflowTimerFireCommitted, committed.Next.Status == workflowTimerStatusActive, err
+}
+
+func (l *WorkflowTimerLifecycle) loadCurrentFireWakeup(ctx context.Context, store *workflowInstanceStore, occurrence timeridentity.WorkflowTimerOccurrenceRef) (WorkflowTimerActivation, bool, WorkflowTimerFireOutcome, error) {
+	hint, found, err := store.loadPersistedWorkflowTimerActivation(ctx, occurrence.Activation.ActivationID)
+	if err != nil {
+		return WorkflowTimerActivation{}, false, WorkflowTimerFireRetry, err
+	}
+	if !found {
+		return WorkflowTimerActivation{}, false, WorkflowTimerFireTerminal, nil
+	}
+	if hint.Status != workflowTimerStatusActive {
+		return WorkflowTimerActivation{}, false, WorkflowTimerFireTerminal, nil
+	}
+	if hint.Ref != occurrence.Activation {
+		return WorkflowTimerActivation{}, false, WorkflowTimerFireTerminal, fmt.Errorf("workflow timer wakeup does not match the persisted active coordinate")
+	}
+	if !hint.FireAt.Equal(occurrence.DueAt) {
+		return WorkflowTimerActivation{}, false, WorkflowTimerFireTerminal, nil
+	}
+	if err := l.posture.Admit(hint.ExecutionMode, "workflow timer occurrence preparation"); err != nil {
+		return WorkflowTimerActivation{}, false, WorkflowTimerFireRetry, err
+	}
+	current, err := l.workflowTimerActivationDeclarationCurrent(ctx, hint)
+	if err != nil {
+		return WorkflowTimerActivation{}, false, WorkflowTimerFireRetry, err
+	}
+	if !current {
+		if retireErr := l.retireWakeup(occurrence.Activation); retireErr != nil {
+			return WorkflowTimerActivation{}, false, WorkflowTimerFireRetry, retireErr
+		}
+		return WorkflowTimerActivation{}, false, WorkflowTimerFireTerminal, nil
+	}
+	return hint, true, WorkflowTimerFireCommitted, nil
 }
 
 func (l *WorkflowTimerLifecycle) AuthorizeAcceptedEvent(ctx context.Context, evt events.Event) (WorkflowTimerActivation, timeridentity.WorkflowTimerOccurrenceRef, bool, error) {

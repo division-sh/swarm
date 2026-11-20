@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 
+	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
+	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
 	"github.com/google/uuid"
 )
 
@@ -29,7 +31,7 @@ type SelectedForkReceiverExecutionProof struct {
 
 // This exact physical witness observes a selected receiver's committed facts.
 // It grants no execution authority and never repairs missing rows.
-func ReadSelectedForkReceiverExecutionProofTx(ctx context.Context, tx *sql.Tx, req SelectedForkReceiverExecutionProofRequest) (SelectedForkReceiverExecutionProof, error) {
+func readSelectedForkReceiverExecutionProofTx(ctx context.Context, tx *sql.Tx, req SelectedForkReceiverExecutionProofRequest) (SelectedForkReceiverExecutionProof, error) {
 	if err := ctx.Err(); err != nil {
 		return SelectedForkReceiverExecutionProof{}, err
 	}
@@ -93,6 +95,32 @@ func ReadSelectedForkReceiverExecutionProofTx(ctx context.Context, tx *sql.Tx, r
 	}
 	if failure.Valid {
 		out.Failure = []byte(failure.String)
+	}
+	return out, nil
+}
+
+func ReadPostgresSelectedForkReceiverExecutionProofForTest(ctx context.Context, backend *postgresbackend.Backend, req SelectedForkReceiverExecutionProofRequest) (SelectedForkReceiverExecutionProof, error) {
+	var out SelectedForkReceiverExecutionProof
+	err := backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		out, err = readSelectedForkReceiverExecutionProofTx(ctx, tx, req)
+		return err
+	})
+	if err != nil {
+		return SelectedForkReceiverExecutionProof{}, err
+	}
+	return out, nil
+}
+
+func ReadSQLiteSelectedForkReceiverExecutionProofForTest(ctx context.Context, backend *sqlitebackend.Backend, req SelectedForkReceiverExecutionProofRequest) (SelectedForkReceiverExecutionProof, error) {
+	var out SelectedForkReceiverExecutionProof
+	err := backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		out, err = readSelectedForkReceiverExecutionProofTx(ctx, tx, req)
+		return err
+	})
+	if err != nil {
+		return SelectedForkReceiverExecutionProof{}, err
 	}
 	return out, nil
 }

@@ -126,8 +126,8 @@ func TestEntityProgressivePresencePublicServeRestartSQLitePostgres(t *testing.T)
 				err = process.rpc.call(ctx, "run.fork", params, &fork)
 				cancel()
 				forkRunID, _ := fork["fork_run_id"].(string)
-				executed, hasCount := fork["executed_event_count"].(float64)
-				if err != nil || forkRunID == "" || forkRunID == runID || fork["fork_event_id"] != done.EventID || !hasCount || executed != 1 {
+				_, hasCount := fork["executed_event_count"]
+				if err != nil || forkRunID == "" || forkRunID == runID || fork["fork_event_id"] != done.EventID || hasCount {
 					t.Fatalf("reconstruct and execute fork: result=%+v err=%v", fork, err)
 				}
 				waitForPresenceEntity(t, process, forkRunID, "done", completed)

@@ -32,7 +32,7 @@ type selectedRuntimeOutcomeProbe struct {
 	SelectedContractReplayPersistence
 	mu                                                   sync.Mutex
 	t                                                    *testing.T
-	prepared                                             *PreparedSelectedFork
+	prepared                                             **PreparedSelectedFork // Tracks the refreshed fixed-cut preparation.
 	issueErr, claimErr, failErr, closeErr, activationErr error
 	materializationErr                                   error
 	sourceErr, discardErr                                error
@@ -233,11 +233,12 @@ func (p *selectedRuntimeOutcomeProbe) ActivateRunForkForSelectedContractExecutio
 		p.t.Fatalf("real activation must succeed before outcome injection: %v", err)
 	}
 	if activation.Activated {
-		p.prepared.bindMu.Lock()
-		if runtime := p.prepared.retainedRuntime; runtime != nil {
+		current := *p.prepared
+		current.bindMu.Lock()
+		if runtime := current.retainedRuntime; runtime != nil {
 			p.diagnostics = runtime.diagnostics
 		}
-		p.prepared.bindMu.Unlock()
+		current.bindMu.Unlock()
 	}
 	return activation, p.activationErr
 }
@@ -374,11 +375,18 @@ func TestSelectedForkRuntimeConsumersSettleReturnedOutcomes(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				probe.prepared = prepared
-				if err := admitSelectedDeploymentRevisionFrontier(prepared.plan, prepared.frontier); err != nil {
-					t.Fatal(err)
+				finishOrchestration, err := owner.beginSelectedOrchestration(prepared)
+				if err != nil {
+					t.Fatal(errors.Join(err, owner.completePreparation(prepared)))
 				}
-				result, returned := executePreparedLiveFork(ctx, request, prepared)
+				finishOrchestration = sync.OnceFunc(finishOrchestration)
+				defer finishOrchestration()
+				probe.prepared = &prepared
+				if err := admitSelectedDeploymentRevisionFrontier(prepared.plan, prepared.frontier); err != nil {
+					t.Fatal(errors.Join(err, owner.completePreparation(prepared)))
+				}
+				result, returned := executePreparedLiveFork(ctx, request, &prepared)
+				finishOrchestration()
 				read := context.WithoutCancel(ctx)
 				snapshot := probe.snapshot()
 				for _, executionID := range snapshot.committedCloses {

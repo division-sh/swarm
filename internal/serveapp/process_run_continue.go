@@ -206,6 +206,11 @@ func (s *processLifecycleSupervisor) finishContinuedRun(lease *worklifetime.Leas
 	stage = "recover_work"
 	recovery := use.Runtime().RunControl.RecoverContinuedRun(use.WorkContext(), runID)
 	err = recovery.Err
+	if err != nil {
+		return
+	}
+	stage = "rearm_clocks"
+	err = use.Runtime().ReconcileContinuedRunWakeups(use.WorkContext(), runID)
 }
 
 // The lifecycle operation lock is held while checking the exact committed

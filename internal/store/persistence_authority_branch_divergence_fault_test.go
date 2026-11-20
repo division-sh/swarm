@@ -18,15 +18,17 @@ import (
 )
 
 // #642/6208640706: exact fixture provenance, never a new raw-authority allowance.
-const branchFaultNative = "internal/store/internal/runtimepersistence/test_selected_branch_divergence_insert_fault.go"
+const branchFaultNative = "internal/store/internal/backend/pipelinepersistence/test_closed_workflow_faults.go"
+const branchFaultAdapter = "internal/store/internal/runtimepersistence/test_selected_branch_divergence_insert_fault.go"
 const branchFaultPublic = "internal/store/storetest/selected_branch_divergence_insert_fault.go"
 const branchFaultCaller = "internal/runtime/runforkexecution/branch_point_component_test.go"
 
 func branchFaultBoundaryErrors(root string, overrides map[string][]byte) []string {
 	var failures []string
 	for path, pin := range map[string]string{
-		branchFaultNative: "3db2e4d00501761141424a1e098ed4bc8a9d00a679fa75fa7ff117ce678a5cd0",
-		branchFaultPublic: "1bf0b17b8657ce82cb7ebfb5b91fe003ed9bff3282e9b239defc4f6611a2ca07",
+		branchFaultNative:  "e19cb86b0a5979ebf1d0ee741f3f43fe44a89d384d940d462bcc22119db05071",
+		branchFaultAdapter: "ea43e44d4d9dfce9f76d44bbadaf3b635f3c7b377215abc406c356e0f868b3a9",
+		branchFaultPublic:  "1bf0b17b8657ce82cb7ebfb5b91fe003ed9bff3282e9b239defc4f6611a2ca07",
 	} {
 		data, err := branchFaultSource(root, path, overrides)
 		if err != nil || fmt.Sprintf("%x", sha256.Sum256(data)) != pin {
@@ -219,20 +221,21 @@ func TestSelectedBranchPointComponentFaultRejectsRawAuthority(t *testing.T) {
 
 func TestSelectedBranchDivergenceFaultBoundaryRejectsHostiles(t *testing.T) {
 	root := persistenceAuthorityRepoRoot(t)
-	native, err := os.ReadFile(filepath.Join(root, branchFaultNative))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, test := range []struct{ name, old, replacement string }{
-		{"target", "run_fork_selected_contract_branch_divergences", "run_fork_operations"},
-		{"operation", "AFTER INSERT", "AFTER UPDATE"},
-		{"error", "typed_receiver_owner_fault", "other_fault"},
-		{"owner", "runWorkflowProjectionFault(ctx, selected", "otherOwner(ctx, selected"},
-		{"raw-return", ") error {", ") *sql.DB {"},
+	for _, test := range []struct{ name, path, old, replacement string }{
+		{"target", branchFaultNative, "run_fork_selected_contract_branch_divergences", "run_fork_operations"},
+		{"operation", branchFaultNative, "AFTER INSERT ON run_fork_selected_contract_branch_divergences", "AFTER UPDATE ON run_fork_selected_contract_branch_divergences"},
+		{"error", branchFaultNative, "typed_receiver_owner_fault", "other_fault"},
+		{"owner", branchFaultAdapter, "owner.pipelinePostgresOwner", "foreign.pipelinePostgresOwner"},
+		{"owner-sqlite", branchFaultAdapter, "owner.pipelineSQLiteOwner", "foreign.pipelineSQLiteOwner"},
+		{"raw-return", branchFaultAdapter, ") error {", ") *sql.DB {"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
+			native, err := os.ReadFile(filepath.Join(root, test.path))
+			if err != nil {
+				t.Fatal(err)
+			}
 			changed := strings.ReplaceAll(string(native), test.old, test.replacement)
-			if changed == string(native) || len(branchFaultBoundaryErrors(root, map[string][]byte{branchFaultNative: []byte(changed)})) == 0 {
+			if changed == string(native) || len(branchFaultBoundaryErrors(root, map[string][]byte{test.path: []byte(changed)})) == 0 {
 				t.Fatal("changed native fixture authority was accepted")
 			}
 		})

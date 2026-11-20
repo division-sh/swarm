@@ -33,7 +33,7 @@ func TestSchedulerStartupRetainsExactWakeupAndSettlesWithheldWork(t *testing.T) 
 				t.Fatal("duplicate preparation succeeded")
 			}
 			wakeup := genericSchedulerProofWakeup(t, time.Now().Add(-time.Second))
-			if err := scheduler.RegisterGenericScheduleWakeup(context.Background(), wakeup); err != nil {
+			if err := scheduler.RegisterGenericScheduleWakeup(context.Background(), wakeup, runtimegenericschedule.OwnerSystem); err != nil {
 				t.Fatal(err)
 			}
 			if owner.ActiveCount() != 1 {
@@ -99,7 +99,7 @@ func TestSchedulerStartupRetainsExactWakeupAndSettlesWithheldWork(t *testing.T) 
 
 func TestSchedulerStartupRejectsAlreadyRegisteredWork(t *testing.T) {
 	scheduler := newGenericSchedulerProof(t, func(context.Context, runtimegenericschedule.Wakeup) {})
-	if err := scheduler.RegisterGenericScheduleWakeup(context.Background(), genericSchedulerProofWakeup(t, time.Now().Add(time.Hour))); err != nil {
+	if err := scheduler.RegisterGenericScheduleWakeup(context.Background(), genericSchedulerProofWakeup(t, time.Now().Add(time.Hour)), runtimegenericschedule.OwnerSystem); err != nil {
 		t.Fatal(err)
 	}
 	if err := scheduler.PrepareStartup(); err == nil {
@@ -134,13 +134,13 @@ func TestSchedulerStartupReleasesCronAndEverySuccessorsThroughSameTaskPath(t *te
 				if wakeup.DueAt().Equal(firstDue) {
 					// The lifecycle re-registers its committed successor, not a
 					// scheduler-owned recurring clock. Replacement joins this task.
-					reconciled <- scheduler.RegisterGenericScheduleWakeup(context.WithoutCancel(ctx), next)
+					reconciled <- scheduler.RegisterGenericScheduleWakeup(context.WithoutCancel(ctx), next, runtimegenericschedule.OwnerSystem)
 				}
 			})
 			if err := scheduler.PrepareStartup(); err != nil {
 				t.Fatal(err)
 			}
-			if err := scheduler.RegisterGenericScheduleWakeup(context.Background(), first); err != nil {
+			if err := scheduler.RegisterGenericScheduleWakeup(context.Background(), first, runtimegenericschedule.OwnerSystem); err != nil {
 				t.Fatal(err)
 			}
 			select {

@@ -573,9 +573,25 @@ func (s *sqlitePipelineObligationStore) ClaimPublication(ctx context.Context, ev
 }
 
 func (s *postgresPipelineObligationStore) ClaimEvent(ctx context.Context, eventID string, purpose runtimepipelineobligation.Purpose) (runtimepipelineobligation.ClaimedWork, error) {
-	claim, err := s.claimPostgresPipelineEvent(ctx, eventID, purpose)
+	if err := s.requireCurrentSchema(); err != nil {
+		return runtimepipelineobligation.ClaimedWork{}, err
+	}
+	runID, err := s.claimPostgresEventRun(ctx, eventID, purpose)
 	if err != nil {
 		return runtimepipelineobligation.ClaimedWork{}, err
+	}
+	done, admitted := s.postgresPipelineClaims().recoveryTransitions.reserve(runID)
+	if !admitted {
+		return runtimepipelineobligation.ClaimedWork{}, runtimepipelineobligation.ErrBusy
+	}
+	claim, err := s.claimPostgresPipelineEvent(ctx, eventID, purpose)
+	if err != nil {
+		done()
+		return runtimepipelineobligation.ClaimedWork{}, err
+	}
+	if err := s.retainRecoveryTransition(claim, done); err != nil {
+		done()
+		return runtimepipelineobligation.ClaimedWork{}, errors.Join(err, s.Release(context.WithoutCancel(ctx), claim))
 	}
 	work, err := s.loadPostgresClaimedPipelineWork(ctx, claim)
 	if err != nil {
@@ -588,9 +604,25 @@ func (s *postgresPipelineObligationStore) ClaimEvent(ctx context.Context, eventI
 }
 
 func (s *sqlitePipelineObligationStore) ClaimEvent(ctx context.Context, eventID string, purpose runtimepipelineobligation.Purpose) (runtimepipelineobligation.ClaimedWork, error) {
-	claim, err := s.claimSQLitePipelineEvent(ctx, eventID, purpose)
+	if err := s.requireCurrentSchema(); err != nil {
+		return runtimepipelineobligation.ClaimedWork{}, err
+	}
+	runID, err := pipelineClaimEventRun(ctx, s.backend, eventID, purpose, false)
 	if err != nil {
 		return runtimepipelineobligation.ClaimedWork{}, err
+	}
+	done, admitted := s.recoveryTransitions.reserve(runID)
+	if !admitted {
+		return runtimepipelineobligation.ClaimedWork{}, runtimepipelineobligation.ErrBusy
+	}
+	claim, err := s.claimSQLitePipelineEvent(ctx, eventID, purpose)
+	if err != nil {
+		done()
+		return runtimepipelineobligation.ClaimedWork{}, err
+	}
+	if err := s.retainRecoveryTransition(claim, done); err != nil {
+		done()
+		return runtimepipelineobligation.ClaimedWork{}, errors.Join(err, s.Release(context.WithoutCancel(ctx), claim))
 	}
 	work, err := s.loadSQLiteClaimedPipelineWork(ctx, claim)
 	if err != nil {
@@ -600,6 +632,48 @@ func (s *sqlitePipelineObligationStore) ClaimEvent(ctx context.Context, eventID 
 		)
 	}
 	return work, nil
+}
+
+func pipelineClaimEventRun(ctx context.Context, q pipelineQueryer, eventID string, purpose runtimepipelineobligation.Purpose, postgres bool) (string, error) {
+	eventID = strings.TrimSpace(eventID)
+	if _, err := uuid.Parse(eventID); err != nil {
+		return "", fmt.Errorf("claim pipeline event: %w", err)
+	}
+	query := `SELECT COALESCE(run_id, '') FROM events WHERE event_id = ?`
+	if postgres {
+		query = `SELECT COALESCE(run_id::text, '') FROM events WHERE event_id = $1::uuid`
+	}
+	if purpose == runtimepipelineobligation.PurposeDecisionRoute {
+		query = `SELECT run_id FROM decision_card_route_obligations WHERE event_id = ? AND status = 'pending'`
+		if postgres {
+			query = `SELECT run_id::text FROM decision_card_route_obligations WHERE event_id = $1::uuid AND status = 'pending'`
+		}
+	}
+	var runID string
+	if err := q.QueryRowContext(ctx, query, eventID).Scan(&runID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", nil
+		}
+		return "", fmt.Errorf("read exact event run for claim: %w", err)
+	}
+	return runID, nil
+}
+
+func (s *PipelinePostgresOwner) claimPostgresEventRun(ctx context.Context, eventID string, purpose runtimepipelineobligation.Purpose) (runID string, finalErr error) {
+	session, release, err := s.reservePostgresPipelineClaimConnection(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer func() { finalErr = errors.Join(finalErr, release()) }()
+	finalErr = postgresbackend.RunAuthorityReadTransaction(ctx, session, func(readCtx context.Context, tx *sql.Tx) error {
+		var readErr error
+		runID, readErr = pipelineClaimEventRun(readCtx, tx, eventID, purpose, true)
+		return readErr
+	})
+	if finalErr != nil {
+		return "", finalErr
+	}
+	return runID, nil
 }
 
 func (s *postgresPipelineObligationStore) OpenScan(ctx context.Context, request runtimepipelineobligation.ScanRequest) (runtimepipelineobligation.Scan, error) {
@@ -1228,28 +1302,25 @@ func (s *PipelinePostgresOwner) claimPostgresPipelineEventInGroup(ctx context.Co
 	if registry == nil {
 		return runtimepipelineobligation.Claim{}, errors.New("PostgreSQL pipeline claim registry is required")
 	}
+	var releaseRun func()
+	if runID, exact := runtimepipelineobligation.PublicationRunFromContext(ctx); exact && runID != "" && purpose == runtimepipelineobligation.PurposePublication {
+		var admitted bool
+		releaseRun, admitted = registry.recoveryTransitions.reservePublication(runID)
+		if !admitted {
+			return runtimepipelineobligation.Claim{}, runtimepipelineobligation.ErrBusy
+		}
+		defer func() {
+			if err != nil {
+				releaseRun()
+			}
+		}()
+	}
 	if registry.testBeforeClaimRegistryLock != nil {
 		registry.testBeforeClaimRegistryLock()
 	}
-	registry.mu.Lock()
-	for token, state := range registry.claims {
-		if state != nil && state.claim.EventID() == eventID {
-			if runtimepipelineobligation.StartupRecoveryDiagnosticsEnabled(ctx) {
-				slog.WarnContext(ctx, "startup pipeline claim held", "backend", "postgres", "event_id", eventID, "requested_purpose", purpose, "held_owner", "local_claim", "held_claim", token, "held_purpose", state.claim.Purpose(), "held_scan", state.scanToken)
-			}
-			registry.mu.Unlock()
-			return runtimepipelineobligation.Claim{}, runtimepipelineobligation.ErrBusy
-		}
+	if err := registry.reservePostgresPipelineClaimAcquisition(ctx, eventID, purpose); err != nil {
+		return runtimepipelineobligation.Claim{}, err
 	}
-	if _, reserving := registry.acquiring[eventID]; reserving {
-		if runtimepipelineobligation.StartupRecoveryDiagnosticsEnabled(ctx) {
-			slog.WarnContext(ctx, "startup pipeline claim held", "backend", "postgres", "event_id", eventID, "requested_purpose", purpose, "held_owner", "claim_acquisition")
-		}
-		registry.mu.Unlock()
-		return runtimepipelineobligation.Claim{}, runtimepipelineobligation.ErrBusy
-	}
-	registry.acquiring[eventID] = struct{}{}
-	registry.mu.Unlock()
 	acquisitionReserved := true
 	defer func() {
 		if acquisitionReserved {
@@ -1331,7 +1402,7 @@ func (s *PipelinePostgresOwner) claimPostgresPipelineEventInGroup(ctx context.Co
 			releaseUnissued(),
 		)
 	}
-	state := &pipelineClaimState{claim: claim, postgresLease: lease}
+	state := &pipelineClaimState{claim: claim, postgresLease: lease, recoveryDone: releaseRun}
 	state.operationMu.group = group
 	releaseCapacity := s.backend.RetainConnectionCapacity()
 	registry.mu.Lock()
@@ -1376,8 +1447,65 @@ func (s *PipelinePostgresOwner) claimPostgresPipelineEventInGroup(ctx context.Co
 	return claim, nil
 }
 
+func (r *postgresPipelineClaimRegistry) reservePostgresPipelineClaimAcquisition(ctx context.Context, eventID string, purpose runtimepipelineobligation.Purpose) error {
+	r.mu.Lock()
+	for token, state := range r.claims {
+		if state != nil && state.claim.EventID() == eventID {
+			if runtimepipelineobligation.StartupRecoveryDiagnosticsEnabled(ctx) {
+				slog.WarnContext(ctx, "startup pipeline claim held", "backend", "postgres", "event_id", eventID, "requested_purpose", purpose, "held_owner", "local_claim", "held_claim", token, "held_purpose", state.claim.Purpose(), "held_scan", state.scanToken)
+			}
+			r.mu.Unlock()
+			return runtimepipelineobligation.ErrBusy
+		}
+	}
+	if _, reserving := r.acquiring[eventID]; reserving {
+		if runtimepipelineobligation.StartupRecoveryDiagnosticsEnabled(ctx) {
+			slog.WarnContext(ctx, "startup pipeline claim held", "backend", "postgres", "event_id", eventID, "requested_purpose", purpose, "held_owner", "claim_acquisition")
+		}
+		r.mu.Unlock()
+		return runtimepipelineobligation.ErrBusy
+	}
+	r.acquiring[eventID] = struct{}{}
+	r.mu.Unlock()
+	return nil
+}
+
 func (s *PipelinePostgresOwner) ClaimPostgresPipelineEventForTest(ctx context.Context, eventID string, purpose runtimepipelineobligation.Purpose) (runtimepipelineobligation.Claim, error) {
 	return s.claimPostgresPipelineEvent(ctx, eventID, purpose)
+}
+
+func (s *postgresPipelineObligationStore) PublicationCommitted(claim runtimepipelineobligation.Claim) error {
+	if claim.Purpose() != runtimepipelineobligation.PurposePublication {
+		return runtimepipelineobligation.ErrWrongClaim
+	}
+	registry := s.postgresPipelineClaims()
+	token, err := registry.issuer.Token(claim)
+	if err != nil {
+		return err
+	}
+	registry.mu.Lock()
+	defer registry.mu.Unlock()
+	if state := registry.claims[token]; state != nil && state.recoveryDone != nil {
+		state.recoveryDone()
+	}
+	return nil
+}
+
+func (s *sqlitePipelineObligationStore) PublicationCommitted(claim runtimepipelineobligation.Claim) error {
+	if claim.Purpose() != runtimepipelineobligation.PurposePublication {
+		return runtimepipelineobligation.ErrWrongClaim
+	}
+	s.pipelineClaimMu.Lock()
+	defer s.pipelineClaimMu.Unlock()
+	issuer, claims := s.pipelineClaimOwner()
+	token, err := issuer.Token(claim)
+	if err != nil {
+		return err
+	}
+	if state := claims[token]; state != nil && state.recoveryDone != nil {
+		state.recoveryDone()
+	}
+	return nil
 }
 
 func (r *postgresPipelineClaimRegistry) retirePostgresPipelineClaim(token string, state *pipelineClaimState) {
@@ -1427,6 +1555,20 @@ func (s *PipelineSQLiteOwner) claimSQLitePipelineEventInGroup(ctx context.Contex
 	}
 	s.mutationMu.Lock()
 	defer s.mutationMu.Unlock()
+	var releaseRun func()
+	if runID, exact := runtimepipelineobligation.PublicationRunFromContext(ctx); exact && runID != "" && purpose == runtimepipelineobligation.PurposePublication {
+		var admitted bool
+		releaseRun, admitted = s.recoveryTransitions.reservePublication(runID)
+		if !admitted {
+			return runtimepipelineobligation.Claim{}, runtimepipelineobligation.ErrBusy
+		}
+	}
+	installed := false
+	defer func() {
+		if !installed && releaseRun != nil {
+			releaseRun()
+		}
+	}()
 	s.pipelineClaimMu.Lock()
 	issuer, claims := s.pipelineClaimOwner()
 	for token, state := range claims {
@@ -1455,9 +1597,10 @@ func (s *PipelineSQLiteOwner) claimSQLitePipelineEventInGroup(ctx context.Contex
 		if tokenErr != nil {
 			err = tokenErr
 		} else {
-			state := &pipelineClaimState{claim: claim}
+			state := &pipelineClaimState{claim: claim, recoveryDone: releaseRun}
 			state.operationMu.group = group
 			claims[token] = state
+			installed = true
 			if runtimepipelineobligation.StartupRecoveryDiagnosticsEnabled(ctx) {
 				slog.InfoContext(ctx, "startup pipeline claim acquired", "backend", "sqlite", "event_id", eventID, "purpose", purpose, "claim_id", token)
 			}
@@ -1991,7 +2134,7 @@ func (s *PipelinePostgresOwner) postgresPipelineCandidatePage(
 				     , route.next_attempt_at
 				     , route.created_at
 				     , e.execution_mode
-				     , COALESCE(e.run_id::text, '')
+				     , route.run_id::text
 				FROM decision_card_route_obligations route
 				JOIN runs run ON run.run_id = route.run_id
 				JOIN events e ON e.event_id = route.event_id
@@ -2120,7 +2263,7 @@ func (s *PipelineSQLiteOwner) sqlitePipelineCandidatePage(
 				     , route.next_attempt_at
 				     , route.created_at
 				     , e.execution_mode
-				     , COALESCE(e.run_id, '')
+				     , route.run_id
 				FROM decision_card_route_obligations route
 				JOIN runs run ON run.run_id = route.run_id
 				JOIN events e ON e.event_id = route.event_id

@@ -60,6 +60,9 @@ func TestForkCommandUsesRunForkRPCAndRenders(t *testing.T) {
 			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
 		}
 	}
+	if strings.Contains(stdout.String(), "executed_event_count") {
+		t.Fatalf("human fork output retained removed count: %s", stdout.String())
+	}
 	if strings.TrimSpace(stderr.String()) != "" {
 		t.Fatalf("stderr = %q, want empty", stderr.String())
 	}
@@ -93,6 +96,9 @@ func TestForkCommandJSONPreservesAPIShape(t *testing.T) {
 	}
 	if decoded["source_run_id"] != sourceRunID || decoded["fork_run_id"] != "33333333-3333-3333-3333-333333333333" || decoded["source_run_status"] != "running" || decoded["source_frozen"] != false || decoded["fork_point_kind"] != "event" || decoded["fork_revision"] != float64(1) {
 		t.Fatalf("json run fork result = %#v", decoded)
+	}
+	if _, present := decoded["executed_event_count"]; present {
+		t.Fatalf("JSON fork output retained removed count: %#v", decoded)
 	}
 	for _, wrapper := range []string{"run", "fork", "run"} {
 		if _, ok := decoded[wrapper]; ok {
@@ -281,18 +287,17 @@ func assertForkRequest(t *testing.T, req jsonRPCRequest, wantParams map[string]a
 
 func validRunForkResult(sourceRunID, bundleHash string) map[string]any {
 	return map[string]any{
-		"owner":                "run.fork.selected_contracts.v1",
-		"source_run_id":        sourceRunID,
-		"source_run_status":    "paused",
-		"source_frozen":        false,
-		"fork_run_id":          "33333333-3333-3333-3333-333333333333",
-		"fork_point_kind":      "event",
-		"fork_revision":        1,
-		"fork_event_id":        "44444444-4444-4444-4444-444444444444",
-		"fork_run_status":      "running",
-		"bundle_hash":          bundleHash,
-		"executed_event_count": 1,
-		"data_pins":            []any{},
+		"owner":             "run.fork.selected_contracts.v1",
+		"source_run_id":     sourceRunID,
+		"source_run_status": "paused",
+		"source_frozen":     false,
+		"fork_run_id":       "33333333-3333-3333-3333-333333333333",
+		"fork_point_kind":   "event",
+		"fork_revision":     1,
+		"fork_event_id":     "44444444-4444-4444-4444-444444444444",
+		"fork_run_status":   "running",
+		"bundle_hash":       bundleHash,
+		"data_pins":         []any{},
 	}
 }
 

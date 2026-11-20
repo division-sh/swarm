@@ -54,13 +54,10 @@ func (rt *Runtime) ReconcileLiveRun(ctx context.Context, runID string) error {
 	if rt == nil || rt.Manager == nil || rt.Bus == nil {
 		return errors.New("live reconciliation requires its ordinary runtime")
 	}
-	grant, err := rt.CurrentStartupGrantEvidence()
+	ctx, err := rt.runWakeupContext(ctx, runID)
 	if err != nil {
 		return err
 	}
-	ctx = startupownership.WithGenerationGrantEvidence(ctx, grant)
-	ctx = rt.authorActivityContext(ctx)
-	ctx = correlation.WithRunID(ctx, runID)
 	if err := rt.Manager.ReconcileLiveRun(ctx, runID); err != nil {
 		return err
 	}
@@ -76,6 +73,37 @@ func (rt *Runtime) ReconcileLiveRun(ctx context.Context, runID string) error {
 	}
 	_, err = rt.Bus.ReleaseRunQueue(ctx, runID, 200)
 	return err
+}
+
+// ReconcileContinuedRunWakeups re-arms the exact durable cursor after a paused
+// run's queued work has been released by its existing Continue owner.
+func (rt *Runtime) ReconcileContinuedRunWakeups(ctx context.Context, runID string) error {
+	if rt == nil {
+		return errors.New("continued run wakeups require their loaded runtime")
+	}
+	ctx, err := rt.runWakeupContext(ctx, runID)
+	if err != nil {
+		return err
+	}
+	if rt.GenericSchedules != nil {
+		if err := rt.GenericSchedules.ReconcileRunWakeups(ctx, runID); err != nil {
+			return err
+		}
+	}
+	if rt.Pipeline != nil {
+		return rt.Pipeline.RestoreWorkflowTimers(ctx)
+	}
+	return nil
+}
+
+func (rt *Runtime) runWakeupContext(ctx context.Context, runID string) (context.Context, error) {
+	grant, err := rt.CurrentStartupGrantEvidence()
+	if err != nil {
+		return nil, err
+	}
+	ctx = startupownership.WithGenerationGrantEvidence(ctx, grant)
+	ctx = rt.authorActivityContext(ctx)
+	return correlation.WithRunID(ctx, runID), nil
 }
 
 // The caller holds the context owner's selection exclusion through reconciliation.

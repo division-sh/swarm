@@ -5,39 +5,12 @@ package runtimepipelinefixture
 
 import (
 	"context"
-	"database/sql"
 )
 
-type txKey struct{}
-type connKey struct{}
 type postCommitKey struct{}
 type rollbackKey struct{}
 
 type OwnerAction func(context.Context)
-
-func WithSQLTx(ctx context.Context, tx *sql.Tx) context.Context {
-	return context.WithValue(ctx, txKey{}, tx)
-}
-
-func SQLTx(ctx context.Context) (*sql.Tx, bool) {
-	if ctx == nil {
-		return nil, false
-	}
-	tx, ok := ctx.Value(txKey{}).(*sql.Tx)
-	return tx, ok && tx != nil
-}
-
-func WithSQLConn(ctx context.Context, conn *sql.Conn) context.Context {
-	return context.WithValue(ctx, connKey{}, conn)
-}
-
-func SQLConn(ctx context.Context) (*sql.Conn, bool) {
-	if ctx == nil {
-		return nil, false
-	}
-	conn, ok := ctx.Value(connKey{}).(*sql.Conn)
-	return conn, ok && conn != nil
-}
 
 func WithPostCommitActions(ctx context.Context, actions *[]OwnerAction) context.Context {
 	return context.WithValue(ctx, postCommitKey{}, actions)

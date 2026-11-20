@@ -77,7 +77,7 @@ func TestSelectedForkPendingInputEvidenceBothStores(t *testing.T) {
 					if executed != 0 {
 						t.Fatal("stale input reached fork delivery")
 					}
-					requirePendingInputStateCount(t, rt, seed.RunID, "ready", 2)
+					requirePendingInputStateCount(t, rt.ReceiverStateReader.ListWorkflowInstances, seed.RunID, "ready", 2)
 					return
 				}
 				switch fault {

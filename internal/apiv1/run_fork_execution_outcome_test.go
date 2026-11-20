@@ -2,6 +2,7 @@ package apiv1
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -44,15 +45,31 @@ func TestSelectedRunForkAdapterPreservesOutcomeAndError(t *testing.T) {
 				t.Fatalf("calls=%d err=%v", calls, err)
 			}
 			if !acknowledged {
-				if result.ForkRunID != "" || result.ForkRunStatus != "" || result.SourceFrozen || result.ExecutedEventCount != 0 {
+				if result.ForkRunID != "" || result.ForkRunStatus != "" || result.SourceFrozen {
 					t.Fatalf("fabricated execution result: %+v", result)
 				}
 				return
 			}
-			if result.Owner != runfork.RunForkSelectedContractExecutionOwner || result.SourceRunID != runForkTestSourceRunID || result.ForkRunID != runForkTestForkRunID || result.ForkEventID != runForkTestEventID || result.ForkRunStatus != "running" || result.SourceRunStatus != "paused" || result.SourceFrozen || result.ExecutedEventCount != 2 || result.BundleHash != runForkTestBundleHash || !result.activationAcknowledged {
+			if result.Owner != runfork.RunForkSelectedContractExecutionOwner || result.SourceRunID != runForkTestSourceRunID || result.ForkRunID != runForkTestForkRunID || result.ForkEventID != runForkTestEventID || result.ForkRunStatus != "running" || result.SourceRunStatus != "paused" || result.SourceFrozen || result.BundleHash != runForkTestBundleHash || !result.activationAcknowledged {
 				t.Fatalf("lost execution result: %+v", result)
 			}
+			requireRunForkPublicCountAbsent(t, result)
 		})
+	}
+}
+
+func requireRunForkPublicCountAbsent(t *testing.T, result RunForkExecutionResult) {
+	t.Helper()
+	raw, err := json.Marshal(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]any
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		t.Fatal(err)
+	}
+	if _, present := fields["executed_event_count"]; present {
+		t.Fatalf("public fork result retained removed count: %s", raw)
 	}
 }
 

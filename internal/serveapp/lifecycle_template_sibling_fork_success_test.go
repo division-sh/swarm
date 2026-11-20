@@ -149,7 +149,7 @@ func TestServedCompiledTransitionTemplateSiblingForkOnBothStores(t *testing.T) {
 			if lifecycleTemplateSnapshot(t, rt.ReceiverStateReader, runID) != frozenSnapshot || !reflect.DeepEqual(postFreeze, readTemplateForkSourceEvidence(t, t.Context(), rt.ReceiverStateReader, cards, runID, siblings)) {
 				t.Fatal("duplicate fork acknowledgment changed validated frozen source evidence")
 			}
-			if fork.ForkRunID == "" || fork.ForkRunID == runID || !reflect.DeepEqual(fork, duplicate) || fork.ExecutedEventCount != 1 ||
+			if fork.ForkRunID == "" || fork.ForkRunID == runID || !reflect.DeepEqual(fork, duplicate) ||
 				fork.ForkRunStatus != "live" || fork.ForkEventID != frontier.EventID || fork.ForkRevision != cut.Revision ||
 				fork.ForkPointKind != string(cut.Kind) || fork.BundleHash != rt.BundleHash || fork.SourceRunID != runID {
 				t.Fatalf("template fork=%#v duplicate=%#v", fork, duplicate)

@@ -107,9 +107,9 @@ func TestSQLiteRunAPIReadSurface_LoadListAndDiagnoseEvidence(t *testing.T) {
 	)); err != nil {
 		t.Fatalf("seed sqlite runtime log: %v", err)
 	}
-	runlifecyclefixture.CorruptSQLiteState(
-		t, ctx, sqliteStore.backend.ConstructionHandle(), older, "completed", now.Add(-30*time.Minute),
-	)
+	if err := CorruptSQLiteRunStateForTest(ctx, sqliteStore, older, "completed", now.Add(-30*time.Minute)); err != nil {
+		t.Fatalf("corrupt SQLite run state %s: %v", older, err)
+	}
 	seedSQLiteEntityStateRows(t, sqliteStore.backend.ConstructionHandle(), ctx, newer, newerEntityA, newerEntityB)
 	seedSQLiteEntityStateRows(t, sqliteStore.backend.ConstructionHandle(), ctx, older, olderEntity)
 	rootEvent := loadSQLiteDeliveryFixtureEvent(t, ctx, sqliteStore.backend.ConstructionHandle(), newerEvent)
