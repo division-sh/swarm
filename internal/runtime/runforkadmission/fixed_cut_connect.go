@@ -185,8 +185,7 @@ func (s fixedCutConnectSelection) constructionChild(source semanticview.Source, 
 	return flowidentity.KeylessChild(source, parent, flowID)
 }
 
-// Walk captured ancestry, canonical keyless descendants, and keyed children
-// independently selected by an earlier edge of this exact occurrence.
+// Walk captured ancestry and children proved by this exact occurrence.
 func fixedCutConnectParent(source semanticview.Source, cut runfork.RunForkPlan, constructors fixedCutConstructionIndex, selected fixedCutConnectSelection, event events.Event, receiver pinrouting.ConnectRoutePlan) (flowidentity.Instance, error) {
 	bundle, found := semanticview.Bundle(source)
 	if !found {
