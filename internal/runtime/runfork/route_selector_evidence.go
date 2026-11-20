@@ -93,6 +93,65 @@ type ConstructedRouteEvidence struct {
 	proof               RunForkSelectedContractDynamicTopologyProof
 	frontierFingerprint string
 	selection           RunForkContractSelection
+	completedRoutes     []string
+}
+
+// BindEagerChildRouteEvidence seals the completed edge checked by the fixed-cut
+// admission owner. The keyed constructor binding is unchanged.
+func (p RunForkPlan) BindEagerChildRouteEvidence(entityID, parentID, eventID string, recipients []RunForkContractFrontierRecipient, routes []events.DeliveryRoute, frontier RunForkContractFrontierAdmission) (ConstructedRouteEvidence, error) {
+	bound, err := p.BindConstructedRouteEvidence(entityID, eventID, recipients, frontier)
+	if err != nil {
+		return ConstructedRouteEvidence{}, err
+	}
+	var parent *RunForkMaterializedEntitySnapshotMetadata
+	for _, entity := range p.Entities {
+		if entity.EntityID == parentID {
+			parent = entity.MaterializationMetadata
+		}
+	}
+	path := bound.proof.FlowInstance
+	observed, err := completedConstructedRouteKeys(path, routes)
+	if err != nil || parent == nil || len(observed) == 0 {
+		return ConstructedRouteEvidence{}, fmt.Errorf("eager child topology lacks exact parent or completed edge: %v", err)
+	}
+	var cutRoutes []events.DeliveryRoute
+	for _, work := range p.PendingWork {
+		if work.EventID == eventID && work.Classification == RunForkPendingClassificationDeliveredCompleted {
+			cutRoutes = append(cutRoutes, work.DeliveryRoute)
+		}
+	}
+	retained, err := completedConstructedRouteKeys(path, cutRoutes)
+	if err != nil || !slices.Equal(observed, retained) {
+		return ConstructedRouteEvidence{}, fmt.Errorf("eager child route differs from the completed fixed-cut edge: %v", err)
+	}
+	raw, err := json.Marshal(struct {
+		Binding string
+		Parent  *RunForkMaterializedEntitySnapshotMetadata
+		Routes  []string
+	}{bound.proof.FixedCutEvidenceFingerprint, parent, retained})
+	if err != nil {
+		return ConstructedRouteEvidence{}, err
+	}
+	digest := sha256.Sum256(raw)
+	bound.proof.FixedCutEvidenceFingerprint = hex.EncodeToString(digest[:])
+	bound.completedRoutes = retained
+	return bound, nil
+}
+
+func completedConstructedRouteKeys(path string, routes []events.DeliveryRoute) ([]string, error) {
+	var keys []string
+	for _, route := range routes {
+		if route.Target.Route().FlowInstance != path {
+			continue
+		}
+		id, err := route.Identity()
+		if err != nil {
+			return nil, err
+		}
+		keys = append(keys, events.EncodeDeliveryRouteIdentity(id))
+	}
+	slices.Sort(keys)
+	return keys, nil
 }
 
 func (p RunForkPlan) BindConstructedRouteEvidence(entityID, eventID string, recipients []RunForkContractFrontierRecipient, frontier RunForkContractFrontierAdmission) (ConstructedRouteEvidence, error) {
@@ -198,6 +257,12 @@ func (e ConstructedRouteEvidence) ProofFor(instance string, admission RunForkSel
 		}
 		if !slices.Equal(left, right) {
 			return RunForkSelectedContractDynamicTopologyProof{}, false, fmt.Errorf("constructed route recipients changed after selector admission")
+		}
+		if len(e.completedRoutes) != 0 {
+			routes, err := completedConstructedRouteKeys(instance, event.HistoricalDeliveryRoutes)
+			if err != nil || !slices.Equal(routes, e.completedRoutes) {
+				return RunForkSelectedContractDynamicTopologyProof{}, false, fmt.Errorf("eager child completed routes changed after selector admission: %v", err)
+			}
 		}
 		proof.SourceEventIDs = slices.Clone(proof.SourceEventIDs)
 		proof.EventNames = slices.Clone(proof.EventNames)

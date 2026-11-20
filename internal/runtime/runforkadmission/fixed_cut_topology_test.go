@@ -398,6 +398,116 @@ func TestT17FixedCutStaticChildConnectUsesExactCapturedParent(t *testing.T) {
 	t.Fatal("static completed source lost its selected route evidence")
 }
 
+func TestT17CompletedKeylessChildTopology(t *testing.T) {
+	for _, name := range []string{"original", "retained", "swapped_parent", "missing_claim", "altered_event", "altered_recipient", "altered_delivery"} {
+		t.Run(name, func(t *testing.T) {
+			source, plan, selectors := t17FixedCutTopologyFixture(t)
+			plan, selectors = t17WithCompletedKeylessChild(t, source, plan, selectors, name)
+			if name == "retained" {
+				plan, _ = t17ProjectHistoricalCut(t, source, plan, selectors)
+			}
+			child := plan.Entities[4].MaterializationMetadata.FlowInstance
+			idle := plan.Entities[7].MaterializationMetadata.FlowInstance
+			eventID := plan.PendingWork[len(plan.PendingWork)-1].EventID
+			frontier, err := runforkadmission.AdmitContractFrontier(runforkadmission.ContractFrontierRequest{Plan: plan, Source: source})
+			if err != nil {
+				t.Fatal(err)
+			}
+			routes, err := runforkadmission.AdmitSelectedContractRouteHistory(runforkadmission.SelectedContractRouteHistoryRequest{Plan: plan, Source: source, FrontierAdmission: frontier})
+			if err != nil {
+				t.Fatal(err)
+			}
+			// An idle sibling is in the construction tree but not in the proof census.
+			for _, path := range routes.DynamicFlowInstances {
+				if path == idle && name != "swapped_parent" {
+					t.Fatal("idle constructor invented a history obligation")
+				}
+			}
+			for i := range routes.SelectedRouteEvents {
+				event := &routes.SelectedRouteEvents[i]
+				if event.SourceEventID != eventID {
+					continue
+				}
+				switch name {
+				case "altered_event":
+					event.SourceEventID = uuid.NewString()
+				case "altered_recipient":
+					event.DerivedRecipients = nil
+				case "altered_delivery":
+					event.HistoricalDeliveryRoutes = nil
+				}
+			}
+			topology, err := runforkexecution.BuildSelectedContractRouteTopology(runforkexecution.SelectedContractRouteTopologyRequest{Admission: frontier, RouteAdmission: routes})
+			switch name {
+			case "swapped_parent", "missing_claim":
+				if err != nil || topology.DynamicTopologySupported {
+					t.Fatalf("unproven child bypassed proof count: dynamic=%t err=%v", topology.DynamicTopologySupported, err)
+				}
+				return
+			case "altered_event", "altered_recipient", "altered_delivery":
+				if err == nil {
+					t.Fatal("altered bound history was accepted")
+				}
+				return
+			}
+			if err != nil || !topology.DynamicTopologySupported || len(topology.DynamicTopologyProofs) != 5 {
+				t.Fatalf("complete eager-child history was not proved: %+v / %v", topology, err)
+			}
+			for _, proof := range topology.DynamicTopologyProofs {
+				if proof.FlowInstance == child && len(proof.SourceEventIDs) == 1 && proof.SourceEventIDs[0] == eventID && proof.FixedCutEvidenceFingerprint != "" {
+					return
+				}
+			}
+			t.Fatalf("missing completed-event binding for %s", child)
+		})
+	}
+}
+
+func t17WithCompletedKeylessChild(t *testing.T, source semanticview.Source, plan runfork.RunForkPlan, selectors []events.Event, name string) (runfork.RunForkPlan, []events.Event) {
+	t.Helper()
+	sink, child := plan.Entities[3], plan.Entities[4]
+	sinkMeta, childMeta := sink.MaterializationMetadata, child.MaterializationMetadata
+	event := t17SelectorEvent(t, source, plan.SourceRunID, uuid.NewString(), sinkMeta.FlowInstance+"/work.completed", sinkMeta.FlowTemplate, "work.completed",
+		eventtest.ConcreteTemplateRoutingSource(sinkMeta.FlowTemplate, sinkMeta.FlowInstance, sink.EntityID), []byte(`{"result":"left"}`))
+	sourceEvent, err := pinrouting.AdmitSourceEvent(event.Type(), event.RoutingSource())
+	if err != nil {
+		t.Fatal(err)
+	}
+	edges := pinrouting.CompileConnectGraph(source).MatchingSourceEvent(sourceEvent)
+	if len(edges) != 1 {
+		t.Fatalf("expected one selected completed edge, got %d", len(edges))
+	}
+	if name == "swapped_parent" {
+		child = plan.Entities[7]
+		childMeta = child.MaterializationMetadata
+	}
+	target := edges[0].ReceiverRoute(childMeta.FlowInstance, child.EntityID)
+	node := identitytest.FlowNode(t, childMeta.FlowTemplate, "collector")
+	recipient := events.MustNodeDeliveryRecipient(node)
+	route := events.DeliveryRoute{Recipient: recipient, Target: events.MustExistingEntityTarget(target)}
+	if name != "missing_claim" {
+		route.ConnectClaim, err = pinrouting.ConnectExecutionClaim(edges[0], pinrouting.ConnectDeliveryRoute{
+			Recipient: recipient, Target: target, Handler: pinrouting.MustConnectReceiverHandler(node),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	plan.PendingWork = append(plan.PendingWork, runfork.RunForkPendingWork{EventID: event.ID(), EventName: string(event.Type()), RoutingSource: event.RoutingSource(),
+		FlowInstance: target.FlowInstance, DeliveryRoute: route, Classification: runfork.RunForkPendingClassificationDeliveredCompleted})
+	// The existing fixture projection uses the last selector as the frontier.
+	selectors = append(append(selectors[:len(selectors)-1:len(selectors)-1], event), selectors[len(selectors)-1])
+	ids := make([]string, 0, len(selectors))
+	for _, selector := range selectors {
+		ids = append(ids, selector.ID())
+	}
+	plan, err = plan.WithHistoricalEvents(plan.ForkPoint.Revision, ids).WithHistoricalRouteSelectors(plan.ForkPoint.Revision, selectors)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return plan, selectors
+}
+
 func t17FixedCutTopologyFixture(t *testing.T) (semanticview.Source, runfork.RunForkPlan, []events.Event) {
 	t.Helper()
 	repo := canonicalrouting.RepoRoot(t)

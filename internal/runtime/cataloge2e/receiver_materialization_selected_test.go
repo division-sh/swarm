@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
@@ -28,7 +29,7 @@ func TestReceiverMaterializationSelectedForkExecutionBothStores(t *testing.T) {
 func proveNestedAuthoredSelectorFork(t *testing.T) {
 	for _, backend := range []catalogRuntimeBackend{catalogBackendSQLite, catalogBackendPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
-			root := canonicalrouting.CopyNestedSelectorFork(t)
+			root := canonicalrouting.CopyNestedEventSchema(t)
 			h := newLiveForkCatalogHarness(t, root, backend)
 			ctx := worklifetime.WithOccurrence(catalogRunContext(h, catalogRuntimeRunID), h.rt.WorkOccurrence())
 			var selected interface {
@@ -116,6 +117,30 @@ func proveNestedAuthoredSelectorFork(t *testing.T) {
 			if err != nil || !found || entity.Fields["cross_count"] != int64(0) {
 				t.Fatalf("C53 fixed-cut target: %+v found=%t err=%v", entity, found, err)
 			}
+			type auditAtCut struct {
+				identity flowidentity.Instance
+				state    runfork.RunForkEntityState
+			}
+			audits := make([]auditAtCut, 0, len(accounts))
+			for _, key := range []string{"source", "target"} {
+				parent := accounts[key]
+				path := parent.FlowInstance + "/audit"
+				identity, state, found, err := runforkadmission.FixedConstructionForRoute(loaded.Source, plan, flowidentity.StoredRoute("account/audit", flowidentity.LogicalInstanceID(path), path))
+				if err != nil || !found || state.CurrentState == nil || identity.ParentRoute.EntityID != parent.EntityID {
+					t.Fatalf("%s audit construction at cut: %+v found=%t err=%v", key, identity, found, err)
+				}
+				completed := 0
+				for _, work := range plan.PendingWork {
+					if work.DeliveryRoute.Target.Route().EntityID == identity.EntityID && strings.HasSuffix(work.EventName, "/ticket.done") &&
+						work.Classification == runfork.RunForkPendingClassificationDeliveredCompleted {
+						completed++
+					}
+				}
+				if completed != 1 {
+					t.Fatalf("%s audit must have its original completed ticket delivery at cut, got %d", key, completed)
+				}
+				audits = append(audits, auditAtCut{identity: identity, state: state})
+			}
 			before, err := storetest.ReadSelectedForkSourceDomain(ctx, selected, catalogRuntimeRunID)
 			if err != nil {
 				t.Fatal(err)
@@ -127,6 +152,9 @@ func proveNestedAuthoredSelectorFork(t *testing.T) {
 			if err != nil || !result.Activation.Activated || result.ExecutedEventCount < 1 {
 				t.Fatalf("real stored-selector fork: %+v err=%v", result, err)
 			}
+			if result.ExecutedEventCount != 1 || len(result.ForkEvents) != 1 || result.ForkEvents[0].SourceEventID != cut {
+				t.Fatalf("only the ticket.cross frontier may execute, got %+v", result.ForkEvents)
+			}
 			child := result.Materialization.ForkRunID
 			target, err := runfork.ProjectCapturedConstructionIdentity(catalogRuntimeRunID, child, captured)
 			if err != nil {
@@ -134,6 +162,7 @@ func proveNestedAuthoredSelectorFork(t *testing.T) {
 			}
 			wait, cancel := context.WithTimeout(ctx, catalogRuntimePublishTimeout)
 			defer cancel()
+			var instancesAfter []pipeline.WorkflowInstance
 			for {
 				instances, err := h.workflow.ListWorkflowInstances(wait, child)
 				if err != nil {
@@ -144,12 +173,34 @@ func proveNestedAuthoredSelectorFork(t *testing.T) {
 					completed = completed || instance.StorageRef == target.InstancePath && instance.Fields["cross_count"] == int64(1)
 				}
 				if completed {
+					instancesAfter = instances
 					break
 				}
 				select {
 				case <-wait.Done():
 					t.Fatalf("fork did not execute exact captured target: %+v", instances)
 				case <-time.After(10 * time.Millisecond):
+				}
+			}
+			for _, audit := range audits {
+				projected, err := runfork.ProjectCapturedConstructionIdentity(catalogRuntimeRunID, child, audit.identity)
+				if err != nil {
+					t.Fatal(err)
+				}
+				copies := 0
+				for _, instance := range instancesAfter {
+					if instance.StorageRef != projected.InstancePath {
+						continue
+					}
+					copies++
+					if instance.EntityID != projected.EntityID || instance.WorkflowName != projected.TemplateID ||
+						instance.ParentFlowInstance != projected.ParentRoute.FlowInstance || instance.ParentEntityID != projected.ParentEntityID ||
+						instance.InstanceKey != "" || instance.CurrentState != *audit.state.CurrentState || !reflect.DeepEqual(instance.Fields, audit.state.Fields) {
+						t.Fatalf("audit clone differs from fixed-cut identity/state: %+v", instance)
+					}
+				}
+				if copies != 1 {
+					t.Fatalf("audit %s has %d copies, want one", projected.InstancePath, copies)
 				}
 			}
 			after, err := storetest.ReadSelectedForkSourceDomain(ctx, selected, catalogRuntimeRunID)
