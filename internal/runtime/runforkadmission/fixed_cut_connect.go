@@ -145,8 +145,7 @@ func fixedCutConnectTargets(source semanticview.Source, cut runfork.RunForkPlan,
 type fixedCutConnectSelection map[string][]flowidentity.Instance
 
 func (s fixedCutConnectSelection) remember(event events.Event, plan pinrouting.ConnectRoutePlan, instance flowidentity.Instance, target events.RouteIdentity) {
-	// Provider authorization is invocation-local; a captured selector cannot
-	// authorize a provider edge to supply a new construction dependency.
+	// A captured selector cannot supply invocation-local provider authorization.
 	if plan.ProviderOutputAuthorization() != nil {
 		return
 	}
