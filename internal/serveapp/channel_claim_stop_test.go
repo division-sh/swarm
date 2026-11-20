@@ -18,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	"github.com/division-sh/swarm/internal/runtime"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
@@ -136,7 +137,11 @@ func TestGracefulStopJoinsAdmittedDeploymentWebhookClaimBothStores(t *testing.T)
 					if err != nil {
 						return providertriggers.Delivery{}, err
 					}
-					return plan.Accept(providertriggers.Request{Provider: "telegram", Method: http.MethodPost, Body: body, Payload: payload, ContentType: "application/json",
+					var decoded any
+					if err := canonicaljson.DecodePreservingNumberLexemes(body, &decoded); err != nil {
+						return providertriggers.Delivery{}, err
+					}
+					return plan.Accept(providertriggers.Request{Provider: "telegram", Method: http.MethodPost, Body: body, Payload: decoded, ContentType: "application/json",
 						Headers: http.Header{"X-Telegram-Bot-Api-Secret-Token": {"fixture-secret"}}, Target: providertriggers.Target{WebhookSecret: "fixture-secret"}})
 				}, nil, func() bool { return ctx.Err() == nil })
 				if !consumed && err == nil {
