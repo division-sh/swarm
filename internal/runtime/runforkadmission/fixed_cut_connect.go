@@ -200,6 +200,15 @@ func fixedCutConstructedRouteEvidence(source semanticview.Source, cut runfork.Ru
 		eventsByID[event.SourceEventID] = event
 	}
 	for _, path := range dynamic {
+		recipientsAtPath := func(event runfork.RunForkSelectedContractRouteEvent) []runfork.RunForkContractFrontierRecipient {
+			var recipients []runfork.RunForkContractFrontierRecipient
+			for _, recipient := range event.DerivedRecipients {
+				if recipient.Path == path {
+					recipients = append(recipients, recipient)
+				}
+			}
+			return recipients
+		}
 		constructor, found := constructors.byPath[path]
 		if !found {
 			return nil, fmt.Errorf("fixed topology lost captured constructor")
@@ -210,7 +219,7 @@ func fixedCutConstructedRouteEvidence(source semanticview.Source, cut runfork.Ru
 			return nil, err
 		}
 		if evidence.Original.CreatingInput.Input == "" {
-			bound, found, err := fixedCutEagerChildRouteEvidence(source, cut, constructors, graph, frontier, constructor, history)
+			bound, found, err := fixedCutEagerChildRouteEvidence(source, cut, constructors, graph, frontier, constructor, history, recipientsAtPath)
 			if err != nil {
 				return nil, err
 			}
@@ -229,12 +238,7 @@ func fixedCutConstructedRouteEvidence(source semanticview.Source, cut runfork.Ru
 		if !found || event.Disposition == runfork.RunForkSelectedContractDispositionFailClosed {
 			continue
 		}
-		var recipients []runfork.RunForkContractFrontierRecipient
-		for _, recipient := range event.DerivedRecipients {
-			if recipient.Path == path {
-				recipients = append(recipients, recipient)
-			}
-		}
+		recipients := recipientsAtPath(event)
 		if len(recipients) == 0 {
 			continue
 		}
@@ -249,7 +253,7 @@ func fixedCutConstructedRouteEvidence(source semanticview.Source, cut runfork.Ru
 
 // A keyless child shares the parent's construction occurrence, not its input.
 // Only a completed edge to that exact child can supply its historical proof.
-func fixedCutEagerChildRouteEvidence(source semanticview.Source, cut runfork.RunForkPlan, constructors fixedCutConstructionIndex, graph pinrouting.CompiledConnectGraph, frontier runfork.RunForkContractFrontierAdmission, child fixedCutConstructor, history []runfork.RunForkSelectedContractRouteEvent) (runfork.ConstructedRouteEvidence, bool, error) {
+func fixedCutEagerChildRouteEvidence(source semanticview.Source, cut runfork.RunForkPlan, constructors fixedCutConstructionIndex, graph pinrouting.CompiledConnectGraph, frontier runfork.RunForkContractFrontierAdmission, child fixedCutConstructor, history []runfork.RunForkSelectedContractRouteEvent, recipientsAtPath func(runfork.RunForkSelectedContractRouteEvent) []runfork.RunForkContractFrontierRecipient) (runfork.ConstructedRouteEvidence, bool, error) {
 	var absent runfork.ConstructedRouteEvidence
 	parent, found := constructors.byPath[child.instance.ParentRoute.FlowInstance]
 	if !found || child.evidence.InstanceKey != "" ||
@@ -266,11 +270,12 @@ func fixedCutEagerChildRouteEvidence(source semanticview.Source, cut runfork.Run
 		if event.Disposition != runfork.RunForkSelectedContractDispositionEvidenceOnly {
 			continue
 		}
-		recipients, routes, err := fixedCutEagerChildEdge(source, cut, constructors, graph, target, event)
+		recipients := recipientsAtPath(event)
+		routes, err := fixedCutEagerChildEdge(source, cut, constructors, graph, target, event, recipients)
 		if err != nil {
 			return absent, false, err
 		}
-		if len(recipients) != 0 {
+		if len(routes) != 0 {
 			bound, err := cut.BindEagerChildRouteEvidence(expected.EntityID, parent.instance.EntityID, event.SourceEventID, recipients, routes, frontier)
 			return bound, err == nil, err
 		}
@@ -278,29 +283,23 @@ func fixedCutEagerChildRouteEvidence(source semanticview.Source, cut runfork.Run
 	return absent, false, nil
 }
 
-func fixedCutEagerChildEdge(source semanticview.Source, cut runfork.RunForkPlan, constructors fixedCutConstructionIndex, graph pinrouting.CompiledConnectGraph, target events.RouteIdentity, history runfork.RunForkSelectedContractRouteEvent) ([]runfork.RunForkContractFrontierRecipient, []events.DeliveryRoute, error) {
-	var recipients []runfork.RunForkContractFrontierRecipient
+func fixedCutEagerChildEdge(source semanticview.Source, cut runfork.RunForkPlan, constructors fixedCutConstructionIndex, graph pinrouting.CompiledConnectGraph, target events.RouteIdentity, history runfork.RunForkSelectedContractRouteEvent, recipients []runfork.RunForkContractFrontierRecipient) ([]events.DeliveryRoute, error) {
 	var retained []events.DeliveryRoute
-	for _, recipient := range history.DerivedRecipients {
-		if recipient.Path == target.FlowInstance {
-			recipients = append(recipients, recipient)
-		}
-	}
 	for _, route := range history.HistoricalDeliveryRoutes {
 		if route.Target.Route() == target {
 			retained = append(retained, route)
 		}
 	}
 	if len(recipients) == 0 || len(recipients) != len(retained) {
-		return nil, nil, nil
+		return nil, nil
 	}
 	selector, found, err := cut.HistoricalRouteSelector(history.SourceEventID)
 	if err != nil || !found {
-		return nil, nil, err
+		return nil, err
 	}
 	sourceEvent, err := pinrouting.AdmitSourceEvent(selector.Type(), selector.RoutingSource())
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	edges := make(map[events.ConnectPlanIdentity]pinrouting.ConnectRoutePlan)
 	for _, edge := range graph.MatchingSourceEvent(sourceEvent) {
@@ -309,24 +308,24 @@ func fixedCutEagerChildEdge(source semanticview.Source, cut runfork.RunForkPlan,
 		}
 		targets, matched, err := contractFrontierPlanTargets(source, cut, constructors, selector.ID(), selector.RoutingSource(), edge, nil)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		if !matched || len(targets) != 1 || targets[0] != target {
 			continue
 		}
 		id, err := pinrouting.ConnectPlanIdentity(edge)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		edges[id] = edge
 	}
-	if !matchFixedCutEagerChildDeliveries(recipients, retained, edges) {
-		return nil, nil, nil
+	if !matchFixedCutEagerChildDeliveries(cut.SourceRunID, recipients, retained, edges) {
+		return nil, nil
 	}
-	return recipients, retained, nil
+	return retained, nil
 }
 
-func matchFixedCutEagerChildDeliveries(recipients []runfork.RunForkContractFrontierRecipient, routes []events.DeliveryRoute, edges map[events.ConnectPlanIdentity]pinrouting.ConnectRoutePlan) bool {
+func matchFixedCutEagerChildDeliveries(sourceRun string, recipients []runfork.RunForkContractFrontierRecipient, routes []events.DeliveryRoute, edges map[events.ConnectPlanIdentity]pinrouting.ConnectRoutePlan) bool {
 	used := make([]bool, len(routes))
 	for _, recipient := range recipients {
 		id, pin, connect := recipient.Connect()
@@ -336,11 +335,7 @@ func matchFixedCutEagerChildDeliveries(recipients []runfork.RunForkContractFront
 		}
 		matched := false
 		for i, route := range routes {
-			if used[i] || route.Recipient != recipient.Recipient {
-				continue
-			}
-			node, event, ok := route.ConnectClaim.NodeHandlerOwner()
-			if !ok || node != recipient.HandlerNode() || event != recipient.HandlerEvent() {
+			if used[i] || !route.Recipient.IsNode() || !matchesHistoricalRecipient(sourceRun, route, recipient) {
 				continue
 			}
 			claim, err := edge.ClaimForRetainedDelivery(route)
