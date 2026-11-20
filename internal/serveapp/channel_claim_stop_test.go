@@ -9,6 +9,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -47,6 +49,12 @@ func TestGracefulStopRefusesOnlyMatchedDeploymentWebhookClaimBothStores(t *testi
 				opts.TestRuntimeContextsReadyHook = func(m *runtime.RuntimeContextManager) { managers <- m }
 			})
 			h.opts.SourceRoot = writeStandingTelegramServeFixture(t, h.telegram.URL)
+			nodesPath := filepath.Join(h.opts.SourceRoot, "telegram-chat", "nodes.yaml")
+			nodes, err := os.ReadFile(nodesPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			writeStandingCandidateFile(t, nodesPath, string(nodes)+"\nstop-input-receiver:\n  inbound.telegram.text_message:\n    guard: true\n")
 			var stores *selectedStoreOwner
 			project := projectRuntimePersistenceForServe
 			projectRuntimePersistenceForServe = func(owner *selectedStoreOwner) serveRuntimePersistence {
@@ -175,7 +183,7 @@ func TestGracefulStopRefusesOnlyMatchedDeploymentWebhookClaimBothStores(t *testi
 			if use != nil || !errors.Is(err, worklifetime.ErrAdmissionFenced) {
 				t.Errorf("retained observation reopened ordinary run admission: %v", err)
 			}
-			foreignFact, err := runtimecorrelation.NewSourceArtifactFact(strings.Repeat("0", 64))
+			foreignFact, err := runtimecorrelation.NewSourceArtifactFact("bundle-v2:sha256:" + strings.Repeat("0", 64))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -254,10 +262,15 @@ func TestGracefulStopJoinsAdmittedDeploymentWebhookClaimBothStores(t *testing.T)
 			var once sync.Once
 			resume := func() { once.Do(func() { close(release) }) }
 			defer resume()
+			var runtimeOptions deploymentRuntimeOptions
 			factory := func(ctx context.Context, opts cliapp.ChannelRegistrationOptions) (cliapp.ChannelRegistrationSession, error) {
 				secrets = opts.Credentials
 				opts.Identities = heldStopClaimStore{opts.Identities, entered, release}
-				return OpenChannelRegistration(ctx, opts)
+				session, err := OpenChannelRegistration(ctx, opts)
+				if err == nil {
+					configureDeploymentRuntimeSession(session, runtimeOptions)
+				}
+				return session, err
 			}
 			client, err := cliapp.UseDeploymentChannelControl(ctx, root, h.opts.ConfigPath, directory, "telegram", stores, process, factory)
 			if err != nil {
@@ -285,7 +298,8 @@ func TestGracefulStopJoinsAdmittedDeploymentWebhookClaimBothStores(t *testing.T)
 			s.runtimeContexts, s.processCapability = manager, capability
 			s.shutdownOptions = runtime.ShutdownOptions{Grace: 5 * time.Second}
 			// Keep the original factory and handler. Only the injected native store waits.
-			handler := deploymentPendingClaimHandler(root, h.opts.ConfigPath, directory, stores, process, capability, factory, deploymentRuntimeOptions{manager: manager})
+			runtimeOptions = deploymentRuntimeOptions{manager: manager, beginWebhookClaim: s.beginWebhookClaim}
+			handler := deploymentPendingClaimHandler(root, h.opts.ConfigPath, directory, stores, process, capability, factory, runtimeOptions)
 			claimed := make(chan error, 1)
 			go func() {
 				payload := map[string]any{"update_id": 91, "message": map[string]any{"message_id": 91, "text": child.Challenge,

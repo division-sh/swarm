@@ -22,12 +22,13 @@ import (
 type serveSessionBootstrapRuntime func(context.Context, channelonboarding.Candidate) (context.Context, *sessionprovider.RuntimeIncomingOptions, processbinding.Binding, func() error, error)
 
 type deploymentRuntimeOptions struct {
-	output     io.Writer
-	deployment *serveDeploymentTransport
-	manager    *runtime.RuntimeContextManager
-	sessions   serveSessionBootstrapOwner
-	refresh    func(context.Context, channelonboarding.AccountReference) error
-	ingress    *publicingress.ReadinessOwner
+	beginWebhookClaim func(context.Context) (context.Context, func(), bool)
+	output            io.Writer
+	deployment        *serveDeploymentTransport
+	manager           *runtime.RuntimeContextManager
+	sessions          serveSessionBootstrapOwner
+	refresh           func(context.Context, channelonboarding.AccountReference) error
+	ingress           *publicingress.ReadinessOwner
 }
 
 type serveSessionBootstrapOwner interface {

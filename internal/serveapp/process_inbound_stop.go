@@ -25,6 +25,15 @@ func (s *processLifecycleSupervisor) prepareInboundStop() context.Context {
 	return ctx
 }
 
+func (s *processLifecycleSupervisor) beginWebhookClaim(ctx context.Context) (context.Context, func(), bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.stopping || s.runtimeContexts == nil {
+		return ctx, nil, false
+	}
+	return s.runtimeContexts.BeginPendingChannelInputSelection(ctx)
+}
+
 type serveInboundStop struct {
 	supervisor *processLifecycleSupervisor
 	contexts   *runtime.InboundRuntimeStop
