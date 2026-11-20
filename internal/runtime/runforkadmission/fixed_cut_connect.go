@@ -178,6 +178,13 @@ func (s fixedCutConnectSelection) keyedChild(parent flowidentity.Instance, flowI
 	return child, nil
 }
 
+func (s fixedCutConnectSelection) constructionChild(source semanticview.Source, parent flowidentity.Instance, flowID string) (flowidentity.Instance, error) {
+	if schema, known := source.FlowSchemaByID(flowID); known && !schema.Instance.Empty() {
+		return s.keyedChild(parent, flowID)
+	}
+	return flowidentity.KeylessChild(source, parent, flowID)
+}
+
 // Walk captured ancestry, canonical keyless descendants, and keyed children
 // independently selected by an earlier edge of this exact occurrence.
 func fixedCutConnectParent(source semanticview.Source, cut runfork.RunForkPlan, constructors fixedCutConstructionIndex, selected fixedCutConnectSelection, event events.Event, receiver pinrouting.ConnectRoutePlan) (flowidentity.Instance, error) {
@@ -221,15 +228,7 @@ func fixedCutConnectParent(source semanticview.Source, cut runfork.RunForkPlan, 
 		descendants = append(descendants, cursor.Paths.FlowPath)
 	}
 	for i := len(descendants) - 1; i >= 0; i-- {
-		if schema, known := source.FlowSchemaByID(descendants[i]); known && !schema.Instance.Empty() {
-			child, err := selected.keyedChild(owner, descendants[i])
-			if err != nil {
-				return flowidentity.Instance{}, err
-			}
-			owner = child
-			continue
-		}
-		child, err := flowidentity.KeylessChild(source, owner, descendants[i])
+		child, err := selected.constructionChild(source, owner, descendants[i])
 		if err != nil {
 			return flowidentity.Instance{}, err
 		}
