@@ -41,10 +41,14 @@ func TestComputeModuleSecretInputNativeBoundaryBothStores(t *testing.T) {
 			}
 			published := map[string]string{}
 			publish := func(label, document string) servedEventPublishRPCResult {
+				runID := seedServedPublicationRun(t, fixture.Runtime)
 				result := requireServedEventPublishRPCResult(t, fixture.Endpoint, map[string]any{
-					"event_name": "compute.requested", "bundle_hash": fixture.BundleHash,
+					"event_name": "compute.requested", "bundle_hash": fixture.BundleHash, "run_id": runID,
 					"payload": map[string]any{"document": document}, "idempotency_key": label,
 				})
+				if result.RunID != runID || result.EventID == "" || result.NewRunCreated {
+					t.Fatal("publication did not acknowledge the exact fixture run")
+				}
 				published[result.EventID] = result.RunID
 				return result
 			}
