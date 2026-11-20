@@ -3,6 +3,7 @@ package runforkadmission
 import (
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
@@ -348,15 +349,20 @@ func fixedCutEagerChildEdge(source semanticview.Source, cut runfork.RunForkPlan,
 		return nil, err
 	}
 	edges := make(map[events.ConnectPlanIdentity]pinrouting.ConnectRoutePlan)
-	for _, edge := range graph.MatchingSourceEvent(sourceEvent) {
-		if edge.RequiresRuntimeResolution() || edge.ReceiverEndpoint().Readback().FlowID != target.FlowID {
+	plans := graph.MatchingSourceEvent(sourceEvent)
+	pinrouting.SortConnectPlansAncestorFirst(plans)
+	selected := make(fixedCutConnectSelection)
+	for _, edge := range plans {
+		flowID := edge.ReceiverEndpoint().Readback().FlowID
+		staticTarget := !edge.RequiresRuntimeResolution() && flowID == target.FlowID
+		if !staticTarget && (edge.InstanceKey() == nil || !strings.HasPrefix(target.FlowID, flowID+"/")) {
 			continue
 		}
-		targets, matched, err := contractFrontierPlanTargets(source, cut, constructors, selector.ID(), selector.RoutingSource(), edge, nil)
+		targets, matched, err := contractFrontierPlanTargets(source, cut, constructors, selected, selector.ID(), selector.RoutingSource(), edge, nil)
 		if err != nil {
 			return nil, err
 		}
-		if !matched || len(targets) != 1 || targets[0] != target {
+		if !staticTarget || !matched || len(targets) != 1 || targets[0] != target {
 			continue
 		}
 		id, err := pinrouting.ConnectPlanIdentity(edge)
