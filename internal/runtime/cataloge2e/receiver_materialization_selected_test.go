@@ -28,7 +28,7 @@ func TestReceiverMaterializationSelectedForkExecutionBothStores(t *testing.T) {
 func proveNestedAuthoredSelectorFork(t *testing.T) {
 	for _, backend := range []catalogRuntimeBackend{catalogBackendSQLite, catalogBackendPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
-			root := canonicalrouting.CopyNestedEventSchema(t)
+			root := canonicalrouting.CopyNestedSelectorFork(t)
 			h := newLiveForkCatalogHarness(t, root, backend)
 			ctx := worklifetime.WithOccurrence(catalogRunContext(h, catalogRuntimeRunID), h.rt.WorkOccurrence())
 			var selected interface {
