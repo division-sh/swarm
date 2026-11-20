@@ -44,24 +44,50 @@ func TestNativeSelectedRecoverySnapshotPreservesConsumerRefusalsAndIdentity(t *t
 func TestNativeSelectedRecoverySnapshotReusesCompletePhysicalEncoderAndTableScope(t *testing.T) {
 	row := nativeMissingHeaderRecipe(t, "native-selected-recovery-snapshot")
 	owner := selectedCausalObservationBody(t, "internal/store/internal/runtimepersistence/test_selected_fork_application_snapshot.go", "ReadSelectedForkRecoveredStorageSnapshotForTest")
+	const nativePath = "internal/store/internal/backend/pipelinepersistence/test_recovered_storage_snapshot.go"
+	native := selectedCausalObservationBody(t, nativePath, "readSelectedForkRecoveredStorageSnapshot")
 	for _, original := range []string{
 		`[]string{"entity_state", "flow_instances", "flow_instance_runtime_readiness", "events"}`,
 		`"SELECT * FROM "+table+" WHERE run_id = $1", runID`,
 	} {
-		if !strings.Contains(row.Before, original) || !strings.Contains(owner, original) {
+		if !strings.Contains(row.Before, original) || !strings.Contains(native, original) {
 			t.Fatalf("fixed original tables, complete columns or exact run predicate changed: %s", original)
 		}
 	}
 	for _, required := range []string{
 		"validateSelectedForkStorageIdentity(runID)", "selectedForkSnapshotObserverInitialized(selected)",
-		"readServedDeliveryObservation(ctx, selected,", "readSelectedForkSnapshotRows(rows)",
-		"snapshot[table] = evidence", "return nil, err",
+		"owner.pipelinePostgresOwner.ReadSelectedForkRecoveredStorageSnapshotForTest(ctx, runID)",
+		"owner.pipelineSQLiteOwner.ReadSelectedForkRecoveredStorageSnapshotForTest(ctx, runID)",
+		"return nil, err",
 	} {
 		if !strings.Contains(owner, required) {
 			t.Fatalf("original coherent owner, shared typed encoding or partial-read refusal missing: %s", required)
 		}
 	}
-	if strings.Contains(row.After, "h.db") || strings.Contains(owner, "LIMIT ") || strings.Contains(owner, "DISTINCT ") {
+	scope := owner + native
+	for _, receiver := range []string{"PipelinePostgresOwner", "PipelineSQLiteOwner"} {
+		body := selectedCausalObservationBody(t, nativePath, "ReadSelectedForkRecoveredStorageSnapshotForTest", receiver)
+		scope += body
+		for _, required := range []string{
+			"s.backend.RunReadTransaction(ctx,", "readSelectedForkRecoveredStorageSnapshot(ctx, tx, runID)",
+			"return nil, err", "return snapshot, nil",
+		} {
+			if !strings.Contains(body, required) {
+				t.Fatalf("original native read cut or partial-read refusal missing for %s: %s", receiver, required)
+			}
+		}
+	}
+	for _, required := range []string{"readRecoveredSnapshotRows(rows)", "snapshot[table] = evidence", "return nil, err"} {
+		if !strings.Contains(native, required) {
+			t.Fatalf("complete native snapshot encoding or partial-read refusal missing: %s", required)
+		}
+	}
+	rows := selectedCausalObservationBody(t, nativePath, "readRecoveredSnapshotRows")
+	encoder := selectedCausalObservationBody(t, "internal/store/internal/runtimepersistence/test_selected_fork_application_snapshot.go", "encodeSelectedForkSnapshotValues")
+	if !strings.Contains(rows, "EncodeSelectedForkSnapshotValues(columns, values)") || !strings.Contains(encoder, "pipelinepersistence.EncodeSelectedForkSnapshotValues(columns, values)") {
+		t.Fatal("original and recovered snapshot paths no longer share their complete typed value encoder")
+	}
+	if strings.Contains(row.After, "h.db") || strings.Contains(scope+rows, "LIMIT ") || strings.Contains(scope+rows, "DISTINCT ") {
 		t.Fatal("raw consumer or narrowed/duplicate-collapsing snapshot returned")
 	}
 }

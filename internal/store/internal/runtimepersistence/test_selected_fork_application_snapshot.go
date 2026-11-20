@@ -11,13 +11,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
 	"github.com/division-sh/swarm/internal/store/internal/schemastore"
 )
 
-type SelectedForkStorageTableSnapshot struct {
-	Columns []string
-	Rows    []string
-}
+type SelectedForkStorageTableSnapshot = pipelinepersistence.SelectedForkStorageTableSnapshot
 
 type SelectedForkSnapshotCell struct {
 	Column string
@@ -126,26 +124,14 @@ func ReadSelectedForkRecoveredStorageSnapshotForTest(ctx context.Context, select
 	if !selectedForkSnapshotObserverInitialized(selected) {
 		return nil, fmt.Errorf("recovered storage snapshot requires an initialized native observer, got %T", selected)
 	}
-	var snapshot map[string]SelectedForkStorageTableSnapshot
-	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		snapshot = make(map[string]SelectedForkStorageTableSnapshot, 4)
-		for _, table := range []string{"entity_state", "flow_instances", "flow_instance_runtime_readiness", "events"} {
-			rows, err := tx.QueryContext(ctx, "SELECT * FROM "+table+" WHERE run_id = $1", runID)
-			if err != nil {
-				return err
-			}
-			evidence, err := readSelectedForkSnapshotRows(rows)
-			if err != nil {
-				return err
-			}
-			snapshot[table] = evidence
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
+	switch owner := selected.(type) {
+	case *PostgresStore:
+		return owner.pipelinePostgresOwner.ReadSelectedForkRecoveredStorageSnapshotForTest(ctx, runID)
+	case *SQLiteRuntimeStore:
+		return owner.pipelineSQLiteOwner.ReadSelectedForkRecoveredStorageSnapshotForTest(ctx, runID)
+	default:
+		return nil, fmt.Errorf("storage observation requires the original selected owner, got %T", selected)
 	}
-	return snapshot, nil
 }
 
 // This is one closed whole-store immutability witness. Callers cannot select
@@ -254,25 +240,5 @@ func encodeSelectedForkSnapshotRow(rows *sql.Rows, columns []string) (string, er
 }
 
 func encodeSelectedForkSnapshotValues(columns []string, values []any) (string, error) {
-	if len(columns) == 0 || len(columns) != len(values) {
-		return "", fmt.Errorf("physical snapshot column/value cardinality mismatch")
-	}
-	encodedValues := make([]struct {
-		Column string
-		Type   string
-		Value  any
-	}, len(values))
-	for i, value := range values {
-		if stamp, ok := value.(time.Time); ok {
-			value = stamp.UTC()
-		}
-		encodedValues[i].Column = columns[i]
-		encodedValues[i].Type = fmt.Sprintf("%T", value)
-		encodedValues[i].Value = value
-	}
-	encoded, err := json.Marshal(encodedValues)
-	if err != nil {
-		return "", err
-	}
-	return string(encoded), nil
+	return pipelinepersistence.EncodeSelectedForkSnapshotValues(columns, values)
 }
