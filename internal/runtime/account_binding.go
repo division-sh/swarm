@@ -2,7 +2,6 @@ package runtime
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -10,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/packadmission"
 	contracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -87,6 +87,15 @@ func (rt *Runtime) AccountHolders(ctx context.Context, runID string, ref channel
 // AccountHolders reads only currently admitted runs, acquiring their original
 // runtime use. A stale loaded bundle is not a live account holder.
 func (m *RuntimeContextManager) AccountHolders(ctx context.Context, ref channelonboarding.AccountReference) ([]channelonboarding.AccountHolder, error) {
+	return m.accountHolders(ctx, ref, false)
+}
+
+// RegistrationAccountHolders only reads the candidates for registration currentness.
+func (m *RuntimeContextManager) RegistrationAccountHolders(ctx context.Context, ref channelonboarding.AccountReference) ([]channelonboarding.AccountHolder, error) {
+	return m.accountHolders(ctx, ref, true)
+}
+
+func (m *RuntimeContextManager) accountHolders(ctx context.Context, ref channelonboarding.AccountReference, registration bool) ([]channelonboarding.AccountHolder, error) {
 	holders := []channelonboarding.AccountHolder{}
 	seen := map[string]bool{}
 	for _, loaded := range m.LoadedContexts() {
@@ -95,7 +104,7 @@ func (m *RuntimeContextManager) AccountHolders(ctx context.Context, ref channelo
 				continue
 			}
 			seen[activation.RunID] = true
-			rows, err := m.activationAccountHolders(ctx, activation, ref)
+			rows, err := m.activationAccountHolders(ctx, activation, ref, registration)
 			if err != nil {
 				return nil, err
 			}
@@ -120,7 +129,7 @@ func (m *RuntimeContextManager) AccountHolders(ctx context.Context, ref channelo
 	return holders, nil
 }
 
-func (m *RuntimeContextManager) activationAccountHolders(ctx context.Context, activation StandingActivation, ref channelonboarding.AccountReference) ([]channelonboarding.AccountHolder, error) {
+func (m *RuntimeContextManager) activationAccountHolders(ctx context.Context, activation StandingActivation, ref channelonboarding.AccountReference, registration bool) ([]channelonboarding.AccountHolder, error) {
 	if m.landingRuns == nil {
 		return nil, fmt.Errorf("account binding requires the deployment landing-run reader")
 	}
@@ -131,13 +140,20 @@ func (m *RuntimeContextManager) activationAccountHolders(ctx context.Context, ac
 	if !found || landing.RunID != activation.RunID || landing.Source.BundleHash() != activation.BundleHash || landing.State != runlifecycle.StateLive {
 		return nil, nil
 	}
-	use, _, availability, err := m.AcquireRun(ctx, activation.RunID)
-	if err != nil || use == nil {
-		return nil, err
+	var rows []channelonboarding.AccountHolder
+	_, lookup, availability, err := m.acquireRun(ctx, activation.RunID, registration, func(readCtx context.Context, rt *Runtime, _ *BundleContext, state runbundle.Availability) (err error) {
+		if state.Status == string(runlifecycle.StateLive) {
+			rows, err = rt.AccountHolders(readCtx, activation.RunID, ref)
+		}
+		return err
+	})
+	if registration && err == nil && (!lookup.Loaded() || availability.Status != string(runlifecycle.StateLive) || availability.BundleHash != activation.BundleHash) {
+		m.mu.RLock()
+		retained := m.inboundStopObservation != nil
+		m.mu.RUnlock()
+		if retained {
+			return nil, channelonboarding.ErrRevisionConflict
+		}
 	}
-	if !availability.Available() || availability.Status != string(runlifecycle.StateLive) {
-		return nil, use.Done()
-	}
-	rows, err := use.Runtime().AccountHolders(use.WorkContext(), activation.RunID, ref)
-	return rows, errors.Join(err, use.Done())
+	return rows, err
 }

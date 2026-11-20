@@ -102,6 +102,7 @@ type runtimeContextEntry struct {
 	cause            string
 	shutdownMu       sync.Mutex
 	shutdownComplete bool
+	stopObservation  *InboundRuntimeStop
 }
 
 type runtimeSourceSetTransitionEntry struct {
@@ -356,6 +357,7 @@ type RuntimeContextManager struct {
 	inboundSealErr             error
 	inboundRequests            shutdownAdmission
 	inboundSelections          shutdownAdmission
+	inboundStopObservation     *InboundRuntimeStop // guarded by mu
 	availability               RunBundleAvailabilityReader
 	landingRuns                runtimerunlifecycle.LandingRunReader
 	contexts                   map[string]*runtimeContextEntry
@@ -2136,6 +2138,12 @@ func (m *RuntimeContextManager) BeginLiveRunSelection() func() {
 }
 
 func (m *RuntimeContextManager) AcquireRun(ctx context.Context, runID string) (*RuntimeContextUse, RuntimeContextLookup, runbundle.Availability, error) {
+	return m.acquireRun(ctx, runID, false, nil)
+}
+
+type registrationRunRead func(context.Context, *Runtime, *BundleContext, runbundle.Availability) error
+
+func (m *RuntimeContextManager) acquireRun(ctx context.Context, runID string, registration bool, read registrationRunRead) (*RuntimeContextUse, RuntimeContextLookup, runbundle.Availability, error) {
 	if m == nil {
 		lookup := RuntimeContextLookup{State: RuntimeContextStateUnloaded, Cause: RuntimeContextCauseNotLoaded}
 		return nil, lookup, runbundle.Availability{}, nil
@@ -2152,12 +2160,43 @@ func (m *RuntimeContextManager) AcquireRun(ctx context.Context, runID string) (*
 		return nil, lookup, availability, nil
 	}
 	m.mu.RLock()
-	defer m.mu.RUnlock()
 	entry, lookup, err := m.runContextEntryLocked(availability)
 	if err != nil || !lookup.Loaded() {
+		m.mu.RUnlock()
+		return nil, lookup, availability, err
+	}
+	if registration && read != nil && entry.stopObservation != nil {
+		stop := entry.stopObservation
+		deadline, bounded := stop.ctx.Deadline()
+		if stop != m.inboundStopObservation || m.resetExecutionFenced || !bounded || stop.ctx.Err() != nil {
+			m.mu.RUnlock()
+			return nil, lookup, availability, worklifetime.ErrAdmissionFenced
+		}
+		boundedCtx, cancel := context.WithDeadline(ctx, deadline)
+		defer cancel()
+		readCtx, release, admitted := m.inboundRequests.BeginContext(boundedCtx)
+		definition := *entry.context
+		definition.Runtime = entry.runtime
+		m.mu.RUnlock()
+		if !admitted {
+			return nil, lookup, availability, worklifetime.ErrAdmissionFenced
+		}
+		defer release()
+		readCtx, err = rootedRuntimeContextUse(readCtx, definition)
+		if err == nil {
+			_, err = definition.Runtime.CurrentStartupGrantEvidence()
+		}
+		if err == nil {
+			err = errors.Join(read(readCtx, definition.Runtime, &definition, availability), readCtx.Err())
+		}
 		return nil, lookup, availability, err
 	}
 	use, err := m.acquireEntryLocked(ctx, entry)
+	m.mu.RUnlock()
+	if read != nil && use != nil {
+		err = errors.Join(read(use.WorkContext(), use.Runtime(), &use.Context, availability), use.Done())
+		return nil, lookup, availability, err
+	}
 	return use, lookup, availability, err
 }
 

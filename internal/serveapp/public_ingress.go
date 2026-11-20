@@ -61,42 +61,17 @@ func serveRegistrationSelectionCurrent(ctx context.Context, manager *runtime.Run
 		if !current {
 			return false, nil
 		}
-		holders, err := manager.AccountHolders(ctx, channelonboarding.AccountReference{Provider: op.Provider, Account: op.AccountReference})
+		holders, err := manager.RegistrationAccountHolders(ctx, channelonboarding.AccountReference{Provider: op.Provider, Account: op.AccountReference})
 		if err != nil || len(holders) != 1 || holders[0] != pair.AccountHolder {
 			return false, err
 		}
-		return serveRegisteredIngressCurrent(ctx, manager, pair.AccountHolder, pair.Target)
+		return manager.RegisteredIngressCurrent(ctx, pair.AccountHolder, pair.Target)
 	}
 	return channelonboarding.AdmissionResponsibilityCurrent(ctx, store, channelonboarding.AdmissionResponsibility{
 		OperationID: pair.OnboardingOperationID, OperationRevision: pair.OnboardingRevision,
 		ActivationRevision: pair.ActivationRevision, Coordinate: pair.OnboardingCoordinate,
 		TargetSelector: pair.Target.Selector, Provider: pair.Target.Provider, Credentials: pair.CredentialAdmissions,
 	}, exactPendingRevision)
-}
-
-func serveRegisteredIngressCurrent(ctx context.Context, manager *runtime.RuntimeContextManager, holder channelonboarding.AccountHolder, target runtimepublicingress.RegistrationTarget) (current bool, resultErr error) {
-	use, _, availability, err := manager.AcquireRun(ctx, holder.RunID)
-	if err != nil || use == nil {
-		return false, err
-	}
-	defer func() { resultErr = errors.Join(resultErr, use.Done()) }()
-	if !availability.Available() || use.Context.BundleHash() != holder.BundleHash || holder.BundleHash != target.BundleHash || holder.Flow != target.FlowPath {
-		return false, channelonboarding.ErrRevisionConflict
-	}
-	for _, owned := range use.Context.StandingTargets {
-		if owned.FlowPath != holder.Flow || owned.Provider != target.Provider || owned.Alias != target.Alias {
-			continue
-		}
-		if !owned.AdmissionPlan.Generation().Equal(target.AdmissionPlanGeneration) || owned.RunID != holder.RunID {
-			return false, channelonboarding.ErrRevisionConflict
-		}
-		return use.Runtime().RegisteredIngressCurrent(use.WorkContext(), runtime.InboundTarget{
-			BundleHash: target.BundleHash, FlowPath: target.FlowPath, RunID: holder.RunID,
-			Alias: target.Alias, Provider: target.Provider, SigningSecret: target.SigningCredentialKey,
-			RegisteredOperationID: target.RegisteredOperationID, AdmissionPlan: owned.AdmissionPlan,
-		})
-	}
-	return false, nil
 }
 
 type serveRegistrationSelection struct {
@@ -273,7 +248,7 @@ func resolveServeActivationRegistrationPair(ctx context.Context, manager *runtim
 			RegisteredOperationID: activation.OnboardingOperationID, SigningCredentialKey: binding.CredentialStoreKeys()[registration.SigningCredential()],
 			AdmissionPlanGeneration: target.AdmissionPlan.Generation(),
 		}
-		current, err := serveRegisteredIngressCurrent(ctx, manager, holder, registeredTarget)
+		current, err := manager.RegisteredIngressCurrent(ctx, holder, registeredTarget)
 		if err != nil || !current {
 			return absent, false, err
 		}
