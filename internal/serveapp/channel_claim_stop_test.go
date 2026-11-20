@@ -23,6 +23,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/servedparity"
@@ -100,6 +101,11 @@ func TestGracefulStopRefusesOnlyMatchedDeploymentWebhookClaimBothStores(t *testi
 				t.Fatalf("live unmatched callback changed pending native claim: receipt=%t err=%v", claimed, err)
 			}
 			t.Logf("credential-bound callback accepted before stop: events=%d, exact pending claim unchanged", len(live.EventIDs))
+			ref := channelonboarding.AccountReference{Provider: parent.Provider, Account: parent.AccountReference}
+			holders, err := manager.AccountHolders(ctx, ref)
+			if err != nil || len(holders) != 1 {
+				t.Fatalf("ordinary holder discovery did not find the exact current holder: count=%d err=%v", len(holders), err)
+			}
 			accepted, _, err := manager.AcquireBundleHash(ctx, channelAnchorBundleHash(t, h.rpcEndpoint()))
 			if err != nil || accepted == nil {
 				t.Fatalf("retain exact stop fixture: %v", err)
@@ -157,6 +163,32 @@ func TestGracefulStopRefusesOnlyMatchedDeploymentWebhookClaimBothStores(t *testi
 				if _, found, err := identities.LoadOperatorChannelClaimReceipt(cut, operatorchannel.SessionClaimReceiptID(parent.OperationID, event)); err != nil || found {
 					t.Errorf("unexpected claim receipt for event %s: found=%t err=%v", event, found, err)
 				}
+			}
+			retained, err := manager.RegistrationAccountHolders(cut, ref)
+			if err != nil || !reflect.DeepEqual(retained, holders) {
+				t.Errorf("registration observation lost the original holder during stop: count=%d err=%v", len(retained), err)
+			}
+			use, _, _, err := manager.AcquireRun(cut, holders[0].RunID)
+			if use != nil {
+				_ = use.Done()
+			}
+			if use != nil || !errors.Is(err, worklifetime.ErrAdmissionFenced) {
+				t.Errorf("retained observation reopened ordinary run admission: %v", err)
+			}
+			foreignFact, err := runtimecorrelation.NewSourceArtifactFact(strings.Repeat("0", 64))
+			if err != nil {
+				t.Fatal(err)
+			}
+			foreign := runtimecorrelation.WithSourceArtifactFact(cut, foreignFact)
+			if rows, err := manager.RegistrationAccountHolders(foreign, ref); len(rows) != 0 || err == nil {
+				t.Errorf("registration observation accepted a foreign source: count=%d err=%v", len(rows), err)
+			}
+			if err := accepted.Done(); err != nil {
+				t.Fatal(err)
+			}
+			h.stop(t)
+			if rows, err := manager.RegistrationAccountHolders(ctx, ref); len(rows) != 0 {
+				t.Errorf("registration observation survived cutoff: count=%d err=%v", len(rows), err)
 			}
 		})
 	}

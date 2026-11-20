@@ -66,7 +66,13 @@ func (m *RuntimeContextManager) PrepareInboundRuntimeStop(ctx context.Context, g
 			held.admissionErr = rt.Manager.CheckShutdownAdmission()
 			stop.result = errors.Join(stop.result, held.admissionErr)
 		}
+		m.mu.Lock()
+		if runtimeContextEntryLoaded(held.entry) && m.contexts[held.entry.context.BundleHash()] == held.entry && !held.completed && held.admissionErr == nil {
+			m.inboundStopObservation = stop
+			held.entry.stopObservation = stop
+		}
 		rt.CloseAdmission()
+		m.mu.Unlock()
 	}
 	return stop
 }
