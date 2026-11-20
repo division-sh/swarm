@@ -39,11 +39,14 @@ func TestComputeModuleSecretInputNativeBoundaryBothStores(t *testing.T) {
 			if len(uses) != 1 || uses[0].Kind != "compute_module" || uses[0].Role != "private_key" || uses[0].FlowID != "." || uses[0].Name != worker.Key()+"/compute.requested/inspect_key/rules[0]: compute_module" {
 				t.Fatalf("exact compute requirement was lost: %#v", uses)
 			}
+			published := map[string]string{}
 			publish := func(label, document string) servedEventPublishRPCResult {
-				return requireServedEventPublishRPCResult(t, fixture.Endpoint, map[string]any{
+				result := requireServedEventPublishRPCResult(t, fixture.Endpoint, map[string]any{
 					"event_name": "compute.requested", "bundle_hash": fixture.BundleHash,
 					"payload": map[string]any{"document": document}, "idempotency_key": label,
 				})
+				published[result.EventID] = result.RunID
+				return result
 			}
 			for index, tc := range []struct {
 				value, document string
@@ -100,7 +103,13 @@ func TestComputeModuleSecretInputNativeBoundaryBothStores(t *testing.T) {
 			}
 			var traces []computemodule.ReplayEnvelope
 			completionCount := 0
-			for _, event := range computeSecretNativeEvents(t, fixture.Endpoint) {
+			events := computeSecretNativeEvents(t, fixture.Endpoint)
+			for eventID, runID := range published {
+				if event, found := events[eventID]; !found || event.RunID != runID {
+					t.Fatal("native census missed a fixture publication")
+				}
+			}
+			for _, event := range events {
 				if event.RunID == failed.RunID && event.EventName == "compute.completed" {
 					completionCount++
 				}
@@ -159,7 +168,7 @@ func computeSecretNativeEntity(t *testing.T, endpoint, runID, stage string) oper
 	deadline := time.Now().Add(15 * time.Second)
 	for {
 		var page operatorread.OperatorEntityListResult
-		requireServedJSONRPCResult(t, endpoint, "entity.list", map[string]any{"run_id": runID, "limit": 1000}, &page)
+		requireServedJSONRPCResult(t, endpoint, "entity.list", map[string]any{"run_id": runID, "limit": 500}, &page)
 		if page.NextCursor != "" || len(page.Entities) > 1 {
 			t.Fatal("entity census did not exhaust the exact single-root flow")
 		}
@@ -190,8 +199,8 @@ func computeSecretNativeEvents(t *testing.T, endpoint string) map[string]operato
 		Runs       []operatorread.RunHeader `json:"runs"`
 		NextCursor string                   `json:"next_cursor"`
 	}
-	requireServedJSONRPCResult(t, endpoint, "run.list", map[string]any{"limit": 1000}, &runs)
-	if runs.NextCursor != "" || len(runs.Runs) >= 1000 {
+	requireServedJSONRPCResult(t, endpoint, "run.list", map[string]any{"limit": 500}, &runs)
+	if runs.NextCursor != "" || len(runs.Runs) >= 500 {
 		t.Fatal("run census not exhausted")
 	}
 	events := map[string]operatorread.OperatorEventFull{}
@@ -275,7 +284,7 @@ sink:
 `, key),
 		"tools.yaml": fmt.Sprintf(`inspect_key:
   handler_type: wasm
-  path: guest.wasm
+  path: modules/guest.wasm
   abi: core-json-v1
   entry: compute
   digest: %s
@@ -297,7 +306,10 @@ sink:
 	} {
 		writeStandingCandidateFile(t, filepath.Join(root, name), body)
 	}
-	if err := os.WriteFile(filepath.Join(root, "guest.wasm"), wasm, 0o600); err != nil {
+	if err := os.MkdirAll(filepath.Join(root, "modules"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "modules", "guest.wasm"), wasm, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	return root

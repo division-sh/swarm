@@ -71,6 +71,7 @@ func TestProjectNodePolicyValueRows(t *testing.T) {
 		{"multiple_parameters", "{document: payload.document}", "{one: stored_key, two: stored_key}", true},
 		{"blank_key", "{document: payload.document}", "{private_key: ' '}", false},
 		{"nontext_key", "{document: payload.document}", "{private_key: 12}", false},
+		{"numeric_text_key", "{document: payload.document}", "{private_key: '12'}", true},
 		{"nonmapping", "{document: payload.document}", "[stored_key]", false},
 		{"duplicate", "{document: payload.document}", "{private_key: one, private_key: two}", false},
 		{"empty_ordinary", "{}", "{private_key: stored_key}", false},

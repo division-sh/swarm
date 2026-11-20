@@ -2179,11 +2179,15 @@ func TestExecutor_ComputeModuleReplayTraceComparison(t *testing.T) {
 			t.Fatal(err)
 		}
 		root := t.TempDir()
-		if err := os.WriteFile(filepath.Join(root, "constant.wasm"), wasm, 0o600); err != nil {
+		const path = "modules/constant.wasm"
+		if err := os.MkdirAll(filepath.Join(root, "modules"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, path), wasm, 0o600); err != nil {
 			t.Fatal(err)
 		}
 		bundle, _ := semanticview.Bundle(source)
-		module.Path, module.Digest = "constant.wasm", computemodule.HashBytes(wasm)
+		module.Path, module.Digest = path, computemodule.HashBytes(wasm)
 		bundle.SourceArtifact = mustEngineSourceArtifact(t, root)
 		bundle.FlowTree.Root.Tools["structured_renderer"] = runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerWasm), runtimecontracts.WithToolModule(module))
 		exec := newStructuredRendererExecutor(t, semanticview.Wrap(bundle))

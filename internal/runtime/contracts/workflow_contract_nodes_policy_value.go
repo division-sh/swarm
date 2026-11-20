@@ -87,15 +87,11 @@ func projectNodePolicySecretInputsValue(value yamlsource.Value) (map[string]stri
 		if _, duplicate := out[name]; duplicate {
 			return nil, fmt.Errorf("POLICY-SHEET-ROW: compute_module.secret_input duplicate key %q at %s", name, field.KeyLocation)
 		}
-		key, err := nodeValueText(field.Value, "compute_module.secret_input."+name)
-		if err != nil {
-			return nil, err
+		scalar, err := field.Value.Scalar()
+		if err != nil || scalar.Tag != "!!str" || strings.TrimSpace(scalar.Value) == "" {
+			return nil, fmt.Errorf("POLICY-SHEET-ROW: compute_module.secret_input.%s at %s requires a stored key name in text", name, field.Value.Location())
 		}
-		key = strings.TrimSpace(key)
-		if key == "" {
-			return nil, fmt.Errorf("POLICY-SHEET-ROW: compute_module.secret_input.%s at %s requires a stored key name", name, field.Value.Location())
-		}
-		out[name] = key
+		out[name] = strings.TrimSpace(scalar.Value)
 	}
 	return out, nil
 }
