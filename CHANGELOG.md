@@ -20,6 +20,12 @@ release approval or a promise of old-store migration.
   undergo their declared payload-schema validation. Payloads previously admitted
   as schema-less because of the owner lookup defect are refused if they do not
   match that schema. Existing stored events are unchanged. (#3107)
+  For the tested run with a delivery to a keyless child beneath a keyed
+  ancestor, master refused the selected fork during frontier admission
+  (`platform.target_unreachable`, `contract_frontier_route_unresolved`):
+  `ticket.cross` was stored as `schema_less` and had no route selector. With
+  this correction, a selected fork of the same history is refused later, at
+  the topology check. That case is not supported by this change. (#3109)
 
 - WhatsApp link notices use the configured operator's bound conversation and
   the existing delivery journal. Down and back notices each have a ten-minute
