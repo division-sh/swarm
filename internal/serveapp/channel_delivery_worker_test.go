@@ -4,16 +4,19 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/division-sh/swarm/internal/packs"
+	"log"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/operatorchannel"
+	"github.com/division-sh/swarm/internal/packs"
 	runtimechanneldelivery "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	"github.com/division-sh/swarm/internal/runtime/channelnative"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
+	"github.com/division-sh/swarm/internal/runtime/publicingress"
 	"github.com/google/uuid"
 )
 
@@ -176,8 +179,8 @@ func TestChannelDeliveryWorkerRechecksResponsibilityBeforeRender(t *testing.T) {
 				selected.currentOverride = &runtimechanneldelivery.Candidate{DeliveryID: "stale", State: "rendered", RecoveryPending: true}
 			}
 			d := &serveChannelDeliveryDispatcher{store: selected}
-			if err := d.reconcileDelivery(context.Background(), runtimechanneldelivery.Candidate{DeliveryID: "stale", State: "planned"}); err != nil {
-				t.Fatal(err)
+			if preparation, dispatch := d.reconcileDelivery(context.Background(), runtimechanneldelivery.Candidate{DeliveryID: "stale", State: "planned"}, false); preparation != nil || dispatch != nil {
+				t.Fatal(errors.Join(preparation, dispatch))
 			}
 			if len(selected.freezes) != 0 || len(selected.readReceipts) != 0 {
 				t.Fatal("stale or recovery-owned candidate reached render/dispatch")
@@ -194,7 +197,7 @@ func (s *channelDeliveryWorkerStore) GetCurrentChannelSentReceipt(_ context.Cont
 func TestChannelDeliveryReconciliationPlansOpenCardsButRejectsUncompiledBounds(t *testing.T) {
 	selected := &channelDeliveryWorkerStore{}
 	d := &serveChannelDeliveryDispatcher{store: selected, cards: channelDeliveryWorkerCards{}}
-	if err := d.reconcileDeliveries(context.Background()); err == nil || !strings.Contains(err.Error(), "binding owners are unavailable") {
+	if err := d.reconcileDeliveries(context.Background(), false); err == nil || !strings.Contains(err.Error(), "binding owners are unavailable") {
 		t.Fatalf("render admitted without its compiled bounds owner: %v", err)
 	}
 	want := []string{"pending-a", "pending-b", "deferred-c"}
@@ -209,13 +212,82 @@ func TestChannelDeliveryReconciliationPlansOpenCardsButRejectsUncompiledBounds(t
 func TestChannelDeliveryReconciliationContinuesAfterPlanLocalAdmissionFailure(t *testing.T) {
 	selected := &channelDeliveryWorkerStore{}
 	d := &serveChannelDeliveryDispatcher{store: selected, cards: channelDeliveryWorkerCards{}}
-	err := d.reconcileDeliveries(context.Background())
+	err := d.reconcileDeliveries(context.Background(), false)
 	if err == nil || !strings.Contains(err.Error(), "select channel delivery sent presentation bounds") ||
 		!strings.Contains(err.Error(), "select channel delivery editing presentation bounds") {
 		t.Fatalf("one plan's admission failure starved another: %v", err)
 	}
 	if len(selected.freezes) != 0 || len(selected.readReceipts) != 0 {
 		t.Fatal("uncompiled plan reached rendering or delivery")
+	}
+}
+
+func TestChannelDeliveryReconciliationFinalDoesNotFreezeWithoutCurrentReceiver(t *testing.T) {
+	binding := operatorchannel.Binding{Revision: 1, ProofID: uuid.NewString(), ProofRevision: 1}
+	identity := operatorchannel.Operation{OperationID: uuid.NewString(), Revision: 1}
+	selected := channelonboarding.Result{Binding: &binding, IdentityOperation: &identity,
+		Operation: channelonboarding.Operation{OperationID: uuid.NewString(), Revision: 1, Posture: channelonboarding.ActivationWebhookRegistration}}
+	parent := deploymentParent(selected)
+	if err := parent.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	for _, stale := range []bool{false, true} {
+		t.Run(fmt.Sprintf("stale_parent=%t", stale), func(t *testing.T) {
+			store := &channelDeliveryWorkerStore{currentOverride: &runtimechanneldelivery.Candidate{
+				DeliveryID: "selected-response", SourceKind: "response", RequestParent: parent, State: "planned",
+				BindingRevision: binding.Revision,
+				Audience:        runtimechanneldelivery.Audience{InterfaceKey: binding.Interface.Key()},
+			}}
+			d := &serveChannelDeliveryDispatcher{
+				store: store, ingress: publicingress.NewReadinessOwner(true), now: time.Now,
+				deployment: &serveDeploymentTransport{read: func(context.Context, channelnative.TransportParent) (channelonboarding.Result, packs.OutboundBindingPlan, error) {
+					if stale {
+						return channelonboarding.Result{}, packs.OutboundBindingPlan{}, channelonboarding.ErrRevisionConflict
+					}
+					return selected, packs.OutboundBindingPlan{}, nil
+				}},
+			}
+			preparation, dispatch := d.reconcileDelivery(t.Context(), *store.currentOverride, true)
+			if dispatch != nil || preparation == nil || len(store.freezes) != 0 {
+				t.Fatalf("ineligible response reached freeze/dispatch: %v/%v freezes=%v", preparation, dispatch, store.freezes)
+			}
+			if stale && !errors.Is(preparation, channelonboarding.ErrRevisionConflict) ||
+				!stale && !strings.Contains(preparation.Error(), "physical registration is not exact-current") {
+				t.Fatalf("did not reach exact selection refusal: %v", preparation)
+			}
+		})
+	}
+}
+
+type channelDeliveryPreparationFailureStore struct {
+	channelDeliveryWorkerStore
+	scanFailure error
+}
+
+func (s *channelDeliveryPreparationFailureStore) ListCurrentChannelDeliveryPlans(_ context.Context, cursor string, limit int) ([]runtimechanneldelivery.Candidate, error) {
+	if cursor != "" {
+		return nil, s.scanFailure
+	}
+	plans := make([]runtimechanneldelivery.Candidate, limit)
+	plans[0] = runtimechanneldelivery.Candidate{DeliveryID: "sent"}
+	plans[limit-1].DeliveryID = "next"
+	return plans, nil
+}
+
+func TestChannelDeliveryReconciliationFinalLogsPreparationButReturnsScanFailure(t *testing.T) {
+	var notes lockedBuffer
+	prior := log.Writer()
+	log.SetOutput(&notes)
+	t.Cleanup(func() { log.SetOutput(prior) })
+	failure := errors.New("independent scan failure")
+	store := &channelDeliveryPreparationFailureStore{scanFailure: failure}
+	d := &serveChannelDeliveryDispatcher{store: store, cards: channelDeliveryWorkerCards{}}
+	err := d.reconcileDeliveries(t.Context(), true)
+	if !errors.Is(err, failure) || strings.Contains(err.Error(), "presentation bounds") {
+		t.Fatalf("final result did not separate candidate preparation and scan: %v", err)
+	}
+	if !strings.Contains(notes.String(), "channel delivery reconciliation: select channel delivery sent presentation bounds") {
+		t.Fatalf("original preparation failure was not reported: %s", notes.String())
 	}
 }
 

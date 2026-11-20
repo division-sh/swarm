@@ -35,8 +35,9 @@ func (s *processLifecycleSupervisor) beginWebhookClaim(ctx context.Context) (con
 }
 
 type serveInboundStop struct {
-	supervisor *processLifecycleSupervisor
-	contexts   *runtime.InboundRuntimeStop
+	supervisor  *processLifecycleSupervisor
+	contexts    *runtime.InboundRuntimeStop
+	terminalErr error
 }
 
 func (s *processLifecycleSupervisor) beginInboundStop(exposure *publicingress.Controller) *serveInboundStop {
@@ -60,9 +61,10 @@ func (s *processLifecycleSupervisor) beginInboundStop(exposure *publicingress.Co
 	// Admitted registration writers still need ordinary runtime acquisition.
 	exposure.SealUpdates(ctx)
 	s.operationMu.Lock()
+	var terminalErr error
 	if s.processCapability != nil {
 		if result, terminal := s.processCapability.TerminalResult(); terminal && result.Cause != runtimestartupownership.TerminalReleased {
-			preparationErr = errors.Join(preparationErr, &runtimestartupownership.PossessionError{Cause: result.Cause})
+			terminalErr = &runtimestartupownership.PossessionError{Cause: result.Cause}
 		}
 	}
 	if len(s.resetRequests) > 0 && s.stopRunStalled != nil {
@@ -76,8 +78,8 @@ func (s *processLifecycleSupervisor) beginInboundStop(exposure *publicingress.Co
 		additional = append(additional, candidate.runtime)
 	}
 	held := manager.PrepareInboundRuntimeStop(ctx, s.shutdownOptions.Grace, additional...)
-	_ = held.Open(preparationErr) // The retained result is returned once by Finish.
-	return &serveInboundStop{supervisor: s, contexts: held}
+	_ = held.Open(preparationErr, terminalErr) // Finish reports joins separately from the intake veto.
+	return &serveInboundStop{supervisor: s, contexts: held, terminalErr: terminalErr}
 }
 
 func (s *serveInboundStop) Finish() error {
@@ -90,5 +92,5 @@ func (s *serveInboundStop) Finish() error {
 	s.supervisor.mu.Lock()
 	s.supervisor.currentRT = nil
 	s.supervisor.mu.Unlock()
-	return result
+	return errors.Join(s.terminalErr, result)
 }

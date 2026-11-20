@@ -20,6 +20,7 @@ type InboundRuntimeStop struct {
 	drainOnce  sync.Once
 	finishOnce sync.Once
 	result     error
+	intakeVeto error
 	outputSafe bool
 }
 
@@ -78,21 +79,22 @@ func (m *RuntimeContextManager) PrepareInboundRuntimeStop(ctx context.Context, g
 	return stop
 }
 
-func (s *InboundRuntimeStop) Open(prior error) error {
+func (s *InboundRuntimeStop) Open(prior, intakeVeto error) error {
 	s.openOnce.Do(func() {
 		s.result = errors.Join(s.result, prior)
-		if s.result == nil {
+		s.intakeVeto = intakeVeto
+		if admissionErr := errors.Join(s.result, s.intakeVeto); admissionErr == nil {
 			if !s.completedCutoff() {
 				s.result = s.manager.OpenStoredInbound()
 			}
 		} else {
 			s.manager.inboundPhaseMu.Lock()
-			s.manager.inboundSealErr = s.result
+			s.manager.inboundSealErr = admissionErr
 			s.manager.closeInboundReadyLocked()
 			s.manager.inboundPhaseMu.Unlock()
 		}
 	})
-	return s.result
+	return errors.Join(s.result, s.intakeVeto)
 }
 
 func (s *InboundRuntimeStop) completedCutoff() bool {
@@ -112,7 +114,7 @@ func (s *InboundRuntimeStop) completedCutoff() bool {
 
 func (s *InboundRuntimeStop) Drain() bool {
 	s.drainOnce.Do(func() {
-		s.outputSafe = s.result == nil
+		s.outputSafe = s.result == nil && s.intakeVeto == nil
 		for _, held := range s.entries {
 			if !held.completed && held.admissionErr == nil {
 				held.result = held.runtime.drainStopLocked(s.ctx, s.grace)

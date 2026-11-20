@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
@@ -69,7 +70,7 @@ func TestStoredInboundCompletedCutoffRequiresPreparationAndJoin(t *testing.T) {
 			if name == "setup_error" {
 				stop.result = failure
 			}
-			err := stop.Open(prior)
+			err := stop.Open(prior, nil)
 			if name == "complete" {
 				if err != nil {
 					t.Fatalf("completed cutoff was reopened: %v", err)
@@ -86,6 +87,39 @@ func TestStoredInboundCompletedCutoffRequiresPreparationAndJoin(t *testing.T) {
 			}
 			if err := m.OpenStoredInbound(); !errors.Is(err, worklifetime.ErrAdmissionFenced) {
 				t.Fatalf("global Open contract changed: %v", err)
+			}
+		})
+	}
+}
+
+func TestStoredInboundStopPossessionVetoIsNotJoinFailure(t *testing.T) {
+	veto := errors.New("independent possession loss")
+	joinFailure := errors.New("independent preparation/join failure")
+	for _, prior := range []error{nil, joinFailure} {
+		t.Run(fmt.Sprint(prior), func(t *testing.T) {
+			ctx := t.Context()
+			m := &RuntimeContextManager{}
+			if err := m.SealInboundExecution(ctx); err != nil {
+				t.Fatal(err)
+			}
+			stop := &InboundRuntimeStop{manager: m}
+			if err := stop.Open(prior, veto); !errors.Is(err, veto) || (prior != nil && !errors.Is(err, prior)) {
+				t.Fatalf("stop opening lost refusal: %v", err)
+			}
+			if err := m.OpenStoredInbound(); !errors.Is(err, worklifetime.ErrAdmissionFenced) || !errors.Is(err, veto) {
+				t.Fatalf("possession veto reopened intake: %v", err)
+			}
+			if stop.Drain() {
+				t.Fatal("possession veto allowed final output")
+			}
+			if err := stop.Finish(); !errors.Is(err, worklifetime.ErrAdmissionFenced) {
+				t.Fatalf("stop finished without joined cutoff: %v", err)
+			}
+			if err := m.CloseInboundRequests(ctx); err != nil {
+				t.Fatal(err)
+			}
+			if err := stop.Finish(); !errors.Is(err, prior) || errors.Is(err, veto) {
+				t.Fatalf("projection-release eligibility lost its join-only result: %v", err)
 			}
 		})
 	}

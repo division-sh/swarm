@@ -580,10 +580,15 @@ func (d *serveChannelDeliveryDispatcher) channelWriteExecutor(ctx context.Contex
 	return selectServeChannelWrite(ctx, d.sessions, op, plan)
 }
 
-func (d *serveChannelDeliveryDispatcher) selectedPresentation(ctx context.Context, candidate runtimechanneldelivery.Candidate) (packs.PresentationBounds, packs.CompiledChannelCapabilities, error) {
+func (d *serveChannelDeliveryDispatcher) selectedPresentation(ctx context.Context, candidate runtimechanneldelivery.Candidate, final bool) (packs.PresentationBounds, packs.CompiledChannelCapabilities, error) {
 	if selected, plan, deployment, err := d.deploymentDelivery(ctx, candidate); deployment || err != nil {
 		if err != nil {
 			return packs.PresentationBounds{}, packs.CompiledChannelCapabilities{}, err
+		}
+		if final {
+			if _, err := d.requireDeploymentReceiver(ctx, selected); err != nil {
+				return packs.PresentationBounds{}, packs.CompiledChannelCapabilities{}, err
+			}
 		}
 		if _, err := selectServeChannelWrite(ctx, d.sessions, selected.Operation, plan); err != nil {
 			return packs.PresentationBounds{}, packs.CompiledChannelCapabilities{}, err
@@ -596,6 +601,15 @@ func (d *serveChannelDeliveryDispatcher) selectedPresentation(ctx context.Contex
 		return packs.PresentationBounds{}, packs.CompiledChannelCapabilities{}, err
 	}
 	defer lease.Release()
+	if final && selected.Posture == channelonboarding.ActivationWebhookRegistration {
+		providerCtx, err := withChannelProviderAdmission(ctx, lease, plan)
+		if err == nil {
+			err = d.requireRuntimeDeliveryReceiver(providerCtx, selected, lease)
+		}
+		if err != nil {
+			return packs.PresentationBounds{}, packs.CompiledChannelCapabilities{}, err
+		}
+	}
 	if _, err := d.channelWriteExecutor(ctx, selected, plan); err != nil {
 		return packs.PresentationBounds{}, packs.CompiledChannelCapabilities{}, err
 	}
@@ -661,16 +675,8 @@ func (d *serveChannelDeliveryDispatcher) dispatchRuntimeChannel(ctx context.Cont
 	if err != nil {
 		return err
 	}
-	if selected.Posture == channelonboarding.ActivationWebhookRegistration {
-		if d.ingress == nil {
-			return fmt.Errorf("channel delivery requires its exact ingress owner")
-		}
-		registration, current := d.ingress.ChannelRegistrationCurrent(ctx, d.now().UTC(),
-			channelonboarding.LearnedBindingID(selected.SlotKey), selected.TargetSelector, selected.Provider)
-		if !current || !registration.Current || registration.Registration.SlotID == "" ||
-			!registration.ActivationGeneration.Equal(lease.Generation()) {
-			return fmt.Errorf("channel delivery physical registration is not exact-current")
-		}
+	if err := d.requireRuntimeDeliveryReceiver(ctx, selected, lease); err != nil {
+		return err
 	}
 	semanticInput, err := channelDeliverySemanticInput(plan, prepared, operation, previousReference)
 	if err != nil {
@@ -731,6 +737,22 @@ func (d *serveChannelDeliveryDispatcher) dispatchRuntimeChannel(ctx context.Cont
 		channelCredentialHTTPExecutor(d.httpClient, d.credentials, plan, selected.CredentialAdmissions, tool),
 	)
 	return err
+}
+
+func (d *serveChannelDeliveryDispatcher) requireRuntimeDeliveryReceiver(ctx context.Context, selected channelonboarding.ConnectedChannelActivation, lease *runtimechannelactivation.Lease) error {
+	if selected.Posture != channelonboarding.ActivationWebhookRegistration {
+		return nil
+	}
+	if d.ingress == nil {
+		return fmt.Errorf("channel delivery requires its exact ingress owner")
+	}
+	registration, current := d.ingress.ChannelRegistrationCurrent(ctx, d.now().UTC(),
+		channelonboarding.LearnedBindingID(selected.SlotKey), selected.TargetSelector, selected.Provider)
+	if !current || !registration.Current || registration.Registration.SlotID == "" ||
+		!registration.ActivationGeneration.Equal(lease.Generation()) {
+		return fmt.Errorf("channel delivery physical registration is not exact-current")
+	}
+	return nil
 }
 
 func executeChannelWrite(ctx context.Context, operationID, operation, toolID string, tool runtimecontracts.ToolSchemaEntry, input, credentials map[string]any, lineage map[string]string, nativeExecutor sessionexecution.Channel, httpExecutor runtimeregistration.HTTPExecutor) (runtimeregistration.DeliveryResult, error) {
