@@ -21,20 +21,26 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/tests/support/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/tests/support/testutil/flowactivationfixture"
 	"github.com/division-sh/swarm/tests/support/testutil/sourceartifactfixture"
 )
 
 func workflowHandlerNativeFixture(t *testing.T, backend string, source semanticview.Source, mutations, claims uint64) pipeline.WorkflowHandlerNativeFixtureForTest {
 	t.Helper()
-	fixture, _, _, probe := openWorkflowHandlerNativeFixture(t, backend, source)
+	var probe *storetest.TransactionCollector
 	t.Cleanup(func() {
+		if probe == nil {
+			return
+		}
 		counts := probe.Snapshot()
 		if counts.ByOperation[storetest.TransactionWorkflowMutation].WriteCommits != mutations ||
 			counts.ByOperation[storetest.TransactionDeliveryClaim].WriteCommits != claims || counts.Active != 0 {
 			t.Errorf("handler cohort escaped selected mutation/claim ownership: %+v, want mutations=%d claims=%d", counts, mutations, claims)
 		}
 	})
+	fixture, _, _, collected := openWorkflowHandlerNativeFixture(t, backend, source)
+	probe = collected
 	return fixture
 }
 
@@ -58,8 +64,24 @@ func workflowHandlerNativeFixtureFromSelected(t *testing.T, source semanticview.
 	persistence := pipeline.NewWorkflowPersistence(selected)
 	ctx := correlation.WithRootAdmission(withLiveGateExecution(testAuthorActivityContextForSource(t, context.Background(), fact)), rooted.Admission())
 	ctx = originalPipelineFixtureContext(t, ctx, selected)
+	work := pipelineExternalTestWorkOwnerForSource(t, fact)
+	original, err := agentfixture.ProcessCapability(t, ctx, selected.(agentfixture.Store))
+	if err != nil {
+		t.Fatal(err)
+	}
 	probe := storetest.CollectTransactions(t, selected, storetest.TransactionProbeOptions{})
 	t.Cleanup(func() {
+		join, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if _, err := work.RetireAndWait(join); err != nil {
+			t.Errorf("join native handler fixture work: %v", err)
+			return
+		}
+		// Release joins the retained possession monitor while the probe is still attached.
+		if err := original.Release(join); err != nil {
+			t.Errorf("release native handler fixture process: %v", err)
+			return
+		}
 		counts := probe.Snapshot()
 		if counts.Active != 0 {
 			t.Errorf("native handler fixture still has active selected transactions: %+v", counts)
