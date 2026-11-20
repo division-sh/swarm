@@ -10,6 +10,8 @@ import (
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/runtime/credentials"
+	"github.com/division-sh/swarm/internal/runtime/publicingress"
+	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -272,4 +274,28 @@ func (rt *Runtime) RegisteredIngressCurrent(ctx context.Context, target InboundT
 	}
 	err = rt.validateRegisteredStandingCredential(ctx, *binding.registered, false)
 	return err == nil, err
+}
+
+func (m *RuntimeContextManager) RegisteredIngressCurrent(ctx context.Context, holder channelonboarding.AccountHolder, target publicingress.RegistrationTarget) (current bool, resultErr error) {
+	_, _, _, resultErr = m.acquireRun(ctx, holder.RunID, true, func(ctx context.Context, rt *Runtime, definition *BundleContext, availability runbundle.Availability) (err error) {
+		if !availability.Available() || definition.BundleHash() != holder.BundleHash || holder.BundleHash != target.BundleHash || holder.Flow != target.FlowPath {
+			return channelonboarding.ErrRevisionConflict
+		}
+		for _, owned := range definition.StandingTargets {
+			if owned.FlowPath != holder.Flow || owned.Provider != target.Provider || owned.Alias != target.Alias {
+				continue
+			}
+			if !owned.AdmissionPlan.Generation().Equal(target.AdmissionPlanGeneration) || owned.RunID != holder.RunID {
+				return channelonboarding.ErrRevisionConflict
+			}
+			current, err = rt.RegisteredIngressCurrent(ctx, InboundTarget{
+				BundleHash: target.BundleHash, FlowPath: target.FlowPath, RunID: holder.RunID,
+				Alias: target.Alias, Provider: target.Provider, SigningSecret: target.SigningCredentialKey,
+				RegisteredOperationID: target.RegisteredOperationID, AdmissionPlan: owned.AdmissionPlan,
+			})
+			return err
+		}
+		return nil
+	})
+	return current, resultErr
 }
