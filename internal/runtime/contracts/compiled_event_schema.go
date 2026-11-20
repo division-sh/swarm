@@ -351,6 +351,24 @@ func (bindings compiledFlowEventSchemas) resolveOccurrenceEventName(name string)
 	return local, ok
 }
 
+func compiledEventOccurrencePath(view *FlowContractView) []string {
+	var ancestors []*FlowContractView
+	for ancestor := view; ancestor != nil && ancestor.Paths.FlowPath != "."; ancestor = ancestor.Parent {
+		ancestors = append(ancestors, ancestor)
+	}
+	var occurrence []string
+	for i := len(ancestors) - 1; i >= 0; i-- {
+		ancestor := ancestors[i]
+		path := ancestor.Paths.FlowPath
+		occurrence = append(occurrence, path[strings.LastIndex(path, "/")+1:])
+		if !ancestor.Schema.Instance.Empty() {
+			// An empty segment matches only this admitted level's opaque discriminator.
+			occurrence = append(occurrence, "")
+		}
+	}
+	return occurrence
+}
+
 // compileEventSchemaBindings admits producer declarations before pins capture
 // them. Later lookups may resolve a name within this exact scope, but cannot
 // recompile a declaration from a mutable catalog or choose a foreign owner.
@@ -360,19 +378,7 @@ func (b *WorkflowContractBundle) compileEventSchemaBindings() error {
 	views := b.FlowViews()
 	for _, view := range views {
 		scope := compiledFlowEventSchemas{path: view.Path, template: view.Schema.EffectiveMode() == "template", bindings: make(map[string]CompiledEventSchema)}
-		var ancestors []*FlowContractView
-		for ancestor := &view; ancestor != nil && ancestor.Paths.FlowPath != "."; ancestor = ancestor.Parent {
-			ancestors = append(ancestors, ancestor)
-		}
-		for i := len(ancestors) - 1; i >= 0; i-- {
-			ancestor := ancestors[i]
-			path := ancestor.Paths.FlowPath
-			scope.occurrence = append(scope.occurrence, path[strings.LastIndex(path, "/")+1:])
-			if !ancestor.Schema.Instance.Empty() {
-				// An empty segment matches only this admitted level's opaque discriminator.
-				scope.occurrence = append(scope.occurrence, "")
-			}
-		}
+		scope.occurrence = compiledEventOccurrencePath(&view)
 		for _, descendant := range views {
 			if strings.HasPrefix(descendant.Path, view.Path+"/") {
 				scope.descendants = append(scope.descendants, strings.TrimPrefix(descendant.Path, view.Path+"/"))
