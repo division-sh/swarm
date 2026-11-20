@@ -2,6 +2,7 @@ package runforkadmission
 
 import (
 	"fmt"
+	"slices"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
@@ -201,13 +202,9 @@ func fixedCutConstructedRouteEvidence(source semanticview.Source, cut runfork.Ru
 	}
 	for _, path := range dynamic {
 		recipientsAtPath := func(event runfork.RunForkSelectedContractRouteEvent) []runfork.RunForkContractFrontierRecipient {
-			var recipients []runfork.RunForkContractFrontierRecipient
-			for _, recipient := range event.DerivedRecipients {
-				if recipient.Path == path {
-					recipients = append(recipients, recipient)
-				}
-			}
-			return recipients
+			return slices.DeleteFunc(slices.Clone(event.DerivedRecipients), func(recipient runfork.RunForkContractFrontierRecipient) bool {
+				return recipient.Path != path
+			})
 		}
 		constructor, found := constructors.byPath[path]
 		if !found {
