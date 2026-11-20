@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"reflect"
@@ -67,7 +68,9 @@ func TestGracefulStopRefusesOnlyMatchedDeploymentWebhookClaimBothStores(t *testi
 			}()
 			defer func() { cancel(); <-done }()
 			challenge := waitChannelOnboardingChallenge(t, out, errOut, progress)
-			callback, signing := waitChannelOnboardingRegistration(t, h.provider, out, errOut, progress)
+			callback, signing := waitChannelOnboardingRegistrationForCredential(t, h.provider, token, 1, channelOnboardingCLICommand{
+				stdout: out, stderr: errOut, done: progress,
+			})
 			var listed struct{ Accounts []channelonboarding.Result }
 			var listOut, listErr lockedBuffer
 			if code := cliapp.Execute(ctx, channelFixtureArguments(h.opts.ConfigPath, "channel", "list", "--api-server", h.endpoint, "--json"), &listOut, &listErr, nil, nil, OpenChannelRegistration); code != 0 || json.Unmarshal([]byte(listOut.String()), &listed) != nil {
@@ -86,6 +89,17 @@ func TestGracefulStopRefusesOnlyMatchedDeploymentWebhookClaimBothStores(t *testi
 			if err != nil || !beforeParent.PendingDeploymentClaim(channelonboarding.AccountReference{Provider: "telegram", Account: "420079"}) {
 				t.Fatalf("native parent is not the exact pending deployment claim: %v", err)
 			}
+			live := submitChannelOnboardingClaimAs(t, callback, signing, "ordinary customer input before stop", 90, 7001, 1002, "customer")
+			if live.StatusCode != http.StatusAccepted || len(live.EventIDs) == 0 {
+				t.Fatalf("credential-bound callback did not work before stop: status=%d events=%d body=%s", live.StatusCode, len(live.EventIDs), live.Body)
+			}
+			liveChild, childErr := identities.ListOperatorChannelOperations(ctx, child.PrincipalID)
+			liveParent, parentErr := stores.DeploymentChannels().GetChannelOnboarding(ctx, parent.OperationID)
+			_, claimed, receiptErr := identities.LoadOperatorChannelClaimReceipt(ctx, operatorchannel.SessionClaimReceiptID(parent.OperationID, "90"))
+			if err := errors.Join(childErr, parentErr, receiptErr); err != nil || claimed || !reflect.DeepEqual(liveChild, before) || !reflect.DeepEqual(liveParent, beforeParent) {
+				t.Fatalf("live unmatched callback changed pending native claim: receipt=%t err=%v", claimed, err)
+			}
+			t.Logf("credential-bound callback accepted before stop: events=%d, exact pending claim unchanged", len(live.EventIDs))
 			accepted, _, err := manager.AcquireBundleHash(ctx, channelAnchorBundleHash(t, h.rpcEndpoint()))
 			if err != nil || accepted == nil {
 				t.Fatalf("retain exact stop fixture: %v", err)
