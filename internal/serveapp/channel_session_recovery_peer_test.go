@@ -184,7 +184,8 @@ func exerciseServedSessionRecovery(t *testing.T, opts cliapp.ServeOptions, proce
 	if n != connections+1 || l != logins+1 || accepted != sends || read().connection(id) == old || !old.Closed() || current.OperationID != original.OperationID || current.SessionConnectionID != original.SessionConnectionID || current.SessionAccount != original.SessionAccount {
 		t.Fatal("recovery replaced pairing/authority or resent", n, l, accepted)
 	}
-	if strings.Count(process.outputString(), "WhatsApp disconnected: network unreachable, reconnecting...") != 1 {
+	if output := process.outputString(); strings.Count(output, "WhatsApp disconnected, reconnecting...") != 1 ||
+		strings.Contains(output, "WhatsApp disconnected: network unreachable") {
 		t.Fatal("drop sentence not once", process.outputString())
 	}
 	endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc"

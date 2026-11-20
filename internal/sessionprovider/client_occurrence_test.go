@@ -205,6 +205,14 @@ func TestWhatsAppClientOccurrenceLostResultCannotReplayOnSuccessor(t *testing.T)
 				if err := o.join(peer.ctx); err != nil {
 					t.Fatal(err)
 				}
+				if boundary == "remote_disconnect" {
+					o.mu.Lock()
+					reason := o.failureReason
+					o.mu.Unlock()
+					if reason != "connection interrupted" {
+						t.Fatalf("SDK disconnect readback asserted a cause: %q", reason)
+					}
+				}
 				if device.Deleted {
 					t.Fatal("uncertain logout or retirement deleted pairing")
 				}

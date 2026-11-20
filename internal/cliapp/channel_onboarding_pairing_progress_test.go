@@ -13,6 +13,7 @@ import (
 	"testing/iotest"
 	"time"
 
+	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/tests/support/channelfixture"
 )
 
@@ -157,7 +158,7 @@ func TestChannelCLIPairingProgressRefusesContradictoryOrExpiredEvidence(t *testi
 }
 
 func TestChannelCLIExplicitPairingClaimConfirmationJourney(t *testing.T) {
-	for _, mode := range []string{"human", "human-receptionist", "human-login-handoff", "human-login-disconnected", "human-expired-disconnect", "human-cached-expiry", "human-expired-banned", "human-network-failure", "human-reentry", "human-reentry-receptionist", "--json", "--quiet", "human-error-expired-disconnect", "human-error-expired-banned", "human-error-network-failure"} {
+	for _, mode := range []string{"human", "human-receptionist", "human-login-handoff", "human-login-disconnected", "human-expired-disconnect", "human-expired-legacy-disconnect", "human-cached-expiry", "human-expired-banned", "human-network-failure", "human-reentry", "human-reentry-receptionist", "--json", "--quiet", "human-error-expired-disconnect", "human-error-expired-banned", "human-error-network-failure"} {
 		t.Run(mode, func(t *testing.T) {
 			human := strings.HasPrefix(mode, "human")
 			errorState := strings.HasPrefix(mode, "human-error-")
@@ -186,11 +187,12 @@ func TestChannelCLIExplicitPairingClaimConfirmationJourney(t *testing.T) {
 						if mode == "human-cached-expiry" {
 							result["pairing"] = map[string]any{"status": "awaiting_qr", "code": "expired-material", "expires_at": time.Now().Add(-time.Second), "paired": false, "connected": false}
 						}
-						if mode == "human-expired-disconnect" || mode == "human-expired-banned" {
-							reason := "network unreachable"
-							if mode == "human-expired-banned" {
-								reason = "account temporarily banned"
-							}
+						reason := map[string]string{
+							"human-expired-disconnect":        channelonboarding.SessionTransportInterrupted,
+							"human-expired-legacy-disconnect": "network unreachable",
+							"human-expired-banned":            "account temporarily banned",
+						}[mode]
+						if reason != "" {
 							result["connection"] = map[string]any{"state": "disconnected", "linked": false, "reason": reason}
 						}
 					}
@@ -260,7 +262,7 @@ func TestChannelCLIExplicitPairingClaimConfirmationJourney(t *testing.T) {
 						if checkpoints == 1 {
 							result := progress()
 							if mode == "human-login-disconnected" {
-								result["connection"] = map[string]any{"state": "disconnected", "linked": false, "reason": "network unreachable"}
+								result["connection"] = map[string]any{"state": "disconnected", "linked": false, "reason": channelonboarding.SessionTransportInterrupted}
 							}
 							return result
 						}
@@ -329,7 +331,7 @@ func TestChannelCLIExplicitPairingClaimConfirmationJourney(t *testing.T) {
 				}
 				if mode == "human-login-disconnected" {
 					if code != 2 || checkpoints != 1 || loginReads != 0 ||
-						!strings.Contains(errOut.String(), "WhatsApp disconnected: network unreachable") ||
+						!strings.Contains(errOut.String(), "WhatsApp disconnected: connection interrupted") ||
 						strings.Contains(out.String(), "READY") || strings.Contains(out.String(), whatsAppReadyTeaching) || strings.Contains(errOut.String(), "[y/N]") ||
 						strings.Count(out.String(), "Connecting to whatsapp...") != 1 ||
 						// One exhausted QR refresh precedes the one login handoff.

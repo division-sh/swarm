@@ -230,13 +230,18 @@ func writeProviderConnection(out io.Writer, binding channelprovider.Binding, con
 		case "connected", "connecting", "pairing":
 			reason = ""
 		case "disconnected":
-			if connection.Reason != "" {
+			switch connection.Reason {
+			case channelonboarding.SessionTransportInterrupted:
+				reason = binding.DisplayName() + " disconnected, reconnecting..."
+			case "":
+				if connection.Linked {
+					reason = binding.DisplayName() + " disconnected: connection unavailable"
+				}
+			default:
 				reason = binding.DisplayName() + " disconnected: " + cliSanitizeOneLineValue(connection.Reason)
 				if connection.Reason == "network unreachable" {
 					reason += ", reconnecting..."
 				}
-			} else if connection.Linked {
-				reason = binding.DisplayName() + " disconnected: connection unavailable"
 			}
 		}
 	}

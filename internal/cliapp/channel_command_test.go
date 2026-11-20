@@ -250,7 +250,7 @@ func TestOperatorChannelCLIUsesAuthenticatedAPIAndExactSelectors(t *testing.T) {
 	})
 
 	t.Run("native list retains the disconnected reason", func(t *testing.T) {
-		for _, reason := range []string{"network unreachable", "logged out", "account temporarily banned", "session replaced by another connection", "connection rejected by WhatsApp"} {
+		for _, reason := range []string{channelonboarding.SessionTransportInterrupted, "network unreachable", "logged out", "account temporarily banned", "session replaced by another connection", "connection rejected by WhatsApp"} {
 			server := newOperatorChannelCLIServer(t, func(t *testing.T, request jsonRPCRequest, _ int) map[string]any {
 				if request.Method != "channel.list" {
 					t.Fatalf("method = %q, want channel.list", request.Method)
@@ -264,7 +264,11 @@ func TestOperatorChannelCLIUsesAuthenticatedAPIAndExactSelectors(t *testing.T) {
 				return result
 			})
 			out, errOut, code := runOperatorChannelCLIWithBinding(t, server, channelfixture.For("whatsapp"), "", "channel", "list")
-			if code != 0 || errOut != "" || !strings.Contains(out, "WhatsApp: disconnected") || !strings.Contains(out, "WhatsApp disconnected: "+reason) ||
+			teaching := "WhatsApp disconnected: " + reason
+			if reason == channelonboarding.SessionTransportInterrupted {
+				teaching = "WhatsApp disconnected, reconnecting..."
+			}
+			if code != 0 || errOut != "" || !strings.Contains(out, "WhatsApp: disconnected") || !strings.Contains(out, teaching) ||
 				reason != "network unreachable" && strings.Contains(out, "network unreachable") {
 				t.Fatal("native health lost or invented its disconnected reason", code, out, errOut)
 			}

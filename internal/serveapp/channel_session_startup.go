@@ -117,7 +117,7 @@ func (d *serveChannelDeliveryDispatcher) reconcileSessionConnection(ctx context.
 		return nil
 	}
 	if d.sessionStates[op.OperationID] != "disconnected" {
-		fmt.Fprintln(d.output, "WhatsApp disconnected: network unreachable, reconnecting...")
+		fmt.Fprintln(d.output, "WhatsApp disconnected, reconnecting...")
 		d.sessionStates[op.OperationID] = "disconnected"
 		d.sessionAttempts[op.OperationID] = 5
 		d.sessionNextAttempt[op.OperationID] = at.Add(5 * time.Second)

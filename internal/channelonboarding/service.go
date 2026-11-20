@@ -282,6 +282,9 @@ func (r Result) WithProviderFacts(facts channelprovider.Binding) Result {
 	return r
 }
 
+// SessionTransportInterrupted is a disconnect observation, not a diagnosis.
+const SessionTransportInterrupted = "connection interrupted"
+
 type SessionConnectionReadback struct {
 	ClaimCodeNotice     *ClaimCodeNotice `json:"claim_code_notice,omitempty"`
 	Unclaimed           *int64           `json:"account_unclaimed,omitempty"`

@@ -107,7 +107,7 @@ func newClientOccurrence(ctx context.Context, connectionID, occurrenceID string,
 				o.disconnectedAt = time.Now()
 			}
 			o.mu.Unlock()
-			reason, observedDisconnect = "network unreachable", true
+			reason, observedDisconnect = channelonboarding.SessionTransportInterrupted, true
 		case *events.LoggedOut:
 			if observed != nil && observed.Reason.IsLoggedOut() {
 				fact := *observed
