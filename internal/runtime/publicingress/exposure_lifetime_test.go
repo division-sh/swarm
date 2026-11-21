@@ -153,7 +153,10 @@ func TestExposureListenerLossDuringStartupReturnsServeCause(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c.waitRetry = func(context.Context, time.Duration) error {
+	c.waitRetry = func(ctx context.Context, _ time.Duration) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		return errors.New("startup proof retried after listener loss")
 	}
 	ctx, cancel := context.WithCancel(t.Context())
