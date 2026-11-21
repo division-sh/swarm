@@ -16,7 +16,7 @@ import (
 // A delivery send owns no run or agent. The principal lock serializes default
 // changes with authorization and launch; the joined rows fence a replaced
 // binding or activation even when the immutable plan still exists.
-func requireChannelDeliveryAuthorityTx(ctx context.Context, tx *sql.Tx, authority runtimeeffects.Authority, postgres bool) error {
+func requireChannelDeliveryAuthorityTx(ctx context.Context, tx *sql.Tx, authority runtimeeffects.Authority, postgres, authorize bool) error {
 	delivery := authority.ChannelDelivery
 	if delivery.Parent.Kind == channelnative.TransportDeploymentRegistration {
 		if err := channeldelivery.LockTransportParentTx(ctx, tx, delivery.Parent, postgres); err != nil {
@@ -34,8 +34,15 @@ func requireChannelDeliveryAuthorityTx(ctx context.Context, tx *sql.Tx, authorit
 		return invalidExternalAuthority(authority, "source_missing")
 	}
 	frozen, err := channeldelivery.FreezeCurrentSourceTx(ctx, tx, plan, postgres)
-	if err != nil || frozen.Hash != delivery.RenderHash {
+	if err != nil {
 		return invalidExternalAuthority(authority, "source_changed")
+	}
+	if frozen.Hash != delivery.RenderHash {
+		err := invalidExternalAuthority(authority, "source_changed")
+		if authorize {
+			return &runtimeeffects.ChannelDeliveryRenderSuperseded{Cause: err}
+		}
+		return err
 	}
 	// Freeze locks the canonical source before eligibility is evaluated. A
 	// terminal status need not change the render bytes (for example a notice).

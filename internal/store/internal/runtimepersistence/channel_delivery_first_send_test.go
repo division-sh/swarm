@@ -97,6 +97,8 @@ func proveChannelFirstSendEligibility(t *testing.T, ctx context.Context, mode st
 		effectCtx = startupownership.CarryMutationAuthority(effectCtx, ctx)
 		if _, err := runtimeeffects.BeginChannelDelivery(effectCtx, []byte(authority.ID), nil); err == nil {
 			t.Fatal("completed notice authorized")
+		} else if _, ok := err.(*runtimeeffects.ChannelDeliveryRenderSuperseded); !ok {
+			t.Fatalf("completed notice did not report a confirmed pre-authorization render change: %v", err)
 		}
 		return
 	}
@@ -114,6 +116,8 @@ func proveChannelFirstSendEligibility(t *testing.T, ctx context.Context, mode st
 		responsibility(true, true)
 		if err := handle.MarkLaunched(effectCtx); err == nil {
 			t.Fatal("source loss before launch was admitted")
+		} else if _, ok := err.(*runtimeeffects.ChannelDeliveryRenderSuperseded); ok {
+			t.Fatalf("already-authorized attempt was reported as unselected: %v", err)
 		}
 		failure, _ := failures.EnvelopeFromError(failures.New(failures.ClassLifecycleConflict, "test_source_closed_prelaunch", "test", "launch", nil))
 		if err := handle.Settle(effectCtx, runtimeeffects.StateTerminalFailure, &failure, nil); err != nil {
