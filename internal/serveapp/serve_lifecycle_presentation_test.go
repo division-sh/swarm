@@ -346,7 +346,7 @@ func TestServeLifecyclePresenterPreReadyRuntimeFailureSuppressesCommit(t *testin
 	presenter := newServeLifecyclePresenter(cliapp.ServeOptions{Output: &stdout, ErrorOutput: &stderr})
 	presenter.runtimeFailure("api server", errors.New("accept failed before readiness"))
 	published := false
-	if presenter.commitReady(serveLifecycleReadyFacts{ProjectName: "must-not-render"}, func() { published = true }) {
+	if presenter.commitReady(serveLifecycleReadyFacts{ProjectName: "must-not-render"}, func() { published = true }, nil) {
 		t.Fatal("readiness committed after a pre-ready runtime failure")
 	}
 	presenter.finish()
@@ -372,7 +372,7 @@ func TestServeLifecyclePresenterPublishesAdmissionBeforeVisibleReadiness(t *test
 		if out.Len() != 0 {
 			t.Fatalf("visible readiness preceded public admission: %q", out.String())
 		}
-	}) {
+	}, nil) {
 		t.Fatal("readiness commit was rejected")
 	}
 	if !published {

@@ -1193,7 +1193,8 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 			}
 		}
 		shutdownErr = errors.Join(shutdownErr, channelWorker.finishOutput(shutdownCtx, outputSafe))
-		shutdownErr = errors.Join(shutdownErr, publicExposure.CloseListener(shutdownCtx))
+		// Join at cutoff; Stop includes this latched result once below.
+		publicExposure.CloseListener(shutdownCtx)
 		shutdownErr = errors.Join(shutdownErr, shutdownHTTPServer(shutdownCtx, "mcp", mcpServer))
 		shutdownErr = errors.Join(shutdownErr, apiProbe.Close(shutdownCtx))
 		if retained != nil {
@@ -1214,7 +1215,7 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 		cancelOwnershipWatch()
 		finalErr := selectedLifecycle.Finalize(shutdownCtx, shutdownErr)
 		presenter.shutdown(finalErr)
-		if finalErr != nil {
+		if finalErr != nil || publicExposure.ListenerFailure() != nil {
 			exitCode = max(exitCode, 1)
 		}
 	}()
@@ -1852,7 +1853,10 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 				return authority.GrantID
 			},
 			OnGeneration: reconcilePublicIngress,
-			OnFatal:      func(exposureErr error) { runtimeFailure("public_ingress", exposureErr) },
+			OnFatal: func(exposureErr error) {
+				presenter.runtimeFailure("public_ingress", exposureErr)
+				cancelServe()
+			},
 		})
 		if controllerErr != nil {
 			presenter.fail(20, "public_ingress", controllerErr)
@@ -2175,7 +2179,7 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 		ready.Store(true)
 		close(channelWorkerReady)
 		supervisor.mu.Unlock()
-	}) {
+	}, publicExposure) {
 		return 1
 	}
 	if feedEnabled {

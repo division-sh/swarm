@@ -19,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime"
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	runtimepublicingress "github.com/division-sh/swarm/internal/runtime/publicingress"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
@@ -435,16 +436,17 @@ func (p *serveLifecyclePresenter) recordBootWarnings(report runtimebootverify.Re
 }
 
 func (p *serveLifecyclePresenter) readyPresentation(facts serveLifecycleReadyFacts) {
-	p.commitReady(facts, nil)
+	p.commitReady(facts, nil, nil)
 }
 
-func (p *serveLifecyclePresenter) commitReady(facts serveLifecycleReadyFacts, publish func()) bool {
+func (p *serveLifecyclePresenter) commitReady(facts serveLifecycleReadyFacts, publish func(), exposure *runtimepublicingress.Controller) bool {
 	if p == nil {
 		return false
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.failed || p.ready {
+	// A listener can fail after Start but before its fatal callback gets this lock.
+	if p.failed || p.ready || exposure.ListenerFailure() != nil {
 		return false
 	}
 	p.ready = true

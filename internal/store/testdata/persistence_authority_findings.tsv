@@ -1094,6 +1094,7 @@ typed-process-local	interface-method	typed	internal/runtime/pipelineobligation/p
 typed-process-local	interface-method	typed	internal/runtime/pipelineobligation/publication_group.go	PublicationPreparation	method:ValidatePreparedFanOutEvent	func(original github.com/division-sh/swarm/internal/events.Event) error
 typed-process-local	callback-type	typed	internal/runtime/publicingress/exposure.go	(*github.com/division-sh/swarm/internal/runtime/publicingress.Controller).beginUpdate	result:#2	func(error)
 typed-process-local	callback-type	typed	internal/runtime/publicingress/exposure.go	Controller	field:cancel	context.CancelFunc
+typed-process-local	callback-type	typed	internal/runtime/publicingress/exposure.go	Controller	field:stopTransport	context.CancelFunc
 typed-process-local	callback-type	typed	internal/runtime/publicingress/exposure.go	Controller	field:waitRetry	func(context.Context, time.Duration) error
 typed-process-local	callback-type	typed	internal/runtime/publicingress/exposure.go	Options	field:Now	func() time.Time
 typed-process-local	callback-type	typed	internal/runtime/publicingress/exposure.go	Options	field:OnFatal	func(error)
@@ -1102,6 +1103,8 @@ typed-process-local	callback-type	typed	internal/runtime/publicingress/exposure.
 typed-process-local	interface-method	typed	internal/runtime/publicingress/exposure.go	ManagedLauncher	method:Launch	func(context.Context, string, string, string) (github.com/division-sh/swarm/internal/runtime/publicingress.Process, error)
 typed-process-local	interface-method	typed	internal/runtime/publicingress/exposure.go	Process	method:Done	func() <-chan error
 typed-process-local	interface-method	typed	internal/runtime/publicingress/exposure.go	Process	method:Stop	func() error
+typed-process-local	callback-type	typed	internal/runtime/publicingress/listener.go	(*github.com/division-sh/swarm/internal/runtime/publicingress.Controller).admitDelegate	result:#2	func()
+typed-process-local	callback-type	typed	internal/runtime/publicingress/listener.go	(*github.com/division-sh/swarm/internal/runtime/publicingress.Controller).serveListener	param:cancelStartup	context.CancelFunc
 typed-process-local	callback-type	typed	internal/runtime/publicingress/readiness.go	(*github.com/division-sh/swarm/internal/runtime/publicingress.ReadinessOwner).SetCurrentnessChecks	param:credentials	func(context.Context, map[string]string) (bool, error)
 typed-process-local	callback-type	typed	internal/runtime/publicingress/readiness.go	(*github.com/division-sh/swarm/internal/runtime/publicingress.ReadinessOwner).SetCurrentnessChecks	param:effect	func(context.Context, github.com/division-sh/swarm/internal/runtime/effects.Authority) (bool, error)
 typed-process-local	callback-type	typed	internal/runtime/publicingress/readiness.go	(*github.com/division-sh/swarm/internal/runtime/publicingress.ReadinessOwner).SetCurrentnessChecks	param:startup	func(context.Context, string) (bool, error)

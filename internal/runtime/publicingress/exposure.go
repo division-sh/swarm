@@ -70,27 +70,38 @@ type Options struct {
 }
 
 type Controller struct {
-	opts        Options
-	mu          sync.RWMutex
-	generation  Generation
-	listener    net.Listener
-	server      *http.Server
-	serverDone  chan struct{}
-	process     Process
-	cancel      context.CancelFunc
-	done        chan struct{}
-	supervising bool
-	nonce       string
-	waitRetry   func(context.Context, time.Duration) error
-	updateCtx   context.Context
-	updateSeal  chan struct{}
-	updateN     int
-	updateDone  chan struct{}
-	updateErr   error
-	genErr      error
-	sealOnce    sync.Once
-	sealErr     error
-	sealed      bool
+	opts          Options
+	mu            sync.RWMutex
+	generation    Generation
+	listener      net.Listener
+	server        *http.Server
+	serverDone    chan struct{}
+	serveErr      error
+	cutoff        bool
+	closeOnce     sync.Once
+	closeErr      error
+	delegates     map[uint64]context.CancelFunc
+	delegateID    uint64
+	delegateDone  chan struct{}
+	process       Process
+	cancel        context.CancelFunc
+	transportCtx  context.Context
+	stopTransport context.CancelFunc
+	stopOnce      sync.Once
+	stopErr       error
+	done          chan struct{}
+	supervising   bool
+	nonce         string
+	waitRetry     func(context.Context, time.Duration) error
+	updateCtx     context.Context
+	updateSeal    chan struct{}
+	updateN       int
+	updateDone    chan struct{}
+	updateErr     error
+	genErr        error
+	sealOnce      sync.Once
+	sealErr       error
+	sealed        bool
 }
 
 func PreflightCloudflared(ctx context.Context, binary string) error {
@@ -179,9 +190,17 @@ func (c *Controller) Start(ctx context.Context) error {
 	if c == nil {
 		return fmt.Errorf("public exposure controller is required")
 	}
-	ctx, cancel := context.WithCancel(ctx)
+	transportCtx, stopTransport := context.WithCancel(ctx)
+	ctx, cancel := context.WithCancel(transportCtx)
+	serverStarted := false
+	defer func() {
+		if !serverStarted {
+			stopTransport()
+		}
+	}()
 	c.mu.Lock()
 	c.updateCtx, c.cancel = ctx, cancel
+	c.transportCtx, c.stopTransport = transportCtx, stopTransport
 	c.mu.Unlock()
 	listenAddress := strings.TrimSpace(c.opts.ListenAddress)
 	if c.opts.Mode == ModeManagedQuickTunnel {
@@ -214,19 +233,21 @@ func (c *Controller) Start(ctx context.Context) error {
 	}
 	c.server = &http.Server{Handler: http.HandlerFunc(c.servePublicRoute), ReadHeaderTimeout: 5 * time.Second, TLSConfig: c.opts.TLSConfig}
 	c.serverDone = make(chan struct{})
-	go func() {
-		defer close(c.serverDone)
-		if c.opts.Mode == ModeNativeTLS {
-			_ = c.server.ServeTLS(listener, "", "")
-		} else {
-			_ = c.server.Serve(listener)
-		}
-	}()
-	if err := c.establish(ctx); err != nil {
+	serverStarted = true
+	go c.serveListener(listener, cancel)
+	err = c.establish(ctx)
+	c.mu.Lock()
+	if err != nil || c.serveErr != nil {
+		c.mu.Unlock()
 		_ = c.Stop(context.Background())
+		if failure := c.ListenerFailure(); failure != nil {
+			if err == nil || err == context.Canceled || err == failure {
+				return failure
+			}
+			return errors.Join(failure, err)
+		}
 		return err
 	}
-	c.mu.Lock()
 	if c.sealed {
 		c.mu.Unlock()
 		return context.Canceled
@@ -245,9 +266,19 @@ func (c *Controller) establish(ctx context.Context) (err error) {
 	defer func() { finish(err) }()
 	publicOrigin := strings.TrimRight(strings.TrimSpace(c.opts.PublicOrigin), "/")
 	var process Process
-	succeeded := false
+	succeeded, published := false, false
 	defer func() {
 		if succeeded || process == nil {
+			return
+		}
+		c.mu.Lock()
+		retained := c.sealed && published
+		if retained {
+			// A published generation belongs to cutoff even if its writer failed.
+			c.process = process
+		}
+		c.mu.Unlock()
+		if retained {
 			return
 		}
 		_ = process.Stop()
@@ -265,7 +296,7 @@ func (c *Controller) establish(ctx context.Context) (err error) {
 		if err != nil {
 			return err
 		}
-		processCtx := c.updateCtx
+		processCtx := c.transportCtx
 		if processCtx == nil {
 			processCtx = ctx
 		}
@@ -283,15 +314,10 @@ func (c *Controller) establish(ctx context.Context) (err error) {
 		return err
 	}
 	generation := Generation{ID: uuid.NewString(), Mode: c.opts.Mode, PublicOrigin: publicOrigin, ListenAddress: c.listener.Addr().String(), CreatedAt: c.opts.Now().UTC()}
-	c.mu.Lock()
-	c.generation = generation
-	c.mu.Unlock()
-	if c.opts.Readiness != nil {
-		c.opts.Readiness.SetExposure(ExposureEvidence{
-			GenerationID: generation.ID, Mode: generation.Mode, PublicOrigin: generation.PublicOrigin, ListenAddress: generation.ListenAddress,
-			StartupAuthorityID: c.startupAuthority(), ObservedAt: generation.CreatedAt, ExpiresAt: generation.CreatedAt.Add(EvidenceTTL),
-		})
+	if err := c.publishListenerExposure(generation, generation.CreatedAt, true); err != nil {
+		return err
 	}
+	published = true
 	if c.opts.OnGeneration != nil {
 		if err := c.opts.OnGeneration(ctx, generation); err != nil {
 			return err
@@ -356,6 +382,9 @@ func (c *Controller) replaceManagedTunnel(ctx context.Context) bool {
 			log.Printf("public ingress restored with generation %s", c.Generation().ID)
 			return true
 		}
+		if c.ListenerFailure() != nil {
+			return false
+		}
 		select {
 		case <-c.updateSeal:
 			return false
@@ -380,14 +409,7 @@ func (c *Controller) renew(ctx context.Context) error {
 		}
 		return err
 	}
-	now := c.opts.Now().UTC()
-	if c.opts.Readiness != nil {
-		c.opts.Readiness.SetExposure(ExposureEvidence{
-			GenerationID: generation.ID, Mode: generation.Mode, PublicOrigin: generation.PublicOrigin, ListenAddress: generation.ListenAddress,
-			StartupAuthorityID: c.startupAuthority(), ObservedAt: now, ExpiresAt: now.Add(EvidenceTTL),
-		})
-	}
-	return nil
+	return c.publishListenerExposure(generation, c.opts.Now().UTC(), false)
 }
 
 func (c *Controller) Renew(ctx context.Context) error {
@@ -421,6 +443,11 @@ func (c *Controller) beginUpdate(ctx context.Context, generation bool) (context.
 	if c.sealed {
 		c.mu.Unlock()
 		return ctx, nil, context.Canceled
+	}
+	if c.serveErr != nil {
+		err := c.serveErr
+		c.mu.Unlock()
+		return ctx, nil, err
 	}
 	if c.updateN == 0 {
 		c.updateDone = make(chan struct{})
@@ -504,47 +531,6 @@ func (c *Controller) Generation() Generation {
 	return c.generation
 }
 
-func (c *Controller) Stop(ctx context.Context) error {
-	if c == nil {
-		return nil
-	}
-	c.SealUpdates(ctx)
-	if c.cancel != nil {
-		c.cancel()
-	}
-	c.mu.RLock()
-	process := c.process
-	c.mu.RUnlock()
-	if process != nil {
-		_ = process.Stop()
-		<-process.Done()
-	}
-	shutdownErr := c.CloseListener(ctx)
-	if c.opts.Readiness != nil {
-		c.opts.Readiness.RevokeExposure("serve shutdown")
-	}
-	return errors.Join(c.sealErr, c.genErr, c.updateErr, shutdownErr)
-}
-
-func (c *Controller) CloseListener(ctx context.Context) error {
-	if c == nil {
-		return nil
-	}
-	var shutdownErr error
-	if c.server != nil {
-		shutdownErr = c.server.Shutdown(ctx)
-		// Shutdown can precede Serve registering its listener. Join that handoff
-		// before returning ownership to the caller, including failed startup.
-		if shutdownErr != nil {
-			shutdownErr = errors.Join(shutdownErr, c.server.Close())
-		}
-		<-c.serverDone
-	} else if c.listener != nil {
-		_ = c.listener.Close()
-	}
-	return shutdownErr
-}
-
 func (c *Controller) servePublicRoute(w http.ResponseWriter, request *http.Request) {
 	// Do not let ServeMux normalize or redirect a different public path.
 	parts := strings.Split(request.URL.Path, "/")
@@ -560,7 +546,13 @@ func (c *Controller) servePublicRoute(w http.ResponseWriter, request *http.Reque
 		http.NotFound(w, request)
 		return
 	}
-	c.opts.Handler.ServeHTTP(w, request)
+	ctx, finish := c.admitDelegate(request.Context())
+	if finish == nil {
+		http.Error(w, "ingress target is unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	defer finish()
+	c.opts.Handler.ServeHTTP(w, request.WithContext(ctx))
 }
 
 func (c *Controller) serveProbe(w http.ResponseWriter, request *http.Request) {
