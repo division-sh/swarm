@@ -662,20 +662,28 @@ func (options channelDeliveryWorkerOptions) observePass(ctx context.Context, sco
 	}
 }
 
-func startServeChannelDelivery(ctx context.Context, owner *worklifetime.Process, dispatcher *serveChannelDeliveryDispatcher, options channelDeliveryWorkerOptions) (*serveChannelDeliveryWorker, error) {
-	if owner == nil || dispatcher == nil || dispatcher.store == nil {
-		return nil, fmt.Errorf("channel delivery worker requires process and dispatcher")
-	}
+func (options channelDeliveryWorkerOptions) reconcileCadence() (time.Duration, time.Duration, error) {
 	ordinary := options.cadence.Ordinary
 	native := options.cadence.Native
 	if ordinary < 0 || native < 0 {
-		return nil, fmt.Errorf("channel delivery observation cadence must be positive")
+		return 0, 0, fmt.Errorf("channel delivery observation cadence must be positive")
 	}
 	if ordinary == 0 {
 		ordinary = time.Second
 	}
 	if native == 0 {
 		native = 5 * time.Second
+	}
+	return ordinary, native, nil
+}
+
+func startServeChannelDelivery(ctx context.Context, owner *worklifetime.Process, dispatcher *serveChannelDeliveryDispatcher, options channelDeliveryWorkerOptions) (*serveChannelDeliveryWorker, error) {
+	if owner == nil || dispatcher == nil || dispatcher.store == nil {
+		return nil, fmt.Errorf("channel delivery worker requires process and dispatcher")
+	}
+	ordinary, native, err := options.reconcileCadence()
+	if err != nil {
+		return nil, err
 	}
 	lease, err := owner.Begin(ctx)
 	if err != nil {

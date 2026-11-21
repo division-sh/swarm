@@ -335,32 +335,38 @@ func (c *Controller) supervise(ctx context.Context) {
 			if c.opts.Readiness != nil {
 				c.opts.Readiness.RevokeExposure("managed tunnel stopped: " + errorText(cause))
 			}
-			var last error
-			for attempt, backoff := range []time.Duration{time.Second, 2 * time.Second, 4 * time.Second} {
-				select {
-				case <-ctx.Done():
-					return
-				case <-c.updateSeal:
-					return
-				case <-time.After(backoff):
-				}
-				last = c.establish(ctx)
-				if last == nil {
-					log.Printf("public ingress restored with generation %s", c.Generation().ID)
-					break
-				}
-				select {
-				case <-c.updateSeal:
-					return
-				default:
-				}
-				if attempt == 2 && c.opts.OnFatal != nil {
-					c.opts.OnFatal(fmt.Errorf("public tunnel re-establishment failed after 3 attempts: %w", last))
-					return
-				}
+			if !c.replaceManagedTunnel(ctx) {
+				return
 			}
 		}
 	}
+}
+
+func (c *Controller) replaceManagedTunnel(ctx context.Context) bool {
+	for attempt, backoff := range []time.Duration{time.Second, 2 * time.Second, 4 * time.Second} {
+		select {
+		case <-ctx.Done():
+			return false
+		case <-c.updateSeal:
+			return false
+		case <-time.After(backoff):
+		}
+		last := c.establish(ctx)
+		if last == nil {
+			log.Printf("public ingress restored with generation %s", c.Generation().ID)
+			return true
+		}
+		select {
+		case <-c.updateSeal:
+			return false
+		default:
+		}
+		if attempt == 2 && c.opts.OnFatal != nil {
+			c.opts.OnFatal(fmt.Errorf("public tunnel re-establishment failed after 3 attempts: %w", last))
+			return false
+		}
+	}
+	return true
 }
 
 func (c *Controller) renew(ctx context.Context) error {
