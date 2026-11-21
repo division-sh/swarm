@@ -677,7 +677,9 @@ func (d *serveChannelDeliveryDispatcher) dispatchRuntimeChannel(ctx context.Cont
 	}
 	ctx, err = withChannelProviderAdmission(ctx, lease, plan)
 	if err != nil {
-		if _, refused := err.(runtime.ChannelPublicationCredentialNotCurrent); !final && refused {
+		_, notCurrent := err.(runtime.ChannelPublicationCredentialNotCurrent)
+		unusable, _ := err.(*runtimecredentials.SecretBindingObservationError)
+		if !final && (notCurrent || unusable != nil && unusable.Err == runtimecredentials.ErrCredentialValueUnusable) {
 			return &ordinaryChannelCredentialRefusal{err}
 		}
 		return err
