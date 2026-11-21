@@ -45,7 +45,8 @@ func (d *serveChannelDeliveryDispatcher) reconcileSessionConnections(ctx context
 	var operations []channelonboarding.Operation
 	presentations := map[string]string{}
 	for _, activation := range activations {
-		if activation.Provider != "whatsapp" {
+		binding, installed := installedChannelFactsFor(activation.Provider)
+		if !installed || !binding.Session() {
 			continue
 		}
 		result, err := d.onboarding.Get(ctx, activation.OperationID)
@@ -109,7 +110,8 @@ func (d *serveChannelDeliveryDispatcher) reconcileSessionConnection(ctx context.
 					return err
 				}
 			}
-			fmt.Fprintf(d.output, "WhatsApp: reconnected (%s)\n", presentation)
+			binding, _ := installedChannelFactsFor(op.Provider)
+			fmt.Fprintf(d.output, "%s: reconnected (%s)\n", binding.DisplayName(), presentation)
 		}
 		d.sessionStates[op.OperationID], d.sessionAttempts[op.OperationID] = state, 0
 		return nil

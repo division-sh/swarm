@@ -32,7 +32,7 @@ func (pc *PipelineCoordinator) committedAccountHolder(flow string, before, after
 		return nil, err
 	}
 	plan, held := provider.ChannelPlan()
-	if !held || plan.Provider() != "telegram" {
+	if !held || !plan.ProviderFacts().PollsClaim() {
 		return nil, nil
 	}
 	previous, _ := declaration.Value(before)
@@ -40,7 +40,7 @@ func (pc *PipelineCoordinator) committedAccountHolder(flow string, before, after
 	if !present || value == "" || value == previous {
 		return nil, nil
 	}
-	ref, err := channelonboarding.CanonicalAccount(plan.Provider(), value)
+	ref, err := channelonboarding.CanonicalAccount(plan.ProviderFacts(), value)
 	if err != nil {
 		return nil, err
 	}

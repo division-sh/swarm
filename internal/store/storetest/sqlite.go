@@ -1,6 +1,9 @@
 package storetest
 
 import (
+	"github.com/division-sh/swarm/internal/channelprovider"
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"context"
 	"database/sql"
 	"os"
@@ -50,7 +53,7 @@ func StartSQLiteRuntimeStoreWithContext(t testing.TB, ctx context.Context) *stor
 // PostgreSQL test database and returns the admitted store object.
 func AdmitPostgresRuntimeStore(t testing.TB, db *sql.DB) *store.PostgresStore {
 	t.Helper()
-	postgresStore := NewPostgresStoreForTest(db)
+	postgresStore := NewPostgresStoreForTest(db, channelfixture.Facts)
 	BootstrapPostgresRuntimeStore(t, postgresStore)
 	bindTestPayloadAdmitter(postgresStore)
 	return postgresStore
@@ -60,7 +63,7 @@ func AdmitPostgresRuntimeStore(t testing.TB, db *sql.DB) *store.PostgresStore {
 // SQLite test database and returns the admitted store object.
 func AdmitSQLiteRuntimeStore(t testing.TB, db *sql.DB) *store.SQLiteRuntimeStore {
 	t.Helper()
-	sqliteStore := NewSQLiteRuntimeStoreForTest(db)
+	sqliteStore := NewSQLiteRuntimeStoreForTest(db, channelfixture.Facts)
 	platformSpec, plans := canonicalPlatformPlans(t)
 	if err := sqliteStore.BootstrapSchema(context.Background(), store.SchemaBootstrapRequest{
 		PlatformPlans: plans,
@@ -107,12 +110,12 @@ func commitPersistedEventDeliveryFixture(ctx context.Context, selected any, even
 	return private.CommitPersistedEventDeliveryFixtureForTest(ctx, selected, eventID, runID, routes)
 }
 
-func NewPostgresStoreForTest(db *sql.DB) *store.PostgresStore {
-	return private.NewPostgresStoreForTest(db)
+func NewPostgresStoreForTest(db *sql.DB, facts channelprovider.FactsLookup) *store.PostgresStore {
+	return private.NewPostgresStoreForTest(db, facts)
 }
 
-func NewSQLiteRuntimeStoreForTest(db *sql.DB) *store.SQLiteRuntimeStore {
-	return private.NewSQLiteRuntimeStoreForTest(db)
+func NewSQLiteRuntimeStoreForTest(db *sql.DB, facts channelprovider.FactsLookup) *store.SQLiteRuntimeStore {
+	return private.NewSQLiteRuntimeStoreForTest(db, facts)
 }
 
 // BootstrapPostgresRuntimeStore admits an existing PostgreSQL store through

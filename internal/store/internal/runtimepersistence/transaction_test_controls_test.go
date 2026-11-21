@@ -1,6 +1,8 @@
 package runtimepersistence
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"context"
 	"database/sql"
 	"database/sql/driver"
@@ -38,7 +40,7 @@ func NewPostgresStore(dsn string, native ...driver.Connector) (*PostgresStore, e
 		_ = db.Close()
 		return nil, err
 	}
-	store, err := newPostgresStoreComposition(backend)
+	store, err := newPostgresStoreComposition(backend, channelfixture.Facts)
 	if err != nil {
 		_ = db.Close()
 		return nil, err
@@ -79,7 +81,7 @@ func NewSQLiteRuntimeStore(path string, native ...nativeSQLiteFixtureConstructio
 	if err != nil {
 		return nil, err
 	}
-	store, err := newSQLiteStoreComposition(schema, backend, identity)
+	store, err := newSQLiteStoreComposition(schema, backend, identity, channelfixture.Facts)
 	if err != nil {
 		_ = schema.Close()
 		return nil, err

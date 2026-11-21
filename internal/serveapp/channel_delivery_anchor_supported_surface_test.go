@@ -15,7 +15,6 @@ import (
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/cliapp"
-	"github.com/division-sh/swarm/internal/packadmission"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/bootverify"
 	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
@@ -771,7 +770,7 @@ func TestScalar2556ChannelAnchorSourcePreservesGateText(t *testing.T) {
 				}
 			}
 			repo := canonicalrouting.RepoRoot(t)
-			bundle, err := contracts.LoadWorkflowContractBundleWithOptions(repo, root, contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory})
+			bundle, err := contracts.LoadWorkflowContractBundleWithOptions(repo, root, contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{AdmitPackInventory: ChannelRegistrations().AdmitInventory})
 			if err != nil {
 				t.Fatal(err)
 			}

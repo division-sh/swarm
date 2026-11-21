@@ -57,7 +57,7 @@ func TestRetainedSessionAccountIsProvenanceNotExecutableAuthority(t *testing.T) 
 			if present {
 				op.SessionAccount, want = account, row.present
 			}
-			if err := op.ValidateSessionAccount(); (err == nil) != want {
+			if err := op.ValidateSessionAccount(op.ProviderFacts()); (err == nil) != want {
 				t.Fatalf("phase %s present=%t: %v, want valid=%t", row.phase, present, err, want)
 			}
 		}
@@ -72,7 +72,7 @@ func TestRetainedSessionAccountIsProvenanceNotExecutableAuthority(t *testing.T) 
 	} {
 		op := Operation{Posture: ActivationSessionConnection, Provider: "whatsapp", Phase: PhaseAwaitingExternalIdentity, SessionConnectionID: account.ConnectionID, SessionAccount: account}
 		mutate(&op)
-		if err := op.ValidateSessionAccount(); err == nil {
+		if err := op.ValidateSessionAccount(op.ProviderFacts()); err == nil {
 			t.Fatal("contradictory retained account admitted")
 		}
 	}

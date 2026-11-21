@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
+	"github.com/division-sh/swarm/tests/support/channelfixture"
 )
 
 func TestMailboxReplacementReasonUsesExactRuledSentence(t *testing.T) {
@@ -363,6 +364,7 @@ func mailboxProposedEffectStateResult() map[string]any {
 
 func testRootCommandOptions(server *httptest.Server) rootCommandOptions {
 	opts := defaultRootCommandOptions()
+	opts.channelReadbackFact = channelfixture.For("telegram")
 	hasTokenSource := strings.TrimSpace(opts.apiTokenFile) != ""
 	if cfg, err := loadCLICommandConfig(); err == nil && strings.TrimSpace(cfg.Connection.APITokenFile) != "" {
 		hasTokenSource = true

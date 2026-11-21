@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
@@ -25,17 +26,27 @@ type SessionInputReference struct {
 	Kind         string
 }
 
+// Only the provider subtree can supply original retained evidence. The issuer
+// still validates responsibility/currentness and owns the input seal.
+type retainedSessionInputReader interface {
+	readOwnedInput(context.Context, SessionInputReference) (nativeSessionInput, error)
+	readPendingBusinessInput(context.Context, SessionInputReference) (nativeSessionInput, error)
+	readPendingClaimInput(context.Context, SessionInputReference) (nativeSessionInput, error)
+	capturePublications() retainedPublicationOwner
+}
+
 type sessionInputOwner struct {
 	store           channelonboarding.Store
 	operations      channelonboarding.OperationStore
-	native          *sessionInputReader
+	native          retainedSessionInputReader
 	operation       string
 	registered      *RegisteredBusinessBinding
 	operatorAccount channelonboarding.AccountReference
 }
 
-func newSessionInputOwner(store channelonboarding.Store, operations channelonboarding.OperationStore, native *sessionInputReader, operation string) (*sessionInputOwner, error) {
-	if store == nil || operations == nil || native == nil || operation == "" {
+func newSessionInputOwner(store channelonboarding.Store, operations channelonboarding.OperationStore, native retainedSessionInputReader, operation string) (*sessionInputOwner, error) {
+	if store == nil || operations == nil || native == nil || operation == "" ||
+		reflect.ValueOf(native).Kind() == reflect.Pointer && reflect.ValueOf(native).IsNil() {
 		return nil, fmt.Errorf("native input requires its owned SDK/capture and exact declared responsibility")
 	}
 	return &sessionInputOwner{store: store, operations: operations, native: native, operation: operation}, nil
@@ -132,6 +143,7 @@ func (o *sessionInputOwner) admitRetainedInput(ctx context.Context, reference Se
 		return input.Admission{}, err
 	}
 	return inputfact.SealOwnedCapture(inputfact.Capture{Store: o.store, Responsibility: responsibility,
+		ProviderFacts:           native.OriginalCapture.ProviderFacts(),
 		OriginalProviderEventID: providerID, OriginalCaptureFingerprint: fingerprint,
 		AccountOnly: native.AccountOnly,
 		Scope:       native.Scope, BindingRevision: native.BindingRevision, PublicationRunID: native.PublicationBinding.RunID,
@@ -191,7 +203,7 @@ func (o *sessionInputOwner) currentInputResponsibility(ctx context.Context, nati
 		if err != nil {
 			return original, err
 		}
-		if activation.ActivationID != native.ActivationID || !original.MatchesActivation(op, activation) {
+		if activation.ActivationID != native.ActivationID || !original.MatchesActivation(op, activation, op.ProviderFacts()) {
 			return original, errCaptureScopeChanged
 		}
 	}
@@ -210,7 +222,7 @@ func (o *sessionInputOwner) recoveredInputResponsibility(ctx context.Context, na
 		return original, nil
 	}
 	if native.Scope != channelonboarding.SessionInputBusiness || native.PrincipalID != op.PrincipalID ||
-		!native.Source.Matches(op.Coordinate.DurableIdentity()) || op.ValidateSessionAccount() != nil {
+		!native.Source.Matches(op.Coordinate.DurableIdentity()) || op.ValidateSessionAccount(op.ProviderFacts()) != nil {
 		return original, errCaptureScopeChanged
 	}
 	activation, err := o.store.GetConnectedChannelActivation(ctx, op.SlotKey)

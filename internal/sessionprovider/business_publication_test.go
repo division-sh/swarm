@@ -3,6 +3,8 @@
 package sessionprovider
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"bytes"
 	"context"
 	"encoding/json"
@@ -64,7 +66,7 @@ func (f *activeInputFixture) publicationBus(t *testing.T) *bus.EventBus {
 	source, _ := correlation.SourceArtifactFactFromContext(f.ctx)
 	repo := pipeline.WorkflowRepoRoot()
 	bundle, err := contracts.LoadWorkflowContractBundleFromRootedSource(repo, f.rooted,
-		contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{})
+		contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{AdmitPackInventory: activeInputAdmission})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,7 +195,7 @@ func sessionBusinessSemanticFixture(t *testing.T, rooted sourceartifact.RootedSo
 	t.Helper()
 	repo := pipeline.WorkflowRepoRoot()
 	bundle, err := contracts.LoadWorkflowContractBundleFromRootedSource(repo, rooted,
-		contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{})
+		contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{AdmitPackInventory: activeInputAdmission})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -431,7 +433,7 @@ func TestWhatsAppBusinessCommitRuntimeDispatchAndHistoryBothStores(t *testing.T)
 			if err != nil || !settled {
 				t.Fatalf("original committed history required live SDK: %t %v", settled, err)
 			}
-			original, err := publicationCaptureProvenance(record.Request)
+			original, err := publicationCaptureProvenance(record.Request, channelfixture.For("whatsapp"))
 			if err != nil || !bytes.Equal(original.Body, event.Body) || !original.SameCapture(event) {
 				t.Fatalf("receipt lost original capture: %v", err)
 			}

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"fmt"
+	"github.com/division-sh/swarm/tests/support/channelfixture"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	domain "github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/channelprovider"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/packs"
 	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
@@ -722,6 +724,11 @@ type callbackLockFixture struct {
 
 func newCallbackLockFixture(t *testing.T, backend string) callbackLockFixture {
 	t.Helper()
+	return newCallbackLockFixtureWithFacts(t, backend, channelfixture.Facts)
+}
+
+func newCallbackLockFixtureWithFacts(t *testing.T, backend string, providerFacts func(string) (channelprovider.Binding, bool)) callbackLockFixture {
+	t.Helper()
 	var original *sql.DB
 	var dsn string
 	var err error
@@ -749,7 +756,7 @@ func newCallbackLockFixture(t *testing.T, backend string) callbackLockFixture {
 			t.Fatal(err)
 		}
 		bootstrapCallbackSchema(t, schema)
-		onboarding, err := onboardingowner.NewPostgres(b, schema.RequireCurrent)
+		onboarding, err := onboardingowner.NewPostgres(b, schema.RequireCurrent, providerFacts)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -769,7 +776,7 @@ func newCallbackLockFixture(t *testing.T, backend string) callbackLockFixture {
 			t.Fatal(err)
 		}
 		bootstrapCallbackSchema(t, schema)
-		onboarding, err := onboardingowner.NewSQLite(b, schema.RequireCurrent)
+		onboarding, err := onboardingowner.NewSQLite(b, schema.RequireCurrent, providerFacts)
 		if err != nil {
 			t.Fatal(err)
 		}

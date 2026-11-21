@@ -23,7 +23,7 @@ func TestServeSessionLogoutDispatcherRetainsOriginalUntilSettlementBothStores(t 
 			f, op, _ := pairedServeSessionObserver(t, backend)
 			d := &serveSessionLogoutDispatcher{sessions: f.adapter, effects: f.adapter.store.(effects.Store), posture: executionposture.Live}
 			target, err := d.PrepareSessionLogout(f.ctx, op)
-			if err != nil || !target.MatchesOperation(op) {
+			if err != nil || !target.MatchesOperation(op, op.ProviderFacts()) {
 				t.Fatal("served logout did not prepare the original SDK", err)
 			}
 			original := f.adapter.connection(op.OperationID)

@@ -19,7 +19,7 @@ type serveInstalledHandler struct{ handler http.Handler }
 func readStandbyStoreStatus(ctx context.Context, selection backendselection.Selection, cfg *config.Config) (string, error) {
 	bounded, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	inspection, err := cliapp.InspectSelectedStoreStartup(bounded, selection, cfg)
+	inspection, err := cliapp.InspectSelectedStoreStartup(bounded, selection, cfg, installedChannelFactsFor)
 	if err != nil {
 		return "", err
 	}

@@ -1,6 +1,8 @@
 package cliapp
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"bytes"
 	"context"
 	"encoding/json"
@@ -54,7 +56,7 @@ func newVerifyCompositionBootStore(t *testing.T, backend, root string, schema st
 		configText = fmt.Sprintf("store: {backend: sqlite, sqlite: {path: %q}}\n", path)
 	} else {
 		dsn, _, _ := testutil.StartEmptyPostgres(t)
-		selected, _, err := construction.OpenPostgres(dsn)
+		selected, _, err := construction.OpenPostgres(dsn, channelfixture.Facts)
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -1,6 +1,8 @@
 package tools_test
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"context"
 	"path/filepath"
 	"strings"
@@ -526,7 +528,7 @@ func newSQLiteRuntimeToolStoreForTest(t *testing.T) *store.SQLiteRuntimeStore {
 	if err != nil {
 		t.Fatalf("GeneratePlatformTableDDLs: %v", err)
 	}
-	sqliteStore, err := store.NewSQLiteRuntimeStore(filepath.Join(t.TempDir(), "dev.db"))
+	sqliteStore, err := store.NewSQLiteRuntimeStore(filepath.Join(t.TempDir(), "dev.db"), channelfixture.Facts)
 	if err != nil {
 		t.Fatalf("NewSQLiteRuntimeStore: %v", err)
 	}

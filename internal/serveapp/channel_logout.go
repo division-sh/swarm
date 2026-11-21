@@ -28,7 +28,7 @@ func (d *serveSessionLogoutDispatcher) PrepareSessionLogout(ctx context.Context,
 }
 
 func (d *serveSessionLogoutDispatcher) DispatchSessionLogout(ctx context.Context, op channelonboarding.TeardownOperation) error {
-	if d == nil || d.sessions == nil || d.effects == nil || op.Logout == nil || op.Logout.Validate() != nil || !d.posture.Valid() {
+	if d == nil || d.sessions == nil || d.effects == nil || op.Logout == nil || op.Logout.Validate(op.ProviderFacts()) != nil || !d.posture.Valid() {
 		return channelonboarding.ErrInvalidRequest
 	}
 	coordinate := op.Logout.Coordinate

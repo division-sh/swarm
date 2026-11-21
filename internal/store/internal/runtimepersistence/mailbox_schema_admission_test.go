@@ -1,6 +1,8 @@
 package runtimepersistence
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"context"
 	"database/sql"
 	"errors"
@@ -78,11 +80,11 @@ func TestMailboxTokenOnlySchemaRejectedBeforeRuntimeAdmissionBothStores(t *testi
 					_, pg, cleanup := testutil.StartEmptyPostgres(t)
 					t.Cleanup(cleanup)
 					db = pg
-					old := newPostgresStoreWithBackend(mustPostgresBackend(db))
+					old := newPostgresStoreWithBackend(mustPostgresBackend(db), channelfixture.Facts)
 					if err := old.BootstrapSchema(ctx, legacy); err != nil {
 						t.Fatal(err)
 					}
-					fresh := newPostgresStoreWithBackend(mustPostgresBackend(db))
+					fresh := newPostgresStoreWithBackend(mustPostgresBackend(db), channelfixture.Facts)
 					bootstrap = fresh.BootstrapSchema
 					runtimeProbe = func() error {
 						_, err := fresh.ListActiveAgentDescriptors(ctx, unacceptedAdmissionEventID)

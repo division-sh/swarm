@@ -1,6 +1,8 @@
 package runtimepersistence
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"context"
 	"database/sql"
 	"database/sql/driver"
@@ -158,7 +160,7 @@ func openCompletionOutcomeFixture(t *testing.T, backend string, wrappers ...func
 	if backend == "postgres" {
 		return completionSettlementFixture{store: admitTestPostgresStore(t, db), db: db, context: testAuthorActivityContext()}, control
 	}
-	store := NewSQLiteRuntimeStoreForTest(db)
+	store := NewSQLiteRuntimeStoreForTest(db, channelfixture.Facts)
 	if err := store.BootstrapSchema(testAuthorActivityContext(), canonicalSchemaBootstrapTestRequest(t)); err != nil {
 		t.Fatal(err)
 	}

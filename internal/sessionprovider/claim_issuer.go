@@ -47,6 +47,7 @@ func prepareSessionSetup(ctx context.Context, admitted input.Admission, trigger 
 	if err := json.Unmarshal(admitted.OriginalCapture(), &event); err != nil {
 		return absent, err
 	}
+	event = event.WithProviderFacts(admitted.ProviderFacts())
 	projectedBody, err := event.ProjectedBody()
 	if err != nil {
 		return absent, err

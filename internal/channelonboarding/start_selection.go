@@ -59,7 +59,7 @@ func (s *Service) resolveStartCandidate(ctx context.Context, input StartInput) (
 	if candidate.DeploymentRegistration != s.deployment || !s.deployment && input.ExpectedAccount != "" {
 		return principal, candidate, ErrInvalidRequest
 	}
-	if s.deployment && validateRegistrationScope(true, candidate.Provider, input.ExpectedAccount, candidate.Coordinate, candidate.Target.Selector) != nil {
+	if s.deployment && validateRegistrationScope(true, candidate.Provider, input.ExpectedAccount, candidate.Coordinate, candidate.Target.Selector, candidate.ProviderFacts()) != nil {
 		return principal, candidate, ErrInvalidRequest
 	}
 	if err := s.qualifyProvider(candidate); err != nil {

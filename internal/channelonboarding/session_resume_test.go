@@ -53,7 +53,7 @@ func TestSessionBusinessResumeOnlyChangesLiveOccurrence(t *testing.T) {
 			if want := change == "unchanged" || change == "live_occurrence"; ok != want {
 				t.Fatalf("resume=%t, want %t", ok, want)
 			}
-			if ok && (!resumed.MatchesActivation(current, active) || resumed.OperationRevision != active.OperationRevision ||
+			if ok && (!resumed.MatchesActivation(current, active, current.ProviderFacts()) || resumed.OperationRevision != active.OperationRevision ||
 				resumed.SessionAccount != expected.SessionAccount || !resumed.Coordinate.Matches(current.Coordinate)) {
 				t.Fatal("resume changed stable authority or failed current activation admission")
 			}

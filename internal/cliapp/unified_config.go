@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/channelprovider"
 	"github.com/division-sh/swarm/internal/config"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
@@ -23,9 +24,10 @@ const (
 )
 
 type unifiedConfigLoadOptions struct {
-	RepoRoot        string
-	ExplicitPath    string
-	BackendOverride string
+	ChannelRegistration ChannelRegistrationFactory
+	RepoRoot            string
+	ExplicitPath        string
+	BackendOverride     string
 }
 
 type unifiedConfigLoadResult struct {
@@ -42,6 +44,15 @@ type unifiedConfigSource struct {
 	Name    string
 	Path    string
 	Present *bool
+}
+
+type unifiedConfigPreparation struct {
+	opts        unifiedConfigLoadOptions
+	repoRoot    string
+	source      unifiedConfigSource
+	document    yamlsource.Value
+	diagnostics []unifiedConfigDiagnostic
+	config      *config.Config
 }
 
 type unifiedConfigDiagnosticKind string
@@ -104,37 +115,58 @@ func loadUnifiedConfig(opts unifiedConfigLoadOptions) (unifiedConfigLoadResult, 
 }
 
 func loadUnifiedConfigAllowDiagnostics(opts unifiedConfigLoadOptions) (unifiedConfigLoadResult, error) {
-	RepoRoot, err := requireInvocationRootPath(opts.RepoRoot)
+	prepared, err := prepareUnifiedConfig(opts)
 	if err != nil {
 		return unifiedConfigLoadResult{}, err
+	}
+	var facts channelprovider.Binding
+	if account := prepared.config.Channels.HITL; account != nil && opts.ChannelRegistration != nil {
+		selected, _ := opts.ChannelRegistration.Select(account.Provider)
+		facts = selected.Facts
+	}
+	return validateUnifiedConfig(prepared, facts)
+}
+
+func prepareUnifiedConfig(opts unifiedConfigLoadOptions) (unifiedConfigPreparation, error) {
+	RepoRoot, err := requireInvocationRootPath(opts.RepoRoot)
+	if err != nil {
+		return unifiedConfigPreparation{}, err
 	}
 	source, diagnostics := selectUnifiedConfigSource(RepoRoot, opts.ExplicitPath)
 	document, sourceDiagnostics := readUnifiedConfigSource(source)
 	diagnostics = append(diagnostics, sourceDiagnostics...)
+	value := yamlsource.ValueFromNode(&document)
 	cfg, err := defaultRuntimeConfig()
 	if err != nil {
-		return unifiedConfigLoadResult{}, err
+		return unifiedConfigPreparation{}, err
 	}
 	if len(document.Content) > 0 {
-		if err := config.DecodeSource(yamlsource.ValueFromNode(&document), cfg); err != nil {
+		if err := config.DecodeSource(value, cfg); err != nil {
 			diagnostics = append(diagnostics, unifiedConfigProjectionDiagnostic(err, source.Path))
 		}
 	}
 	backendOverride := strings.TrimSpace(opts.BackendOverride)
 	if len(unifiedConfigBlockers(diagnostics)) == 0 {
 		if _, err := llmselection.ResolvePersistedBackend(cfg.LLM.Backend); err != nil {
-			diagnostics = append(diagnostics, unifiedConfigValidationDiagnostic(err, source.Path, &document, "set llm.backend to a supported backend profile before applying command-line overrides"))
+			diagnostics = append(diagnostics, unifiedConfigValidationDiagnostic(err, source.Path, value, "set llm.backend to a supported backend profile before applying command-line overrides"))
 		}
 	}
 	if backendOverride != "" {
 		cfg.LLM.Backend = backendOverride
 	}
+	return unifiedConfigPreparation{opts: opts, repoRoot: RepoRoot, source: source,
+		document: value, diagnostics: diagnostics, config: cfg}, nil
+}
+
+func validateUnifiedConfig(prepared unifiedConfigPreparation, facts channelprovider.Binding) (unifiedConfigLoadResult, error) {
+	cfg, document := prepared.config, prepared.document
+	source, diagnostics := prepared.source, prepared.diagnostics
 	if len(unifiedConfigBlockers(diagnostics)) == 0 {
-		if err := cfg.Validate(); err != nil {
-			diagnostics = append(diagnostics, unifiedConfigValidationDiagnostic(err, source.Path, &document, "fix the referenced swarm.yaml key or command flag"))
+		if err := cfg.Validate(facts); err != nil {
+			diagnostics = append(diagnostics, unifiedConfigValidationDiagnostic(err, source.Path, document, "fix the referenced swarm.yaml key or command flag"))
 		}
 	}
-	cli, err := decodeUnifiedCLIConfig(&document)
+	cli, err := decodeUnifiedCLIConfig(document)
 	if err != nil {
 		diagnostics = append(diagnostics, unifiedConfigProjectionDiagnostic(err, source.Path))
 	}
@@ -145,7 +177,7 @@ func loadUnifiedConfigAllowDiagnostics(opts unifiedConfigLoadOptions) (unifiedCo
 	} else {
 		diagnostics = unifiedConfigBlockers(diagnostics)
 	}
-	if err := validateSwarmEnvSources(swarmEnvGuardContext{RepoRoot: RepoRoot, RuntimeConfigPath: opts.ExplicitPath, DelegatedSources: delegated}); err != nil {
+	if err := validateSwarmEnvSources(swarmEnvGuardContext{RepoRoot: prepared.repoRoot, RuntimeConfigPath: prepared.opts.ExplicitPath, DelegatedSources: delegated}); err != nil {
 		diagnostics = append(diagnostics, unifiedConfigDiagnostic{Kind: unifiedConfigDiagnosticValidationFailed, Path: source.Path, Message: err.Error()})
 	}
 	result := unifiedConfigLoadResult{
@@ -163,15 +195,13 @@ func loadUnifiedConfigAllowDiagnostics(opts unifiedConfigLoadOptions) (unifiedCo
 	return result, nil
 }
 
-func unifiedConfigValidationDiagnostic(err error, path string, document *yaml.Node, remediation string) unifiedConfigDiagnostic {
+func unifiedConfigValidationDiagnostic(err error, path string, document yamlsource.Value, remediation string) unifiedConfigDiagnostic {
 	diagnostic := unifiedConfigDiagnostic{Kind: unifiedConfigDiagnosticValidationFailed, Path: path, Message: err.Error(), Remediation: remediation}
 	if path != "" {
 		// Runtime validation has no key coordinate; locate the selected document,
 		// rather than inferring a field from the validator's human-readable error.
-		diagnostic.Line, diagnostic.Column = 1, 1
-		if root := yamlDocumentRoot(document); root != nil {
-			diagnostic.Line, diagnostic.Column = max(1, root.Line), max(1, root.Column)
-		}
+		location := document.Location()
+		diagnostic.Line, diagnostic.Column = max(1, location.Line), max(1, location.Column)
 		diagnostic.Message = fmt.Sprintf("%s:%d:%d: %v", path, diagnostic.Line, diagnostic.Column, err)
 	}
 	return diagnostic
@@ -342,26 +372,14 @@ func expandUnifiedConfigValue(value yamlsource.Value) (*yaml.Node, error) {
 	return &node, nil
 }
 
-func yamlMappingValue(node *yaml.Node, key string) *yaml.Node {
-	if node == nil || node.Kind != yaml.MappingNode {
-		return nil
-	}
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		if node.Content[i].Value == key {
-			return node.Content[i+1]
-		}
-	}
-	return nil
-}
-
 type unifiedCLIYAML = config.CLISourceConfig
 
-func decodeUnifiedCLIConfig(node *yaml.Node) (cliCommandConfig, error) {
-	if node == nil || len(node.Content) == 0 {
+func decodeUnifiedCLIConfig(value yamlsource.Value) (cliCommandConfig, error) {
+	if value.Presence() == yamlsource.PresenceMissing || value.Presence() == yamlsource.PresenceEmptyMapping {
 		return cliCommandConfig{}, nil
 	}
 	var decoded unifiedCLIYAML
-	if err := node.Decode(&decoded); err != nil {
+	if err := value.Project(&decoded); err != nil {
 		return cliCommandConfig{}, err
 	}
 	return cliCommandConfig{
@@ -376,18 +394,18 @@ func decodeUnifiedCLIConfig(node *yaml.Node) (cliCommandConfig, error) {
 		},
 		Paths: cliPathsConfig{
 			SwarmDir:    decoded.Paths.SwarmDir,
-			SwarmDirSet: yamlPathExists(node, "paths", "swarm_dir"),
+			SwarmDirSet: yamlPathExists(value, "paths", "swarm_dir"),
 		},
 	}, nil
 }
 
-func yamlPathExists(node *yaml.Node, path ...string) bool {
-	cur := node
+func yamlPathExists(value yamlsource.Value, path ...string) bool {
 	for _, key := range path {
-		cur = yamlMappingValue(cur, key)
-		if cur == nil {
+		field, err := value.Lookup(key)
+		if err != nil || len(field.Occurrences) == 0 {
 			return false
 		}
+		value = field.Value
 	}
 	return true
 }

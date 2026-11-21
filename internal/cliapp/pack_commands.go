@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/cli/argcount"
-	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/packmodel"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -144,7 +143,7 @@ func newImportPackCommand(invocationRoot InvocationRoot, root rootCommandOptions
 			if err := opts.output.validate(); err != nil {
 				return returnCLIValidationError(cmd.ErrOrStderr(), err)
 			}
-			cfgResult, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: opts.repoRoot, ExplicitPath: rootConfigPath(opts.root)})
+			cfgResult, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: opts.repoRoot, ExplicitPath: rootConfigPath(opts.root), ChannelRegistration: opts.root.channelRegistration})
 			if err != nil {
 				return returnCLIValidationError(cmd.ErrOrStderr(), err)
 			}
@@ -199,7 +198,7 @@ func rootConfigPath(root rootCommandOptions) string {
 }
 
 func loadEffectivePackInventory(opts packCommandOptions) (*packartifact.EffectivePackInventory, error) {
-	cfgResult, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: opts.repoRoot, ExplicitPath: rootConfigPath(opts.root)})
+	cfgResult, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: opts.repoRoot, ExplicitPath: rootConfigPath(opts.root), ChannelRegistration: opts.root.channelRegistration})
 	if err != nil {
 		return nil, err
 	}
@@ -220,7 +219,7 @@ func loadEffectivePackInventory(opts packCommandOptions) (*packartifact.Effectiv
 		return nil, err
 	}
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOptions(opts.repoRoot, sourceRoot, specPath, runtimecontracts.WorkflowContractLoadOptions{
-		PlatformPackBase: base, AdmitPackInventory: packadmission.AdmitInventory,
+		PlatformPackBase: base, AdmitPackInventory: cfgResult.AdmitPackInventory,
 	})
 	if err != nil {
 		return nil, err

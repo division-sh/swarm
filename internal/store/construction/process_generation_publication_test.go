@@ -1,6 +1,8 @@
 package construction_test
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -40,9 +42,9 @@ func generationPublicationFixture(t *testing.T, postgres bool) (generationPublic
 	var err error
 	if postgres {
 		dsn, _, _ := testutil.StartEmptyPostgres(t)
-		selected, db, err = construction.OpenPostgresRuntime(ctx, dsn)
+		selected, db, err = construction.OpenPostgresRuntime(ctx, dsn, channelfixture.Facts)
 	} else {
-		selected, db, err = construction.OpenSQLiteRuntimeForServing(ctx, filepath.Join(t.TempDir(), "publication.db"))
+		selected, db, err = construction.OpenSQLiteRuntimeForServing(ctx, filepath.Join(t.TempDir(), "publication.db"), channelfixture.Facts)
 	}
 	if err != nil {
 		t.Fatal(err)

@@ -1,6 +1,8 @@
 package apiv1
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -286,7 +288,7 @@ func newPostgresObservabilitySurfaceFixture(t *testing.T, ctx context.Context) o
 	t.Helper()
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
-	pg := storetest.NewPostgresStoreForTest(db)
+	pg := storetest.NewPostgresStoreForTest(db, channelfixture.Facts)
 	storetest.BootstrapPostgresRuntimeStore(t, pg)
 	return newObservabilitySurfaceFixture(t, ctx, pg, db, false)
 }

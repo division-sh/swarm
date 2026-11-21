@@ -325,8 +325,15 @@ type standingLearnedCredentials struct {
 }
 
 func (rt *Runtime) currentStandingCredentialAdmissions(ctx context.Context) (map[string]standingLearnedCredentials, error) {
+	var source semanticview.Source
+	if rt.Options.WorkflowModule != nil {
+		source = rt.Options.WorkflowModule.SemanticSource()
+	}
+	return currentStandingCredentialAdmissions(ctx, rt.Options.ChannelOnboardingStore, source, rt.Options.ChannelPlans, rt.Options.SourceArtifactFact.BundleHash())
+}
+
+func currentStandingCredentialAdmissions(ctx context.Context, store channelonboarding.Store, source semanticview.Source, plans []packs.SatisfactionPlan, bundleHash string) (map[string]standingLearnedCredentials, error) {
 	out := map[string]standingLearnedCredentials{}
-	store := rt.Options.ChannelOnboardingStore
 	if store == nil {
 		return out, nil
 	}
@@ -348,12 +355,12 @@ func (rt *Runtime) currentStandingCredentialAdmissions(ctx context.Context) (map
 		}
 		operationsByID[operation.OperationID] = operation
 	}
-	bundle, ok := semanticview.Bundle(rt.Options.WorkflowModule.SemanticSource())
+	bundle, ok := semanticview.Bundle(source)
 	if !ok || bundle == nil || bundle.PackInventory == nil {
 		return nil, fmt.Errorf("learned standing credentials require the exact admitted source inventory")
 	}
-	for _, plan := range rt.Options.ChannelPlans {
-		scope, present, err := rt.standingCredentialPlanScope(plan, bundle.PackInventory.Digest())
+	for _, plan := range plans {
+		scope, present, err := standingCredentialPlanScopeForSource(plan, bundle.PackInventory.Digest(), bundleHash)
 		if err != nil {
 			return nil, err
 		}
@@ -379,6 +386,10 @@ type standingCredentialPlanScope struct {
 }
 
 func (rt *Runtime) standingCredentialPlanScope(plan packs.SatisfactionPlan, inventory string) (standingCredentialPlanScope, bool, error) {
+	return standingCredentialPlanScopeForSource(plan, inventory, rt.Options.SourceArtifactFact.BundleHash())
+}
+
+func standingCredentialPlanScopeForSource(plan packs.SatisfactionPlan, inventory, bundleHash string) (standingCredentialPlanScope, bool, error) {
 	profile, present := plan.OnboardingProfile()
 	if !present || channelonboarding.ActivationPosture(profile.ActivationPosture()) != channelonboarding.ActivationWebhookRegistration {
 		return standingCredentialPlanScope{}, false, nil
@@ -396,7 +407,7 @@ func (rt *Runtime) standingCredentialPlanScope(plan packs.SatisfactionPlan, inve
 		return standingCredentialPlanScope{}, false, fmt.Errorf("webhook channel plan has no compiled registration credential owner")
 	}
 	return standingCredentialPlanScope{provider: profile.Provider(), identity: identity,
-		coordinate: channelonboarding.ChannelRuntimeContextCoordinate{BundleHash: rt.Options.SourceArtifactFact.BundleHash(), PackInventoryGeneration: inventory, PlanGeneration: generation},
+		coordinate: channelonboarding.ChannelRuntimeContextCoordinate{BundleHash: bundleHash, PackInventoryGeneration: inventory, PlanGeneration: generation},
 		required:   append(registration.ProviderCredentials(), registration.SigningCredential()), signingRole: registration.SigningCredential()}, true, nil
 }
 
@@ -636,7 +647,7 @@ func (rt *Runtime) AdmitChannelStandingTarget(ctx context.Context, operation cha
 
 func (rt *Runtime) requireStandingChannelTargetAdmission(current channelonboarding.Operation, revision int64, candidate channelonboarding.Candidate, session operatorchannel.ProviderAuthority) error {
 	admittedPhase := current.Phase == channelonboarding.PhaseCredentialsAdmitted && current.Posture == channelonboarding.ActivationWebhookRegistration ||
-		current.Phase == channelonboarding.PhaseAwaitingOperatorConfirmation && current.Posture == channelonboarding.ActivationSessionConnection && (current.BindingRevision > 0 || current.AccountConnection())
+		current.Phase == channelonboarding.PhaseAwaitingOperatorConfirmation && current.Posture == channelonboarding.ActivationSessionConnection && (current.BindingRevision > 0 || current.AccountConnection(current.ProviderFacts()))
 	if !admittedPhase || current.Revision != revision || current.Posture != candidate.Posture || current.Provider != candidate.Provider ||
 		current.Interface.Normalized() != candidate.Interface.Normalized() || current.Ceremony != candidate.Ceremony ||
 		!current.Coordinate.MatchesDeclaration(candidate.Coordinate) || current.TargetSelector != candidate.Target.Selector || current.Coordinate.BundleHash != rt.Options.SourceArtifactFact.BundleHash() {

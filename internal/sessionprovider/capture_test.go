@@ -1,6 +1,8 @@
 package sessionprovider
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"bufio"
 	"bytes"
 	"context"
@@ -54,7 +56,7 @@ func captureFixture(t *testing.T) capturedEvent {
 			BundleHash: "bundle-v2:sha256:" + strings.Repeat("a", 64), BundleIdentity: "source:test", PackInventoryGeneration: "inventory:test",
 			PlanGeneration: generation, RuntimeInstanceID: uuid.NewString(), ContextPublicationGeneration: 1},
 			CatalogGeneration: triggergeneration.FromCanonicalBytes([]byte(`{"fixture":"capture"}`))},
-	}
+	}.WithProviderFacts(channelfixture.For("whatsapp"))
 }
 
 func TestWhatsAppCaptureScopeAndReceiptAreClosedProducts(t *testing.T) {
@@ -67,6 +69,7 @@ func TestWhatsAppCaptureScopeAndReceiptAreClosedProducts(t *testing.T) {
 	if err := json.Unmarshal(legacy, &decoded); err != nil || !decoded.SameCapture(business) {
 		t.Fatal("legacy capture changed", err)
 	}
+	decoded = decoded.WithProviderFacts(business.ProviderFacts())
 	projection, err := decoded.ProjectedBody()
 	if err != nil || !bytes.Equal(projection, business.Body) {
 		t.Fatal("absent phone changed old body", err)
@@ -95,6 +98,8 @@ func TestWhatsAppCaptureScopeAndReceiptAreClosedProducts(t *testing.T) {
 		{"unknown_scope", business, func(e *capturedEvent) { e.Scope.Kind = "guessed" }},
 		{"bad_phone", business, func(e *capturedEvent) { e.SenderPhone = "not a phone" }},
 		{"no_scope", business, func(e *capturedEvent) { e.Scope.Kind = "" }},
+		{"foreign_provider", business, func(e *capturedEvent) { e.Scope.Session.Provider = "foreign" }},
+		{"non_capture_provider", business, func(e *capturedEvent) { e.Scope.Session.Provider = "telegram" }},
 		{"no_operation_revision", business, func(e *capturedEvent) { e.Scope.OperationRevision = 0 }},
 		{"no_target", business, func(e *capturedEvent) { e.Scope.TargetSelector = "" }},
 		{"bootstrap_binding", bootstrap, func(e *capturedEvent) { e.Scope.PublicationBinding = business.Scope.PublicationBinding }},
@@ -125,6 +130,7 @@ func TestWhatsAppCaptureProcessDeathBeforeAndAfterCommit(t *testing.T) {
 		if err := json.Unmarshal([]byte(os.Getenv("SWARM_WHATSAPP_CAPTURE_TEST_EVENT")), &event); err != nil {
 			t.Fatal(err)
 		}
+		event = event.WithProviderFacts(channelfixture.For("whatsapp"))
 		_, store := openCaptureFixture(t, os.Getenv("SWARM_WHATSAPP_CAPTURE_TEST_PATH"), event.Scope.Session.ConnectionID)
 		if mode == "after_commit" {
 			if err := store.capture(context.Background(), event); err != nil {
@@ -210,7 +216,7 @@ func openCaptureFixture(t *testing.T, path, connectionID string) (*sessionstate.
 	if err != nil {
 		t.Fatal(err)
 	}
-	capture, err := newCaptureStore(context.Background(), owner, connectionID)
+	capture, err := newCaptureStore(context.Background(), owner, connectionID, channelfixture.For("whatsapp"))
 	if err != nil {
 		_ = fixture.Close()
 		t.Fatal(err)

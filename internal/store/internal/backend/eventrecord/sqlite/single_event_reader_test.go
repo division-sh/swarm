@@ -1,6 +1,8 @@
 package sqlite_test
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"context"
 	"errors"
 	"fmt"
@@ -30,7 +32,7 @@ import (
 
 func singleEventReaderFixture(t *testing.T) (*sqlitebackend.Backend, eventrecord.Record, context.Context, startupownership.ProcessCapability) {
 	t.Helper()
-	selected, db, err := construction.OpenSQLiteRuntime(filepath.Join(t.TempDir(), "reader.db"))
+	selected, db, err := construction.OpenSQLiteRuntime(filepath.Join(t.TempDir(), "reader.db"), channelfixture.Facts)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,6 +1,8 @@
 package runtimepersistence
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"context"
 	"reflect"
 	"testing"
@@ -254,5 +256,5 @@ func seedSQLiteBudgetEntity(t *testing.T, ctx context.Context, store *SQLiteRunt
 
 func seedSQLiteBudgetRun(t *testing.T, ctx context.Context, store *SQLiteRuntimeStore, runID string, at time.Time) {
 	t.Helper()
-	requireRunFixtureForTest(t, ctx, NewSQLiteRuntimeStoreForTest(store.backend.ConstructionHandle()), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at})
+	requireRunFixtureForTest(t, ctx, NewSQLiteRuntimeStoreForTest(store.backend.ConstructionHandle(), channelfixture.Facts), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at})
 }

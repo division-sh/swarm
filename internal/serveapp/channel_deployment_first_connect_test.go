@@ -41,7 +41,7 @@ func requireLiveDeploymentChannelList(t *testing.T, config, endpoint string, op 
 		if format != "" {
 			args = append(args, "--"+format)
 		}
-		if code := cliapp.Execute(t.Context(), args, &out, &diagnostic, nil, nil, OpenChannelRegistration); code != 0 {
+		if code := cliapp.Execute(t.Context(), args, &out, &diagnostic, nil, nil, ChannelRegistrations()); code != 0 {
 			t.Fatalf("channel list %s exit=%d: %s", format, code, diagnostic.String())
 		}
 		if format == "" {
@@ -271,7 +271,7 @@ func TestChannelConnectWhatsAppRegistersAccountBothStores(t *testing.T) {
 					}
 				}()
 				go func() {
-					done <- cliapp.Execute(ctx, []string{"--config", opts.ConfigPath, "channel", "connect", "whatsapp", "--yes"}, out, errOut, nil, nil, factory)
+					done <- cliapp.Execute(ctx, []string{"--config", opts.ConfigPath, "channel", "connect", "whatsapp", "--yes"}, out, errOut, nil, nil, fixtureRegistration(factory))
 				}()
 				var pairing channelonboarding.Result
 				select {
@@ -305,10 +305,14 @@ func TestChannelConnectWhatsAppRegistersAccountBothStores(t *testing.T) {
 					Accounts []channelonboarding.Result `json:"accounts"`
 				}
 				var listed, listErr bytes.Buffer
-				if code := cliapp.Execute(ctx, []string{"--config", opts.ConfigPath, "channel", "list", "--json"}, &listed, &listErr, nil, nil, factory); code != 0 || json.Unmarshal(listed.Bytes(), &listing) != nil || len(listing.Accounts) != 1 {
+				if code := cliapp.Execute(ctx, []string{"--config", opts.ConfigPath, "channel", "list", "--json"}, &listed, &listErr, nil, nil, fixtureRegistration(factory)); code != 0 || json.Unmarshal(listed.Bytes(), &listing) != nil || len(listing.Accounts) != 1 {
 					t.Fatalf("public account-list exit=%d err=%s", code, listErr.String())
 				}
-				op := listing.Accounts[0].Operation
+				selected, found := fixtureRegistration(factory).Select(listing.Accounts[0].Operation.Provider)
+				if !found {
+					t.Fatal("listed operation has no exact installed provider facts")
+				}
+				op := listing.Accounts[0].Operation.WithProviderFacts(selected.Facts)
 				if op.OperationID != pairing.Operation.OperationID || op.Phase != channelonboarding.PhaseSucceeded || !op.AccountConfirmed || op.AccountReference != "+15551234567" || op.IdentityOperationID != "" {
 					t.Fatal("first connect replaced its device/operation or failed to register the approved receptionist account")
 				}
@@ -375,7 +379,7 @@ func TestChannelConnectWhatsAppRegistersAccountBothStores(t *testing.T) {
 								}
 							}()
 							go func() {
-								done <- cliapp.Execute(ctx, []string{"--config", opts.ConfigPath, "channel", "connect", "whatsapp", op.AccountReference, "--yes"}, out, errOut, nil, nil, reverify)
+								done <- cliapp.Execute(ctx, []string{"--config", opts.ConfigPath, "channel", "connect", "whatsapp", op.AccountReference, "--yes"}, out, errOut, nil, nil, fixtureRegistration(reverify))
 							}()
 							var replacement channelonboarding.Result
 							select {
@@ -405,7 +409,7 @@ func TestChannelConnectWhatsAppRegistersAccountBothStores(t *testing.T) {
 								t.Fatal("public same-account relink did not register")
 							}
 							var listed, listErr bytes.Buffer
-							if code := cliapp.Execute(ctx, []string{"--config", opts.ConfigPath, "channel", "list", "--json"}, &listed, &listErr, nil, nil, factory); code != 0 ||
+							if code := cliapp.Execute(ctx, []string{"--config", opts.ConfigPath, "channel", "list", "--json"}, &listed, &listErr, nil, nil, fixtureRegistration(factory)); code != 0 ||
 								json.Unmarshal(listed.Bytes(), &listing) != nil || len(listing.Accounts) != 1 {
 								t.Fatalf("relinked public account-list exit=%d err=%s", code, listErr.String())
 							}
@@ -559,7 +563,7 @@ service-probe:
 		Accounts []channelonboarding.Result `json:"accounts"`
 	}
 	var out, errOut bytes.Buffer
-	if code := cliapp.Execute(t.Context(), []string{"--config", opts.ConfigPath, "channel", "list", "--json"}, &out, &errOut, nil, nil, OpenChannelRegistration); code != 0 || json.Unmarshal(out.Bytes(), &listing) != nil {
+	if code := cliapp.Execute(t.Context(), []string{"--config", opts.ConfigPath, "channel", "list", "--json"}, &out, &errOut, nil, nil, ChannelRegistrations()); code != 0 || json.Unmarshal(out.Bytes(), &listing) != nil {
 		t.Errorf("service mock restart account readback exit=%d err=%s", code, errOut.String())
 	}
 	if len(listing.Accounts) != 1 || listing.Accounts[0].Operation.OperationID != registered.OperationID ||
@@ -732,7 +736,7 @@ func readOfflinePairedWhatsAppCaptures(t *testing.T, opts cliapp.ServeOptions, r
 			t.Fatalf("historical callback failure changed: count=%d err=%v", count, err)
 		}
 	}
-	spool, err := owner.Captures(t.Context(), filepath.Base(filepath.Dir(paths[0])))
+	spool, err := owner.Captures(t.Context(), filepath.Base(filepath.Dir(paths[0])), registered.ProviderFacts())
 	if err != nil {
 		t.Fatal(err)
 	}

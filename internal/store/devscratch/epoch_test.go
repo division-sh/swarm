@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/store/devscratch"
 	storeselected "github.com/division-sh/swarm/internal/store/selected"
 	"github.com/division-sh/swarm/internal/store/selected/selectedtest"
+	"github.com/division-sh/swarm/tests/support/channelfixture"
 	"github.com/division-sh/swarm/tests/support/testutil/testprocess"
 )
 
@@ -273,7 +274,7 @@ func TestDevScratchEpochHandsOffToSQLitePossession(t *testing.T) {
 	coordinate := scratchCoordinate(t)
 	authority := acquirePrepared(t, coordinate)
 	owner, err := storeselected.OpenRuntime(context.Background(), storeselected.RuntimeRequest{
-		Selection: storebackend.Selection{Backend: storebackend.BackendSQLite, SQLitePath: coordinate.DatabasePath},
+		Selection: storebackend.Selection{Backend: storebackend.BackendSQLite, SQLitePath: coordinate.DatabasePath}, ProviderFacts: channelfixture.Facts,
 	})
 	if err != nil {
 		_ = authority.AbortBeforeStoreOpen()

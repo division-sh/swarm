@@ -1,6 +1,8 @@
 package runtimepersistence
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"bytes"
 	"context"
 	"database/sql"
@@ -1840,7 +1842,7 @@ func seedSelectedContractExecutionSourceWithRun(t *testing.T, ctx context.Contex
 func seedSelectedContractExecutionSourceWithEvent(t *testing.T, ctx context.Context, db *sql.DB, run semanticRunFixture, entityID string, event events.Event, at time.Time, routes []events.DeliveryRoute, flowInstance string, parents ...events.Event) {
 	t.Helper()
 	ctx = startupownership.CarryMutationAuthority(runtimeeffects.WithExecutionMode(runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(run.BundleHash), run.RunID), runtimeeffects.ExecutionModeLive), ctx)
-	selected := newPostgresStoreWithBackend(mustPostgresBackend(db))
+	selected := newPostgresStoreWithBackend(mustPostgresBackend(db), channelfixture.Facts)
 	selected.acceptCurrentSchemaForTest()
 	ctx = originalStoreFixtureContext(t, ctx, selected)
 	ctx = requireRunFixtureForTest(t, ctx, selected, run)
@@ -1921,8 +1923,8 @@ func seedImportedSelectedContractSourceWithEvent(t *testing.T, ctx context.Conte
 	t.Helper()
 	sourceRunID, eventID := run.RunID, event.ID()
 	ctx = startupownership.CarryMutationAuthority(testAuthorActivityContextForBundle(run.BundleHash), ctx)
-	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), run)
-	selected := newPostgresStoreWithBackend(mustPostgresBackend(db))
+	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db), channelfixture.Facts), run)
+	selected := newPostgresStoreWithBackend(mustPostgresBackend(db), channelfixture.Facts)
 	selected.acceptCurrentSchemaForTest()
 	if err := runSelectedFixtureMutation(ctx, selected, "selected-contract source facts", func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
 		for _, parent := range parents {

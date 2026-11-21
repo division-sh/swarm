@@ -152,7 +152,7 @@ func (s *EffectPostgresOwner) LoadProviderCallResume(ctx context.Context, req ru
 	result := mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, nil, func(ctx context.Context, mutation *mutationprotocol.Attempt) (providerCallRecoveryResult, error) {
 		var value providerCallRecoveryResult
 		err := mutation.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
-			if err := requireExternalEffectAuthorityPostgres(ctx, tx, req.Authority, false); err != nil {
+			if err := requireExternalEffectAuthorityPostgres(ctx, s.channelChecks, tx, req.Authority, false); err != nil {
 				return err
 			}
 			if s.delivery == nil {
@@ -178,7 +178,7 @@ func (s *EffectSQLiteOwner) LoadProviderCallResume(ctx context.Context, req runt
 	result := mutationprotocol.RunSQLite(ctx, s.backend, "sqlite read provider resume", mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, nil, func(ctx context.Context, mutation *mutationprotocol.Attempt) (providerCallRecoveryResult, error) {
 		var value providerCallRecoveryResult
 		err := mutation.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
-			if err := requireExternalEffectAuthoritySQLite(ctx, tx, req.Authority, false); err != nil {
+			if err := requireExternalEffectAuthoritySQLite(ctx, s.channelChecks, tx, req.Authority, false); err != nil {
 				return err
 			}
 			if s.delivery == nil {

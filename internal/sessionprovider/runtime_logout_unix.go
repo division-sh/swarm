@@ -40,7 +40,7 @@ func (c *RuntimeConnection) PrepareSessionLogout(ctx context.Context, expected c
 	target = channelonboarding.SessionLogoutPreparation{OperationID: op.OperationID, OperationRevision: op.Revision,
 		OccurrenceID: observed.OccurrenceID, TargetSelector: op.TargetSelector,
 		Account: observed.Admission, Coordinate: op.Coordinate, ProcessBinding: c.processBinding}
-	if !observed.Connected || !target.MatchesOperation(expected) {
+	if !observed.Connected || !target.MatchesOperation(expected, c.plan.ProviderFacts()) {
 		return channelonboarding.SessionLogoutPreparation{}, errRuntimeConnection
 	}
 	if err := work.Context().Err(); err != nil {
@@ -154,7 +154,7 @@ func (c *RuntimeConnection) requireOriginalLogoutOccurrence(ctx context.Context,
 	}
 	target := op.Logout
 	occurrence := c.state.currentOccurrence()
-	if target.Validate() != nil || op.PrincipalID != c.operation.PrincipalID ||
+	if target.Validate(c.plan.ProviderFacts()) != nil || op.PrincipalID != c.operation.PrincipalID ||
 		op.Scope.Interface.Normalized() != c.operation.Interface.Normalized() || target.OperationID != c.operation.OperationID ||
 		target.OperationRevision < c.operation.Revision || target.TargetSelector != c.operation.TargetSelector ||
 		target.Account != c.sessionAccount() || !target.Coordinate.MatchesRuntimeContext(c.operation.Coordinate) ||

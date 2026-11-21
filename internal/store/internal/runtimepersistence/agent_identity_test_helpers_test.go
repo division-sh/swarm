@@ -1,6 +1,8 @@
 package runtimepersistence
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -114,12 +116,12 @@ func seedTestAgentRow(
 	var runOwner any
 	var requireErr error
 	if postgres {
-		owner := newPostgresStoreWithBackend(mustPostgresBackend(db))
+		owner := newPostgresStoreWithBackend(mustPostgresBackend(db), channelfixture.Facts)
 		bootstrapTestPostgresStore(t, owner)
 		runOwner = owner
 		requireErr = owner.RequirePresentRun(ctx, fields.RunID)
 	} else {
-		owner := NewSQLiteRuntimeStoreForTest(db)
+		owner := NewSQLiteRuntimeStoreForTest(db, channelfixture.Facts)
 		if err := owner.BootstrapSchema(context.Background(), canonicalSchemaBootstrapTestRequest(t)); err != nil {
 			t.Fatalf("bootstrap test agent store: %v", err)
 		}

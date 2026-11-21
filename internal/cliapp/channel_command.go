@@ -6,12 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/url"
-	"regexp"
 	"strings"
 	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/channelprovider"
 	"github.com/division-sh/swarm/internal/cli/argcount"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/sourceartifact"
@@ -27,11 +26,13 @@ type channelControlClient interface {
 }
 
 type channelListResult struct {
+	facts       []channelprovider.Binding
 	PrincipalID string                  `json:"principal_id"`
 	Channels    []channelReadbackResult `json:"channels"`
 }
 
-func (r channelListResult) linkedSessionOperation(provider string) (string, error) {
+func (r channelListResult) linkedSessionOperation(binding channelprovider.Binding) (string, error) {
+	provider := binding.Provider()
 	operationID, best, matches := "", -1, 0
 	for _, row := range r.Channels {
 		if row.Operation == nil || row.Operation.Provider != provider || row.Connection == nil || !row.Connection.Linked ||
@@ -52,10 +53,10 @@ func (r channelListResult) linkedSessionOperation(provider string) (string, erro
 		}
 	}
 	if matches > 1 {
-		return "", errors.New("more than one WhatsApp connection is linked")
+		return "", fmt.Errorf("more than one %s connection is linked", binding.DisplayName())
 	}
 	if operationID == "" {
-		return "", errors.New("Not linked: run swarm channel connect whatsapp")
+		return "", errors.New(binding.NotLinked())
 	}
 	return operationID, nil
 }
@@ -147,12 +148,16 @@ func runChannelLogout(ctx context.Context, out, errOut io.Writer, operationID, i
 	if err != nil {
 		return returnCLIValidationError(errOut, err)
 	}
-	if operationID == "whatsapp" {
+	binding := selectedChannelFacts(opts.channelRegistration, operationID)
+	if opts.channelReadbackFact.MatchesProvider(operationID) {
+		binding = opts.channelReadbackFact
+	}
+	if binding.Session() {
 		list, err := fetchChannelList(ctx, client)
 		if err != nil {
 			return returnCLIAPIError(errOut, err, channelErrorClassifier())
 		}
-		operationID, err = list.linkedSessionOperation("whatsapp")
+		operationID, err = list.linkedSessionOperation(binding)
 		if err != nil {
 			return returnCLIValidationError(errOut, err)
 		}
@@ -540,8 +545,9 @@ func writeChannelNativeQualification(out io.Writer, result channelOnboardingResu
 	if qualification.Reason != "" {
 		fmt.Fprintln(out, qualification.Reason)
 	}
-	if result.Operation.Provider == "telegram" && result.Operation.ClientLanguage == "" {
-		fmt.Fprintf(out, "Declare the Telegram language used on this device: swarm channel resume %s --client-language <language>.\n", result.Operation.OperationID)
+	if result.Operation.ClientLanguage == "" {
+		binding := result.Operation.ProviderFacts()
+		fmt.Fprint(out, binding.LanguageHelp(result.Operation.OperationID))
 	}
 }
 
@@ -625,17 +631,8 @@ func presentAndWaitForChannelClaim(ctx context.Context, client channelControlCli
 	if result.Operation.DeploymentRegistration {
 		fmt.Fprintf(progressOut, "%s is this deployment's HITL channel.\n", result.Operation.AccountReference)
 	}
-	if result.Operation.Provider == "whatsapp" {
-		if err := writeWhatsAppClaimInstructions(progressOut, result); err != nil {
-			return channelOnboardingResult{}, returnCLIValidationError(errOut, err)
-		}
-	} else if result.Operation.DeploymentRegistration && result.Operation.Provider == "telegram" {
-		if err := writeTelegramClaimInstructions(progressOut, result); err != nil {
-			return channelOnboardingResult{}, returnCLIValidationError(errOut, err)
-		}
-	} else {
-		identity := result.IdentityOperation
-		fmt.Fprintf(progressOut, "Send the code %s from your operator phone to this number before %s.\nWaiting for an authenticated claimant...\n", identity.Challenge, channelClaimDeadline(identity.ExpiresAt))
+	if err := writeChannelClaimInstructions(progressOut, result); err != nil {
+		return channelOnboardingResult{}, returnCLIValidationError(errOut, err)
 	}
 	current, err := waitForChannelOnboardingClaim(ctx, client, result, opts, errOut)
 	if err != nil {
@@ -644,34 +641,23 @@ func presentAndWaitForChannelClaim(ctx context.Context, client channelControlCli
 	return current, nil
 }
 
-func writeTelegramClaimInstructions(out io.Writer, result channelOnboardingResult) error {
-	if result.Connection == nil || result.IdentityOperation == nil || result.IdentityOperation.ExpiresAt.IsZero() {
-		return errors.New("operator code requires its exact Telegram destination and expiry")
-	}
-	bot := result.Connection.AccountName
-	if !regexp.MustCompile(`^[A-Za-z0-9_]{5,32}$`).MatchString(bot) || result.Connection.AccountPresentation != result.Operation.AccountReference {
-		return errors.New("operator code requires its authenticated Telegram bot address")
+func writeChannelClaimInstructions(out io.Writer, result channelOnboardingResult) error {
+	binding := result.Operation.ProviderFacts()
+	if result.IdentityOperation == nil {
+		return fmt.Errorf("operator code requires its exact %s destination and expiry", binding.DisplayName())
 	}
 	identity := result.IdentityOperation
-	fmt.Fprintf(out, "Send the code %s to @%s before %s.\nSEND-CODE LINK: https://t.me/%s?text=%s\nWaiting for an authenticated claimant...\n",
-		identity.Challenge, bot, channelClaimDeadline(identity.ExpiresAt), bot, url.QueryEscape(identity.Challenge))
-	return nil
-}
-
-func writeWhatsAppClaimInstructions(out io.Writer, result channelOnboardingResult) error {
-	account := result.Operation.AccountReference
-	if account == "" && result.Connection != nil {
-		account = result.Connection.AccountPresentation
+	prompt := channelprovider.ClaimPrompt{Account: result.Operation.AccountReference, Code: identity.Challenge,
+		ExpiresAt: identity.ExpiresAt, Deployment: result.Operation.DeploymentRegistration}
+	if result.Connection != nil {
+		prompt.Connection = &channelprovider.AccountPresentation{Account: result.Connection.AccountPresentation, Name: result.Connection.AccountName}
 	}
-	destination, err := channelonboarding.CanonicalAccount("whatsapp", account)
-	if err != nil || result.IdentityOperation == nil || result.IdentityOperation.ExpiresAt.IsZero() {
-		return errors.New("operator code requires its exact WhatsApp destination and expiry")
+	text, err := binding.ClaimInstructions(prompt)
+	if err != nil {
+		return err
 	}
-	identity := result.IdentityOperation
-	fmt.Fprintf(out, "FROM your operator phone TO %s\n", destination.Account)
-	fmt.Fprintf(out, "Send the code %s from your operator phone to this number before %s.\nSEND-CODE LINK (not a device-link QR): https://wa.me/%s?text=%s\nWaiting for an authenticated claimant...\n",
-		identity.Challenge, channelClaimDeadline(identity.ExpiresAt), strings.TrimPrefix(destination.Account, "+"), url.QueryEscape(identity.Challenge))
-	return nil
+	_, err = io.WriteString(out, text)
+	return err
 }
 
 func channelRetryParameters(result channelOnboardingResult, acceptedAccount, credential string) map[string]any {
@@ -711,7 +697,7 @@ func waitForChannelOnboardingPairing(ctx context.Context, client channelControlC
 		switch {
 		case current.Connection != nil && (current.Connection.State == "disconnected" || current.Connection.State == "error") && current.Connection.Reason != "" &&
 			(!expired || current.Connection.Reason != "network unreachable"):
-			return channelOnboardingResult{}, returnCLIValidationError(errOut, fmt.Errorf("WhatsApp disconnected: %s", cliSanitizeOneLineValue(current.Connection.Reason)))
+			return channelOnboardingResult{}, returnCLIValidationError(errOut, fmt.Errorf("%s disconnected: %s", current.Operation.ProviderFacts().DisplayName(), cliSanitizeOneLineValue(current.Connection.Reason)))
 		case expired:
 			current, err = renewExpiredChannelPairing(ctx, client, current, errOut)
 			if err != nil {
@@ -890,10 +876,6 @@ func channelAutomaticClaimConfirmation(result channelOnboardingResult) bool {
 	return result.Operation.Provider == "whatsapp" || result.Operation.DeploymentRegistration && result.Operation.Provider == "telegram"
 }
 
-func channelClaimDeadline(expires time.Time) string {
-	return expires.Local().Format("2006-01-02 15:04:05 MST (-07:00)")
-}
-
 func channelClaimantConfirmationRequired(result channelOnboardingResult, now time.Time) bool {
 	identity := result.IdentityOperation
 	if result.Operation.Phase != "awaiting_operator_confirmation" || identity == nil || identity.State != "awaiting_confirmation" {
@@ -951,7 +933,7 @@ func waitForChannelOnboardingClaim(ctx context.Context, client channelControlCli
 	if ctx.Err() != nil {
 		return channelOnboardingResult{}, fmt.Errorf("%w: stopped waiting for the operator's code%s", ctx.Err(), continuation)
 	}
-	return channelOnboardingResult{}, fmt.Errorf("operator code expired at %s%s", channelClaimDeadline(expires), continuation)
+	return channelOnboardingResult{}, fmt.Errorf("operator code expired at %s%s", channelprovider.ClaimDeadline(expires), continuation)
 }
 
 func runChannelList(ctx context.Context, out, errOut io.Writer, opts rootCommandOptions, output cliOutputOptions) error {
@@ -1167,9 +1149,10 @@ func writeChannelList(out io.Writer, result channelListResult) {
 	rows := make([][]string, 0, len(result.Channels))
 	footers := []string{}
 	wroteSession := false
-	for _, row := range result.Channels {
-		if row.Identity.Interface.ChannelPackID == "whatsapp" || row.Operation != nil && row.Operation.Provider == "whatsapp" {
-			writeWhatsAppConnection(out, row.Connection, false)
+	for i, row := range result.Channels {
+		binding := channelListRowFacts(result.facts, i, row)
+		if binding.ReadyTeaching() != "" {
+			writeProviderConnection(out, binding, row.Connection, false)
 			wroteSession = true
 			continue
 		}
@@ -1212,6 +1195,19 @@ func writeChannelList(out io.Writer, result channelListResult) {
 		Columns: []cliTableColumn{{Header: "PACK"}, {Header: "STATUS"}, {Header: "READY"}, {Header: "NATIVE INBOX"}, {Header: "ACCOUNT"}, {Header: "REVISION"}, {Header: "SCOPE"}, {Header: "REASON"}, {Header: "BUNDLE"}, {Header: "TARGET"}, {Header: "SELECTOR", KeyColumn: true, IdentifierFamily: cliIdentifierFamilyOperatorChannel}},
 		Rows:    rows, EmptyMessage: "No operator channels are active.", FooterLines: footers,
 	})
+}
+
+func channelListRowFacts(facts []channelprovider.Binding, index int, row channelReadbackResult) channelprovider.Binding {
+	var binding channelprovider.Binding
+	if index < len(facts) {
+		binding = facts[index]
+	}
+	if row.Operation != nil {
+		if current := row.Operation.ProviderFacts(); current.ReadyTeaching() != "" {
+			binding = current
+		}
+	}
+	return binding
 }
 
 func channelListReadiness(row channelReadbackResult, ready, nativeInbox, reason string, footers []string) (string, string, string, []string) {

@@ -83,7 +83,7 @@ func (rt *Runtime) observeRuntimeStandingSessionOperations(ctx context.Context, 
 func matchingRegisteredSessionOperations(registered []channelonboarding.Operation, provider string) []channelonboarding.Operation {
 	var selected []channelonboarding.Operation
 	for _, op := range channelonboarding.RetainedConfirmedAccounts(registered, provider) {
-		if op.ValidateSessionAccount() != nil || op.LogoutCompleted {
+		if op.ValidateSessionAccount(op.ProviderFacts()) != nil || op.LogoutCompleted {
 			continue
 		}
 		selected = append(selected, op)
@@ -103,7 +103,7 @@ func (rt *Runtime) validateStandingSessionBinding(ctx context.Context, binding s
 			return channelonboarding.ErrInvalidRequest
 		}
 		for _, original := range binding.registeredOperations {
-			current, err := channelonboarding.RegisteredAccount(ctx, scoped.DeploymentChannelOperations(), channelonboarding.AccountReference{Provider: original.Provider, Account: original.AccountReference})
+			current, err := channelonboarding.RegisteredAccount(ctx, scoped.DeploymentChannelOperations(), channelonboarding.AccountReference{Provider: original.Provider, Account: original.AccountReference}, original.ProviderFacts())
 			if err != nil {
 				if err == channelonboarding.ErrNotFound {
 					continue

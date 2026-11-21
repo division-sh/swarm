@@ -25,6 +25,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/tests/support/channelfixture"
 	"github.com/division-sh/swarm/tests/support/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/tests/support/testutil/flowactivationfixture"
 	"github.com/division-sh/swarm/tests/support/testutil/sourceartifactfixture"
@@ -53,10 +54,17 @@ func composeS1NativeEffectiveSource(t *testing.T, source semanticview.Source) se
 	if !found {
 		t.Fatal("native activity journey requires its compiled source")
 	}
-	admitted, err := packadmission.Admit(bundle.PackInventory, bundle.Platform)
+	rooted, err := bundle.RootedSource()
 	if err != nil {
 		t.Fatal(err)
 	}
+	value, err := packadmission.AdmitInventory(rooted, bundle.PackInventory, bundle.Platform)
+	if err != nil {
+		t.Fatal(err)
+	}
+	admitted := value.(packadmission.Projection)
+	admitted = admitted.WithProviderFacts(channelfixture.For("telegram"))
+	admitted = admitted.WithProviderFacts(channelfixture.For("whatsapp"))
 	bundle.PackAdmission = admitted
 	projection, err := runtimepkg.AdmitEffectiveSourceProjection(runtimepkg.EffectiveSourceProjectionRequest{
 		Source: source, SourceArtifactFact: sourceartifactfixture.FactFor(bundle.SourceArtifact),

@@ -12,6 +12,8 @@ import (
 	"testing"
 	"testing/iotest"
 	"time"
+
+	"github.com/division-sh/swarm/tests/support/channelfixture"
 )
 
 func channelCLISelectionResult(result map[string]any) map[string]any {
@@ -303,6 +305,7 @@ func TestChannelCLIExplicitPairingClaimConfirmationJourney(t *testing.T) {
 					t.Fatal(err)
 				}
 				opts := defaultRootCommandOptions()
+				opts.channelReadbackFact = channelfixture.For("whatsapp")
 				opts.httpClient, opts.input = server.Client(), strings.NewReader("y\ny\n")
 				opts.stdinIsTerminal = func() bool { return true }
 				opts.channelConnectPoll = time.Millisecond

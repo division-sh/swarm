@@ -147,7 +147,7 @@ func issue2564ServeHarnessWithPosture(t *testing.T, backend, root string, mock b
 		}
 		original := buildStoresForServe
 		buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
-			owner, err := storeselected.OpenRuntime(ctx, storeselected.RuntimeRequest{Selection: storebackend.Selection{Backend: storebackend.BackendPostgres}, PostgresDSN: dsn, SessionLockTTL: runtimeSessionLockTTL(cfg)})
+			owner, err := storeselected.OpenRuntime(ctx, storeselected.RuntimeRequest{Selection: storebackend.Selection{Backend: storebackend.BackendPostgres}, PostgresDSN: dsn, SessionLockTTL: runtimeSessionLockTTL(cfg), ProviderFacts: installedChannelFactsFor})
 			if err != nil {
 				return nil, err
 			}

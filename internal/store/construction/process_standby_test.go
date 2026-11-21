@@ -1,6 +1,8 @@
 package construction_test
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"context"
 	"database/sql"
 	"errors"
@@ -40,7 +42,7 @@ func TestRuntimeConstructorWaitsBeforeBootstrapBothStores(t *testing.T) {
 			if backend == "sqlite" {
 				path := filepath.Join(t.TempDir(), "runtime.db")
 				open = func(ctx context.Context) (runtimeStore, *sql.DB, error) {
-					owner, db, err := construction.OpenSQLiteRuntimeForServing(ctx, path)
+					owner, db, err := construction.OpenSQLiteRuntimeForServing(ctx, path, channelfixture.Facts)
 					if err != nil {
 						return nil, nil, err
 					}
@@ -49,7 +51,7 @@ func TestRuntimeConstructorWaitsBeforeBootstrapBothStores(t *testing.T) {
 			} else {
 				dsn, _, _ := testutil.StartEmptyPostgres(t)
 				open = func(ctx context.Context) (runtimeStore, *sql.DB, error) {
-					owner, db, err := construction.OpenPostgresRuntime(ctx, dsn)
+					owner, db, err := construction.OpenPostgresRuntime(ctx, dsn, channelfixture.Facts)
 					if err != nil {
 						return nil, nil, err
 					}

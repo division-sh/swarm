@@ -10,7 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	inbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
-	"github.com/division-sh/swarm/internal/store/internal/backend/channelonboarding"
+
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
 )
 
@@ -46,7 +46,7 @@ func admitInboundLandingRunTx(ctx context.Context, tx *sql.Tx, postgres bool, co
 	return nil
 }
 
-func admitNativeInboundPublicationTx(ctx context.Context, tx *sql.Tx, postgres bool, command inbound.CommitCommand) error {
+func admitNativeInboundPublicationTx(ctx context.Context, nativeChecks nativeChannelChecks, tx *sql.Tx, postgres bool, command inbound.CommitCommand) error {
 	input, native := command.Admission.NativeInput()
 	if !native {
 		return nil
@@ -58,7 +58,7 @@ func admitNativeInboundPublicationTx(ctx context.Context, tx *sql.Tx, postgres b
 		target.Provider != request.Provider || input.PublicationRunID() != request.ResolvedRunID {
 		return fmt.Errorf("native publication changed its original source, target or run")
 	}
-	if err := channelonboarding.RequireSessionBusinessInputTx(ctx, tx, postgres, input); err != nil {
+	if err := nativeChecks.RequireSessionBusinessInputTx(ctx, tx, postgres, input); err != nil {
 		return err
 	}
 	if err := command.RequireNativePublicationRequest(); err != nil {

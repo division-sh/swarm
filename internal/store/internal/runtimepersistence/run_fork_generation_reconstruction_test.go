@@ -1,6 +1,8 @@
 package runtimepersistence
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"encoding/json"
 	"reflect"
 	"testing"
@@ -52,13 +54,13 @@ func TestForkGenerationPreparationReconstructedOwnersBothStores(t *testing.T) {
 				switch store := fixture.store.(type) {
 				case *PostgresStore:
 					var fresh *PostgresStore
-					fresh, err = newPostgresStoreComposition(store.backend)
+					fresh, err = newPostgresStoreComposition(store.backend, channelfixture.Facts)
 					if err == nil {
 						bootstrapTestPostgresStore(t, fresh)
 						reconstructed = fresh
 					}
 				case *SQLiteRuntimeStore:
-					reconstructed, err = newSQLiteStoreComposition(store.schema, store.backend, nil)
+					reconstructed, err = newSQLiteStoreComposition(store.schema, store.backend, nil, channelfixture.Facts)
 				default:
 					t.Fatalf("unexpected backend %T", fixture.store)
 				}

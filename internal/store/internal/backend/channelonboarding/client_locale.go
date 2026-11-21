@@ -53,7 +53,7 @@ func setClientLocale(ctx context.Context, r runner, req domain.SetClientLocaleRe
 		changed = 0
 		var found bool
 		var err error
-		op, found, err = loadOperation(txctx, tx, r.dialect(), req.OperationID, true, r.deployment())
+		op, found, err = loadOperation(r, txctx, tx, r.dialect(), req.OperationID, true, r.deployment())
 		if err != nil {
 			return err
 		}

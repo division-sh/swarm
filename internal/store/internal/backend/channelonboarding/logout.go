@@ -23,8 +23,8 @@ type teardownReservation struct {
 	target *domain.SessionLogoutTarget
 }
 
-func exactTeardownReplayTx(ctx context.Context, tx *sql.Tx, d dialect, req domain.ReserveTeardownRequest) (*domain.TeardownOperation, error) {
-	existing, found, err := loadTeardownByRequestKey(ctx, tx, d, req.RequestKeyHash, true)
+func exactTeardownReplayTx(nativeOwner providerFactReader, ctx context.Context, tx *sql.Tx, d dialect, req domain.ReserveTeardownRequest) (*domain.TeardownOperation, error) {
+	existing, found, err := loadTeardownByRequestKey(nativeOwner, ctx, tx, d, req.RequestKeyHash, true)
 	if err != nil || !found {
 		return nil, err
 	}
@@ -34,7 +34,7 @@ func exactTeardownReplayTx(ctx context.Context, tx *sql.Tx, d dialect, req domai
 	return &existing, nil
 }
 
-func prepareTeardownReservationTx(ctx context.Context, tx *sql.Tx, d dialect, req domain.ReserveTeardownRequest) (teardownReservation, error) {
+func prepareTeardownReservationTx(nativeOwner providerFactReader, ctx context.Context, tx *sql.Tx, d dialect, req domain.ReserveTeardownRequest) (teardownReservation, error) {
 	var prepared teardownReservation
 	var err error
 	if req.Kind == domain.TeardownLogout {
@@ -42,13 +42,13 @@ func prepareTeardownReservationTx(ctx context.Context, tx *sql.Tx, d dialect, re
 			return prepared, err
 		}
 	}
-	prepared.replay, err = exactTeardownReplayTx(ctx, tx, d, req)
+	prepared.replay, err = exactTeardownReplayTx(nativeOwner, ctx, tx, d, req)
 	if err != nil || prepared.replay != nil {
 		return prepared, err
 	}
 	if req.Kind == domain.TeardownLogout {
 		var found bool
-		prepared.logout, found, err = loadOperation(ctx, tx, d, req.Logout.OperationID, true)
+		prepared.logout, found, err = loadOperation(nativeOwner, ctx, tx, d, req.Logout.OperationID, true)
 		if err != nil {
 			return prepared, err
 		}
@@ -63,12 +63,12 @@ func prepareTeardownReservationTx(ctx context.Context, tx *sql.Tx, d dialect, re
 		return prepared, err
 	}
 	// Recheck a reservation committed while waiting for the principal fence.
-	prepared.replay, err = exactTeardownReplayTx(ctx, tx, d, req)
+	prepared.replay, err = exactTeardownReplayTx(nativeOwner, ctx, tx, d, req)
 	if err != nil || prepared.replay != nil {
 		return prepared, err
 	}
 	if req.Kind == domain.TeardownLogout {
-		if err := admitLogoutTarget(prepared.logout, req); err != nil {
+		if err := admitLogoutTarget(nativeOwner, prepared.logout, req); err != nil {
 			return prepared, err
 		}
 		stamp, err := generationauthority.FreezeLogoutProcessTx(ctx, tx, req.Logout.ProcessBinding, d == dialectSQLite)
@@ -77,7 +77,7 @@ func prepareTeardownReservationTx(ctx context.Context, tx *sql.Tx, d dialect, re
 		}
 		prepared.target = &domain.SessionLogoutTarget{SessionLogoutPreparation: *req.Logout, ProcessStamp: stamp}
 	}
-	return prepared, requireNoConflictingLogoutTx(ctx, tx, d, req, prepared.logout)
+	return prepared, requireNoConflictingLogoutTx(nativeOwner, ctx, tx, d, req, prepared.logout)
 }
 
 func teardownRequestMatches(op domain.TeardownOperation, req domain.ReserveTeardownRequest) bool {
@@ -88,16 +88,16 @@ func teardownRequestMatches(op domain.TeardownOperation, req domain.ReserveTeard
 	return op.Logout == nil && req.Logout == nil || op.Logout != nil && req.Logout != nil && op.Logout.SessionLogoutPreparation == *req.Logout
 }
 
-func admitLogoutTarget(op domain.Operation, req domain.ReserveTeardownRequest) error {
+func admitLogoutTarget(nativeOwner providerFactReader, op domain.Operation, req domain.ReserveTeardownRequest) error {
 	if op.Phase == domain.PhaseFailed || op.Phase == domain.PhaseRetired || op.PrincipalID != req.PrincipalID ||
-		op.Interface.Normalized() != req.Scope.Interface.Normalized() || op.ValidateSessionAccount() != nil ||
+		op.Interface.Normalized() != req.Scope.Interface.Normalized() || op.ValidateSessionAccount(nativeOwner.providerFact(op.Provider)) != nil ||
 		op.SessionAccount == (operatorchannel.SessionAccountAdmission{}) {
 		return domain.ErrConflict
 	}
 	if op.Revision != req.Logout.OperationRevision {
 		return domain.ErrRevisionConflict
 	}
-	if !req.Logout.MatchesOperation(op) {
+	if !req.Logout.MatchesOperation(op, nativeOwner.providerFact(op.Provider)) {
 		return domain.ErrConflict
 	}
 	return nil
@@ -105,14 +105,14 @@ func admitLogoutTarget(op domain.Operation, req domain.ReserveTeardownRequest) e
 
 // Reservation and retirement serialize with other channel mutations through
 // the existing principal fence, after locking the exact onboarding parent.
-func requireNoConflictingLogoutTx(ctx context.Context, tx *sql.Tx, d dialect, req domain.ReserveTeardownRequest, target domain.Operation) error {
+func requireNoConflictingLogoutTx(nativeOwner providerFactReader, ctx context.Context, tx *sql.Tx, d dialect, req domain.ReserveTeardownRequest, target domain.Operation) error {
 	rows, err := tx.QueryContext(ctx, teardownSelect+` WHERE phase NOT IN ('succeeded','failed') ORDER BY teardown_id`)
 	if err != nil {
 		return err
 	}
 	var pending []domain.TeardownOperation
 	for rows.Next() {
-		op, _, err := scanTeardownRow(rows, d)
+		op, _, err := scanTeardownRow(nativeOwner, rows, d)
 		if err != nil {
 			return errors.Join(err, rows.Close())
 		}
@@ -151,14 +151,14 @@ func teardownScopeIncludesOperation(scope domain.TeardownScope, op domain.Operat
 	return scope.BundleHash == op.Coordinate.BundleHash && scope.ContextPublicationGeneration == op.Coordinate.ContextPublicationGeneration
 }
 
-func fenceLogoutConnectionTx(ctx context.Context, tx *sql.Tx, d dialect, target domain.Operation, now time.Time) (int64, int64, error) {
+func fenceLogoutConnectionTx(nativeOwner providerFactReader, ctx context.Context, tx *sql.Tx, d dialect, target domain.Operation, now time.Time) (int64, int64, error) {
 	rows, err := tx.QueryContext(ctx, d.bind(operationSelect+` WHERE session_connection_id=? ORDER BY operation_id`), target.SessionConnectionID)
 	if err != nil {
 		return 0, 0, err
 	}
 	var ids []string
 	for rows.Next() {
-		op, err := scanOperation(rows)
+		op, err := scanOperation(nativeOwner, rows)
 		if err != nil {
 			return 0, 0, errors.Join(err, rows.Close())
 		}
@@ -197,7 +197,7 @@ func fenceLogoutConnectionTx(ctx context.Context, tx *sql.Tx, d dialect, target 
 	return operations, activations, nil
 }
 
-func decodeLogoutTarget(kind domain.TeardownKind, connection, raw sql.NullString, d dialect) (*domain.SessionLogoutTarget, error) {
+func decodeLogoutTarget(nativeOwner providerFactReader, kind domain.TeardownKind, connection, raw sql.NullString, d dialect) (*domain.SessionLogoutTarget, error) {
 	if kind != domain.TeardownLogout {
 		if connection.Valid || raw.Valid {
 			return nil, fmt.Errorf("%w: non-logout teardown carries a private session target", domain.ErrConflict)
@@ -215,7 +215,7 @@ func decodeLogoutTarget(kind domain.TeardownKind, connection, raw sql.NullString
 	if d == dialectSQLite {
 		backend = processbinding.SQLiteLeaseBackend
 	}
-	if decoder.Decode(new(any)) != io.EOF || target.Validate() != nil || target.ProcessStamp.Backend != backend || !connection.Valid || target.Account.ConnectionID != connection.String || err != nil || string(canonical) != raw.String {
+	if decoder.Decode(new(any)) != io.EOF || target.Validate(nativeOwner.providerFact(target.Account.Provider)) != nil || target.ProcessStamp.Backend != backend || !connection.Valid || target.Account.ConnectionID != connection.String || err != nil || string(canonical) != raw.String {
 		return nil, fmt.Errorf("%w: contradictory logout target", domain.ErrConflict)
 	}
 	return &target, nil

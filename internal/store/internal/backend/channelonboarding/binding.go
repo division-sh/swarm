@@ -27,7 +27,7 @@ func reconcileBinding(ctx context.Context, r runner, req domain.ReconcileBinding
 	}
 	var out domain.Operation
 	err := r.mutate(ctx, "reconcile channel onboarding binding", func(ctx context.Context, tx *sql.Tx) error {
-		op, found, err := loadOperation(ctx, tx, r.dialect(), req.OperationID, true)
+		op, found, err := loadOperation(r, ctx, tx, r.dialect(), req.OperationID, true)
 		if err != nil {
 			return err
 		}
@@ -65,7 +65,7 @@ func reconcileBinding(ctx context.Context, r runner, req domain.ReconcileBinding
 		}
 		op.Revision++
 		op.UpdatedAt = canonicalTime(req.Now)
-		if err := updateOperation(ctx, tx, r.dialect(), op); err != nil {
+		if err := updateOperation(r, ctx, tx, r.dialect(), op); err != nil {
 			return err
 		}
 		out = op

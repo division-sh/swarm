@@ -90,9 +90,9 @@ func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
 					var ok bool
 					var err error
 					if postgres {
-						ok, err = effectpersistence.ExternalEffectAuthorityCurrentPostgres(ctx, db, authority)
+						ok, err = effectpersistence.ExternalEffectAuthorityCurrentPostgres(ctx, selected.(*PostgresStore).channelOnboardingPostgresOwner, db, authority)
 					} else {
-						ok, err = effectpersistence.ExternalEffectAuthorityCurrentSQLite(ctx, db, authority)
+						ok, err = effectpersistence.ExternalEffectAuthorityCurrentSQLite(ctx, selected.(*SQLiteRuntimeStore).channelOnboardingSQLiteOwner, db, authority)
 					}
 					if err != nil {
 						t.Fatal(err)

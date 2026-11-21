@@ -1,6 +1,8 @@
 package runtimepersistence
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -366,7 +368,7 @@ func openStateOnlyAcquisitionStore(t *testing.T, backend string) (stateOnlyAcqui
 	if backend == "sqlite" {
 		selected := newBootstrappedSQLiteRuntimeStoreForTest(t)
 		ctx = originalStoreFixtureContext(t, ctx, selected)
-		ctx = requireRunFixtureForTest(t, ctx, NewSQLiteRuntimeStoreForTest(selected.backend.ConstructionHandle()), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
+		ctx = requireRunFixtureForTest(t, ctx, NewSQLiteRuntimeStoreForTest(selected.backend.ConstructionHandle(), channelfixture.Facts), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 		return selected, selected.backend.ConstructionHandle(), ctx, runID
 	}
 	_, db, cleanup := testutil.StartPostgres(t)

@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/tests/support/channelfixture"
 )
 
 func TestRegistrationHolderDiscoveryFailsClosedOnlyDuringRetainedStop(t *testing.T) {
@@ -25,12 +26,13 @@ func TestRegistrationHolderDiscoveryFailsClosedOnlyDuringRetainedStop(t *testing
 		}},
 	}
 	ref := channelonboarding.AccountReference{Provider: "telegram", Account: "420079"}
-	if rows, err := manager.activationAccountHolders(t.Context(), candidate, ref, true); len(rows) != 0 || err != nil {
+	facts := channelfixture.For(ref.Provider)
+	if rows, err := manager.activationAccountHolders(t.Context(), candidate, ref, facts, true); len(rows) != 0 || err != nil {
 		t.Fatalf("ordinary currentness changed discovery: rows=%v err=%v", rows, err)
 	}
 	// Supply the retained phase directly to exercise only the failed read.
 	manager.inboundStopObservation = &InboundRuntimeStop{manager: manager}
-	if rows, err := manager.activationAccountHolders(t.Context(), candidate, ref, true); len(rows) != 0 || !errors.Is(err, channelonboarding.ErrRevisionConflict) {
+	if rows, err := manager.activationAccountHolders(t.Context(), candidate, ref, facts, true); len(rows) != 0 || !errors.Is(err, channelonboarding.ErrRevisionConflict) {
 		t.Fatalf("retained currentness skipped an unchecked live contender: rows=%v err=%v", rows, err)
 	}
 }

@@ -1,6 +1,8 @@
 package runtimepersistence
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"context"
 	"database/sql"
 	"errors"
@@ -1017,7 +1019,7 @@ func TestPostgresPipelineClaimLeaseExcludesIndependentStoreUntilRelease(t *testi
 	if err := secondaryDB.PingContext(ctx); err != nil {
 		t.Fatalf("ping independent PostgreSQL pool: %v", err)
 	}
-	secondary := newPostgresStoreWithBackend(mustPostgresBackend(secondaryDB))
+	secondary := newPostgresStoreWithBackend(mustPostgresBackend(secondaryDB), channelfixture.Facts)
 	secondary.acceptCurrentSchemaForTest()
 
 	primaryWork, err := primary.PipelineObligations().ClaimEvent(ctx, eventID, runtimepipelineobligation.PurposeRecovery)
