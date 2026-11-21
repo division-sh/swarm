@@ -131,8 +131,20 @@ func TestExposureReportsListenerLossAndRefusesStaleProbe(t *testing.T) {
 func TestExposureListenerLossDuringStartupReturnsServeCause(t *testing.T) {
 	listener := reserveTestListener(t)
 	probing := make(chan struct{})
+	entered, release := make(chan struct{}), make(chan struct{})
+	resume := sync.OnceFunc(func() { close(release) })
+	canceled := make(chan error, 1)
 	c, err := NewController(Options{Mode: ModeExternalOrigin, PublicOrigin: "https://hooks.example.test",
-		ListenAddress: listener.Addr().String(), Listener: listener, Handler: http.NotFoundHandler(),
+		ListenAddress: listener.Addr().String(), Listener: listener,
+		Handler: http.HandlerFunc(func(_ http.ResponseWriter, req *http.Request) {
+			close(entered)
+			select {
+			case <-req.Context().Done():
+				canceled <- req.Context().Err()
+			case <-release:
+			}
+			<-release
+		}),
 		HTTPClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 			close(probing)
 			<-req.Context().Done()
@@ -145,22 +157,56 @@ func TestExposureListenerLossDuringStartupReturnsServeCause(t *testing.T) {
 		return errors.New("startup proof retried after listener loss")
 	}
 	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
 	started := make(chan error, 1)
-	go func() { started <- c.Start(ctx) }()
+	startDone := make(chan struct{})
+	go func() {
+		defer close(startDone)
+		started <- c.Start(ctx)
+	}()
+	t.Cleanup(func() {
+		resume()
+		cancel()
+		_ = listener.Close()
+		awaitExposure(t, startDone)
+		_ = c.Stop(context.Background())
+	})
 	awaitExposure(t, probing)
+	conn, err := net.DialTimeout("tcp", listener.Addr().String(), time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	if _, err := fmt.Fprint(conn, "POST /webhooks/support/telegram HTTP/1.1\r\nHost: hooks.example.test\r\nContent-Length: 5\r\n\r\na"); err != nil {
+		t.Fatal(err)
+	}
+	awaitExposure(t, entered)
 	if err := listener.Close(); err != nil {
 		t.Fatal(err)
 	}
 	awaitExposure(t, c.serverDone)
+	if got := awaitExposure(t, started); got != c.ListenerFailure() || !errors.Is(got, net.ErrClosed) {
+		t.Fatalf("startup failed without its exact listener cause: %v", got)
+	}
 	select {
-	case got := <-started:
-		if !errors.Is(got, net.ErrClosed) {
-			t.Errorf("startup failed without its listener cause: %v", got)
-		}
-	case <-time.After(250 * time.Millisecond):
-		cancel()
-		t.Errorf("listener exit did not interrupt startup proof: %v", awaitExposure(t, started))
+	case got := <-canceled:
+		t.Fatalf("startup canceled its admitted handler before cutoff: %v", got)
+	default:
+	}
+	deadline, stop := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer stop()
+	stopped := make(chan error, 1)
+	go func() { stopped <- c.Stop(deadline) }()
+	if got := awaitExposure(t, canceled); !errors.Is(got, context.Canceled) || deadline.Err() != context.DeadlineExceeded {
+		t.Errorf("handler canceled outside original shutdown deadline: delegate=%v owner=%v", got, deadline.Err())
+	}
+	select {
+	case got := <-stopped:
+		t.Fatalf("cutoff reported %v before the admitted handler returned", got)
+	default:
+	}
+	resume()
+	if got := awaitExposure(t, stopped); !errors.Is(got, context.DeadlineExceeded) || errors.Is(got, net.ErrClosed) {
+		t.Errorf("shutdown lost deadline or repeated startup error: %v", got)
 	}
 }
 
