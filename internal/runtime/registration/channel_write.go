@@ -37,6 +37,12 @@ func channelWriteSource(handle *runtimeeffects.Handle) (string, error) {
 	return "", fmt.Errorf("channel write requires its authorized journal handle")
 }
 
+// SettledChannelDeliveryLaunchRefusal carries the failed dispatch after clean terminal settlement.
+type SettledChannelDeliveryLaunchRefusal struct{ Cause error }
+
+func (e *SettledChannelDeliveryLaunchRefusal) Error() string { return e.Cause.Error() }
+func (e *SettledChannelDeliveryLaunchRefusal) Unwrap() error { return e.Cause }
+
 // FailChannelWrite shares the pre/post-launch mapping across admitted transports.
 // It does not authorize, execute, or retry a provider operation.
 func FailChannelWrite(ctx context.Context, handle *runtimeeffects.Handle, toolID string, launched bool, launchErr, cause error) (DeliveryResult, error) {
@@ -56,7 +62,16 @@ func FailChannelWrite(ctx context.Context, handle *runtimeeffects.Handle, toolID
 			attributes["no_dispatch"] = true
 		}
 	}
-	return result, errors.Join(launchErr, handle.Fail(ctx, state, class, detail, source, "dispatch", attributes, cause))
+	failure := handle.Fail(ctx, state, class, detail, source, "dispatch", attributes, cause)
+	if !launched && launchErr == nil && source == "channel_delivery" {
+		mismatch, refused := cause.(*runtimeeffects.ChannelDeliveryLaunchRenderSuperseded)
+		settled, clean := failure.(*runtimefailures.Error)
+		// Fail returns a join on settlement or cleanup errors, and the bare cause for a non-owner.
+		if refused && clean && settled.Unwrap() == mismatch {
+			return result, &SettledChannelDeliveryLaunchRefusal{Cause: failure}
+		}
+	}
+	return result, errors.Join(launchErr, failure)
 }
 
 // CompleteChannelWrite persists observed provider evidence and the compiled

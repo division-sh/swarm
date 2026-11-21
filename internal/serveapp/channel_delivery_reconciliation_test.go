@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/registration"
 )
 
 type channelWorkerControlStore struct {
@@ -101,7 +102,7 @@ func TestChannelWorkerFinalOutputUsesOriginalDeadline(t *testing.T) {
 			if got, ok := lease.Context().Deadline(); !ok || !got.Equal(deadline) {
 				t.Errorf("final send deadline=%v, want original %v", got, deadline)
 			}
-			return w.finishSend(selection, lease, failure)
+			return w.finishSend(selection, lease, failure, false)
 		},
 	})
 	if err := w.finishOutput(ctx, true); !errors.Is(err, failure) || passes != 1 || process.ActiveCount() != 0 || work.Err() == nil {
@@ -196,10 +197,10 @@ func TestChannelWorkerDoesNotCreditFailedPass(t *testing.T) {
 			t.Fatal(err)
 		}
 		stop()
-		if err := worker.finishSend(selection, lease, errDeploymentReceiverNotCurrent); !errors.Is(err, errDeploymentReceiverNotCurrent) || worker.err != nil || process.ActiveCount() != 0 {
+		if err := worker.finishSend(selection, lease, errDeploymentReceiverNotCurrent, false); !errors.Is(err, errDeploymentReceiverNotCurrent) || worker.err != nil || process.ActiveCount() != 0 {
 			t.Fatalf("receiver refusal changed reconciliation or drain: returned=%v drain=%v active=%d", err, worker.err, process.ActiveCount())
 		}
-		if err := worker.finishSend(selection, lease, errDeploymentReceiverNotCurrent); !errors.Is(err, worklifetime.ErrAlreadySettled) || !errors.Is(worker.err, worklifetime.ErrAlreadySettled) {
+		if err := worker.finishSend(selection, lease, errDeploymentReceiverNotCurrent, false); !errors.Is(err, worklifetime.ErrAlreadySettled) || !errors.Is(worker.err, worklifetime.ErrAlreadySettled) {
 			t.Fatalf("receiver refusal hid independent settlement: returned=%v drain=%v", err, worker.err)
 		}
 	})
@@ -253,20 +254,26 @@ func TestChannelWorkerDoesNotCreditFailedPass(t *testing.T) {
 func testChannelWorkerSupersededRenderDuringStop(t *testing.T) {
 	stale := failures.New(failures.ClassSupersededGeneration, "external_effect_authority_stale", "external-effects", "check_authority", nil)
 	refused := &effects.ChannelDeliveryRenderSuperseded{Cause: stale}
+	launchRefused := &registration.SettledChannelDeliveryLaunchRefusal{Cause: stale}
 	credentialNotCurrent := runtime.ChannelPublicationCredentialNotCurrent{}
 	credentialRefused := &ordinaryChannelCredentialRefusal{credentialNotCurrent}
 	storageErr := errors.New("independent storage failure")
 	for _, tc := range []struct {
 		name              string
 		result, wantDrain error
+		final             bool
 	}{
-		{"exact_pre_authorize_refusal", refused, nil},
-		{"generic_stale", stale, stale},
-		{"compound_failure", errors.Join(refused, storageErr), storageErr},
-		{"ordinary_credential_refusal", credentialRefused, nil},
-		{"unmarked_credential_refusal", credentialNotCurrent, credentialNotCurrent},
-		{"generic_revision_conflict", channelonboarding.ErrRevisionConflict, channelonboarding.ErrRevisionConflict},
-		{"compound_credential_refusal", errors.Join(credentialRefused, storageErr), storageErr},
+		{"exact_pre_authorize_refusal", refused, nil, false},
+		{"generic_stale", stale, stale, false},
+		{"compound_failure", errors.Join(refused, storageErr), storageErr, false},
+		{"settled_launch_refusal", launchRefused, nil, false},
+		{"final_launch_refusal", launchRefused, launchRefused, true},
+		{"unsettled_launch_refusal", &effects.ChannelDeliveryLaunchRenderSuperseded{Cause: stale}, stale, false},
+		{"compound_settled_launch_refusal", errors.Join(launchRefused, storageErr), storageErr, false},
+		{"ordinary_credential_refusal", credentialRefused, nil, false},
+		{"unmarked_credential_refusal", credentialNotCurrent, credentialNotCurrent, false},
+		{"generic_revision_conflict", channelonboarding.ErrRevisionConflict, channelonboarding.ErrRevisionConflict, false},
+		{"compound_credential_refusal", errors.Join(credentialRefused, storageErr), storageErr, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			process := worklifetime.NewProcess()
@@ -277,11 +284,11 @@ func testChannelWorkerSupersededRenderDuringStop(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := worker.finishSend(selection, lease, tc.result); !errors.Is(err, tc.result) || !errors.Is(worker.err, tc.wantDrain) || process.ActiveCount() != 0 {
+			if err := worker.finishSend(selection, lease, tc.result, tc.final); !errors.Is(err, tc.result) || !errors.Is(worker.err, tc.wantDrain) || process.ActiveCount() != 0 {
 				t.Fatalf("reconciliation=%v drain=%v active=%d", err, worker.err, process.ActiveCount())
 			}
 			if tc.wantDrain == nil {
-				if err := worker.finishSend(selection, lease, tc.result); !errors.Is(err, worklifetime.ErrAlreadySettled) || !errors.Is(worker.err, worklifetime.ErrAlreadySettled) {
+				if err := worker.finishSend(selection, lease, tc.result, tc.final); !errors.Is(err, worklifetime.ErrAlreadySettled) || !errors.Is(worker.err, worklifetime.ErrAlreadySettled) {
 					t.Fatalf("refusal hid settlement failure: returned=%v drain=%v", err, worker.err)
 				}
 			}
@@ -391,7 +398,7 @@ func testChannelWorkerExpiredDrainJoinsAcceptedSendAndPreservesFailure(t *testin
 				if independent {
 					result = failed
 				}
-				_ = worker.finishSend(ctx, lease, result)
+				_ = worker.finishSend(ctx, lease, result, false)
 			}()
 			deadline, stop := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
 			defer stop()
