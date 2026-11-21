@@ -224,6 +224,45 @@ func TestRegistrationAcknowledgedLaunchGuardPreventsDispatch(t *testing.T) {
 	}
 }
 
+func TestChannelDeliveryLaunchRefusalRequiresCleanTerminalSettlement(t *testing.T) {
+	refusal := &runtimeeffects.ChannelDeliveryLaunchRenderSuperseded{Cause: errors.New("recomputed render differs")}
+	fault := errors.New("independent settlement fault")
+	for _, tc := range []struct {
+		name               string
+		result             error
+		settleErr, cleanup error
+		marked             bool
+	}{
+		{"clean", refusal, nil, nil, true},
+		{"compound_launch", errors.Join(refusal, fault), nil, nil, false},
+		{"failed_settlement", refusal, fault, nil, false},
+		{"committed_cleanup_failed", refusal, nil, fault, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := &channelDeliveryHarness{Harness: effecttest.New()}
+			h.MarkErr, h.SettleErr = tc.result, tc.settleErr
+			store := &postCommitRegistrationStore{Store: h, settlementErr: tc.cleanup}
+			ctx := runtimeeffects.WithController(channelDeliveryTestContext(h), runtimeeffects.NewController(store).WithExecutionPosture(executionposture.Live))
+			handle, err := runtimeeffects.BeginChannelDelivery(ctx, []byte("launch refusal"), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			cause := handle.MarkLaunched(ctx)
+			_, err = FailChannelWrite(ctx, handle, "send", false, nil, cause)
+			_, marked := err.(*SettledChannelDeliveryLaunchRefusal)
+			if marked != tc.marked || !errors.Is(err, cause) ||
+				(errors.Is(tc.result, fault) || tc.settleErr != nil || tc.cleanup != nil) != errors.Is(err, fault) {
+				t.Fatalf("marked=%t want=%t result=%v", marked, tc.marked, err)
+			}
+			if tc.settleErr == nil {
+				if err := h.RequireState("channel_delivery", runtimeeffects.StateTerminalFailure); err != nil {
+					t.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
 func TestProviderRegistrationReadbackAcknowledgedCleanupLeavesNoPendingAttempt(t *testing.T) {
 	for _, phase := range []runtimeeffects.MutationPhase{runtimeeffects.MutationObservation, runtimeeffects.MutationSettlement} {
 		t.Run(string(phase), func(t *testing.T) {

@@ -13,6 +13,13 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/channeldelivery"
 )
 
+type channelDeliveryLaunchCheckKey struct{}
+
+// Tag only the authority check inside the native launch transaction.
+func channelDeliveryLaunchCheckContext(ctx context.Context) context.Context {
+	return context.WithValue(ctx, channelDeliveryLaunchCheckKey{}, true)
+}
+
 // A delivery send owns no run or agent. The principal lock serializes default
 // changes with authorization and launch; the joined rows fence a replaced
 // binding or activation even when the immutable plan still exists.
@@ -41,6 +48,9 @@ func requireChannelDeliveryAuthorityTx(ctx context.Context, tx *sql.Tx, authorit
 		err := invalidExternalAuthority(authority, "source_changed")
 		if authorize {
 			return &runtimeeffects.ChannelDeliveryRenderSuperseded{Cause: err}
+		}
+		if ctx.Value(channelDeliveryLaunchCheckKey{}) != nil {
+			return &runtimeeffects.ChannelDeliveryLaunchRenderSuperseded{Cause: err}
 		}
 		return err
 	}

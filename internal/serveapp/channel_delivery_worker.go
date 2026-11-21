@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/registration"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 )
 
@@ -586,13 +587,14 @@ func (w *serveChannelDeliveryWorker) beginSend(ctx context.Context) (*worklifeti
 	return w.owner.Begin(w.workCtx)
 }
 
-func (w *serveChannelDeliveryWorker) finishSend(selectionCtx context.Context, lease *worklifetime.Lease, result error) error {
+func (w *serveChannelDeliveryWorker) finishSend(selectionCtx context.Context, lease *worklifetime.Lease, result error, final bool) error {
 	selectionEnded := selectionCtx.Err() != nil
 	_, renderSuperseded := result.(*effects.ChannelDeliveryRenderSuperseded)
 	_, credentialRefused := result.(*ordinaryChannelCredentialRefusal)
-	selectionRefused := result == errDeploymentReceiverNotCurrent || renderSuperseded || credentialRefused
+	_, launchRefused := result.(*registration.SettledChannelDeliveryLaunchRefusal)
+	selectionRefused := result == errDeploymentReceiverNotCurrent || renderSuperseded || credentialRefused || !final && launchRefused
 	if selectionEnded && selectionRefused {
-		// The guard refused before provider I/O or effect authorization.
+		// These refusals occurred before provider I/O; return them to reconciliation.
 		logChannelDeliveryReconciliation(lease.Context(), result)
 	}
 	settlementErr := lease.Done()
