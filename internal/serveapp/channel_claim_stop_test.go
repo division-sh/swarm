@@ -4,7 +4,6 @@ package serveapp
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -30,6 +29,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/servedparity"
 	"github.com/division-sh/swarm/internal/sessionprovider/authority"
+	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
+	storeselected "github.com/division-sh/swarm/internal/store/selected"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
@@ -217,18 +218,20 @@ func TestGracefulStopJoinsAdmittedDeploymentWebhookClaimBothStores(t *testing.T)
 			var stores *selectedStoreOwner
 			if backend == servedparity.BackendDefaultSQLite {
 				stores = openSelectedSQLiteOwner(t, h.storeDSN, &config.Config{})
-				if _, err := initializeServePlatformStateStores(ctx, stores.Schema()); err != nil {
-					t.Fatal(err)
-				}
 			} else {
-				db, err := sql.Open("postgres", h.storeDSN)
+				var err error
+				stores, err = storeselected.OpenRuntime(ctx, storeselected.RuntimeRequest{
+					Selection:   storebackend.Selection{Backend: storebackend.BackendPostgres},
+					PostgresDSN: h.storeDSN,
+				})
 				if err != nil {
 					t.Fatal(err)
 				}
-				t.Cleanup(func() { _ = db.Close() })
-				stores = openSelectedPostgresOwner(t, h.storeDSN, db, &config.Config{})
 			}
 			t.Cleanup(func() { closeUnactivatedSelectedStore(t, stores) })
+			if _, err := initializeServePlatformStateStores(ctx, stores.Schema()); err != nil {
+				t.Fatal(err)
+			}
 			process := worklifetime.NewProcess()
 			capability, err := stores.StartupOwnership().AcquireProcessCapability(ctx, startupownership.AcquireRequest{
 				OwnerID: "stop-claim-proof", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString(),
