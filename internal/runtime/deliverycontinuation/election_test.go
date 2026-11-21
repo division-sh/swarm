@@ -259,7 +259,7 @@ func TestCoordinatorSynchronousDeferralDoesNotScheduleItsOwnRetry(t *testing.T) 
 	if err := job.lease.Done(); err != nil {
 		t.Fatal(err)
 	}
-	c.completeDispatchWithWake(job.deliveryID, nil, false, 0)
+	c.completeDispatchWithWake(job.deliveryID, nil, DispatchTransferred, 0)
 	select {
 	case <-c.wake:
 		t.Fatal("synchronous deferral scheduled its own retry without a named lifecycle transition")
@@ -270,5 +270,68 @@ func TestCoordinatorSynchronousDeferralDoesNotScheduleItsOwnRetry(t *testing.T) 
 	case <-c.wake:
 	default:
 		t.Fatal("named lifecycle wake was lost")
+	}
+}
+
+func TestCoordinatorRearmsReturnedCarrierAfterAlreadyOwnedReservation(t *testing.T) {
+	for _, returned := range []bool{false, true} {
+		authority, owner, cleanup := coordinatorTestAuthorityAndOwner(t)
+		defer cleanup()
+		evt, route := coordinatorTestEvent("reserved-return"), coordinatorTestAgentRoute(t, "receiver")
+		id, err := runtimedelivery.DeliveryID(evt.ID(), route)
+		if err != nil {
+			t.Fatal(err)
+		}
+		page := runtimedelivery.ContinuationPage{Items: []runtimedelivery.ContinuationItem{{DeliveryID: id, Event: evt, Disposition: runtimedelivery.ClaimAcquired, Snapshot: runtimedelivery.Snapshot{DeliveryID: id, Route: route, Authority: authority, Status: runtimedelivery.StatusPending}}}, Exhausted: true}
+		var c *Coordinator
+		var acquisition worklifetime.DeliveryAcquisition
+		c, err = New(&coordinatorTestStore{pages: []runtimedelivery.ContinuationPage{page, page, page}}, authority, owner, electionDispatcher(func(context.Context, events.Event, events.DeliveryRoute) DispatchResult {
+			if acquisition, err = c.Acquire(id); err != nil {
+				return Fatal(err)
+			}
+			if acquisition.Disposition() == worklifetime.DeliveryAlreadyOwned {
+				return AlreadyOwned()
+			}
+			return Transferred()
+		}), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer c.finish(t.Context(), func() {}, nil, nil, false)
+		scan := func(wantJobs int) {
+			if _, wake, err := c.scan(t.Context(), true); err != nil || wake || len(c.jobs) != wantJobs {
+				t.Fatalf("scan: jobs=%d want=%d timer=%t err=%v", len(c.jobs), wantJobs, wake, err)
+			}
+		}
+		scan(1)
+		carrier, err := acquireCoordinatorTestCapability(c, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		job := <-c.jobs
+		disposition, err := c.dispatchAttempt(t.Context(), job)
+		if err != nil || disposition != DispatchAlreadyOwned || acquisition.Disposition() != worklifetime.DeliveryAlreadyOwned {
+			t.Fatalf("first job did not lose to the exact carrier: %v, %v", acquisition.Disposition(), err)
+		}
+		if returned {
+			if resolution, err := carrier.Resolve(t.Context(), worklifetime.DeliveryContinuationReturn); err != nil || resolution != worklifetime.DeliveryContinuationReturned || len(c.wake) != 1 {
+				t.Fatalf("queued carrier did not return and signal: %v, %v", resolution, err)
+			}
+			<-c.wake
+			scan(0)
+		}
+		c.completeDispatchWithWake(job.deliveryID, nil, disposition, job.wakeVersion)
+		if _, held := c.reserved[id]; held || (len(c.wake) == 1) != returned {
+			t.Fatalf("after reservation clearance: held=%t wake=%d, want wake=%t", held, len(c.wake), returned)
+		}
+		if returned {
+			<-c.wake
+			scan(1)
+			job = <-c.jobs
+			_, err = c.dispatchAttempt(t.Context(), job)
+			if next, acquired := acquisition.Acquired(); err != nil || job.deliveryID != id || !acquired || next == carrier || next.DeliveryID() != id {
+				t.Fatalf("rearmed scan did not transfer the exact delivery to a new carrier: %v, %v", acquisition.Disposition(), err)
+			}
+		}
 	}
 }

@@ -502,7 +502,7 @@ func TestCoordinatorCapacityBoundedScanResumesNextPage(t *testing.T) {
 		if err := job.lease.Done(); err != nil {
 			t.Fatal(err)
 		}
-		c.completeDispatchWithWake(job.deliveryID, nil, false, 0)
+		c.completeDispatchWithWake(job.deliveryID, nil, DispatchTransferred, 0)
 	}
 	select {
 	case <-c.wake:
@@ -513,7 +513,7 @@ func TestCoordinatorCapacityBoundedScanResumesNextPage(t *testing.T) {
 	if err := refill.lease.Done(); err != nil {
 		t.Fatal(err)
 	}
-	c.completeDispatchWithWake(refill.deliveryID, nil, false, 0)
+	c.completeDispatchWithWake(refill.deliveryID, nil, DispatchTransferred, 0)
 	select {
 	case <-c.wake:
 	default:
@@ -539,7 +539,7 @@ func TestCoordinatorCapacityBoundedScanResumesNextPage(t *testing.T) {
 	if err := job.lease.Done(); err != nil {
 		t.Fatal(err)
 	}
-	c.completeDispatchWithWake(job.deliveryID, nil, false, 0)
+	c.completeDispatchWithWake(job.deliveryID, nil, DispatchTransferred, 0)
 	select {
 	case <-c.wake:
 	default:
@@ -550,7 +550,7 @@ func TestCoordinatorCapacityBoundedScanResumesNextPage(t *testing.T) {
 		if err := job.lease.Done(); err != nil {
 			t.Fatal(err)
 		}
-		c.completeDispatchWithWake(job.deliveryID, nil, false, 0)
+		c.completeDispatchWithWake(job.deliveryID, nil, DispatchTransferred, 0)
 	}
 }
 
@@ -562,7 +562,7 @@ func TestDeferredDispatchRechecksSignalConsumedBeforeCarrierReturn(t *testing.T)
 	scheduledVersion := c.wakeVersion.Load()
 	c.Signal()
 	<-c.wake // The scanner observed the route change while the job was reserved.
-	c.completeDispatchWithWake("delivery-1", nil, true, scheduledVersion)
+	c.completeDispatchWithWake("delivery-1", nil, DispatchDeferred, scheduledVersion)
 	if got := c.wakeVersion.Load(); got != scheduledVersion+1 {
 		t.Fatalf("internal catch-up advanced progress version to %d", got)
 	}
@@ -572,7 +572,7 @@ func TestDeferredDispatchRechecksSignalConsumedBeforeCarrierReturn(t *testing.T)
 		t.Fatal("route change before carrier return lost its rescan")
 	}
 	c.reserved["delivery-1"] = struct{}{}
-	c.completeDispatchWithWake("delivery-1", nil, true, c.wakeVersion.Load())
+	c.completeDispatchWithWake("delivery-1", nil, DispatchDeferred, c.wakeVersion.Load())
 	select {
 	case <-c.wake:
 		t.Fatal("unchanged route lifecycle spun a deferred delivery")
@@ -586,7 +586,7 @@ func TestDeferredJobsCannotManufactureEachOthersProgress(t *testing.T) {
 	c.Signal()
 	<-c.wake
 
-	c.completeDispatchWithWake("first", nil, true, initial)
+	c.completeDispatchWithWake("first", nil, DispatchDeferred, initial)
 	select {
 	case <-c.wake:
 	default:
@@ -598,7 +598,7 @@ func TestDeferredJobsCannotManufactureEachOthersProgress(t *testing.T) {
 	// The scanner can reserve the first job while its peer is still returning.
 	c.reserved["first"] = struct{}{}
 	firstRescheduled := c.wakeVersion.Load()
-	c.completeDispatchWithWake("second", nil, true, initial)
+	c.completeDispatchWithWake("second", nil, DispatchDeferred, initial)
 	select {
 	case <-c.wake:
 	default:
@@ -608,8 +608,8 @@ func TestDeferredJobsCannotManufactureEachOthersProgress(t *testing.T) {
 		t.Fatalf("second catch-up invented progress version %d", got)
 	}
 	c.reserved["second"] = struct{}{}
-	c.completeDispatchWithWake("first", nil, true, firstRescheduled)
-	c.completeDispatchWithWake("second", nil, true, c.wakeVersion.Load())
+	c.completeDispatchWithWake("first", nil, DispatchDeferred, firstRescheduled)
+	c.completeDispatchWithWake("second", nil, DispatchDeferred, c.wakeVersion.Load())
 	select {
 	case <-c.wake:
 		t.Fatal("deferred jobs kept each other awake without another owner transition")
@@ -654,7 +654,7 @@ func TestCoordinatorCanDispatchIndependentDeliveriesToOneTargetTogether(t *testi
 		if err := job.lease.Done(); err != nil {
 			t.Fatal(err)
 		}
-		c.completeDispatchWithWake(job.deliveryID, nil, false, 0)
+		c.completeDispatchWithWake(job.deliveryID, nil, DispatchTransferred, 0)
 	}
 }
 
