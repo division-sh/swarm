@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/runtime"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/toolgateway"
 	storeselected "github.com/division-sh/swarm/internal/store/selected"
 )
@@ -184,7 +185,14 @@ func (s *processLifecycleSupervisor) serveMCP(w http.ResponseWriter, r *http.Req
 		return
 	}
 	handler := s.currentRT.ToolGateway.Handler()
-	if owner := s.currentRT.WorkOccurrence(); owner != nil {
+	use, _, err := s.runtimeContexts.AcquireBundleHash(r.Context(), s.currentSourceArtifactFact.BundleHash())
+	if owner := s.currentRT.WorkOccurrence(); owner != nil && s.stopping && errors.Is(err, worklifetime.ErrAdmissionFenced) {
+		if s.inboundStopCtx != nil {
+			deadline, _ := s.inboundStopCtx.Deadline()
+			ctx, cancel := context.WithDeadline(r.Context(), deadline)
+			defer cancel()
+			r = r.WithContext(ctx)
+		}
 		accepted, release, err := s.currentRT.ToolGateway.AcquireAcceptedRuntimeRequest(r, owner)
 		if err != nil || accepted != nil {
 			s.mu.RUnlock()
@@ -197,7 +205,6 @@ func (s *processLifecycleSupervisor) serveMCP(w http.ResponseWriter, r *http.Req
 			return
 		}
 	}
-	use, _, err := s.runtimeContexts.AcquireBundleHash(r.Context(), s.currentSourceArtifactFact.BundleHash())
 	s.mu.RUnlock()
 	if err != nil || use == nil {
 		http.Error(w, "runtime execution is unavailable", http.StatusServiceUnavailable)

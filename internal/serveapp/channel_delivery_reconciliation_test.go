@@ -183,6 +183,22 @@ func TestChannelWorkerKeepsInPassHintAndJoinsExactProcess(t *testing.T) {
 func TestChannelWorkerDoesNotCreditFailedPass(t *testing.T) {
 	t.Run("subscription_shutdown", testChannelWorkerSubscriptionShutdown)
 	t.Run("expired_drain", testChannelWorkerExpiredDrainJoinsAcceptedSendAndPreservesFailure)
+	t.Run("stale_receiver_before_launch", func(t *testing.T) {
+		process := worklifetime.NewProcess()
+		worker := &serveChannelDeliveryWorker{owner: process, workCtx: t.Context()}
+		selection, stop := context.WithCancel(t.Context())
+		lease, err := worker.beginSend(selection)
+		if err != nil {
+			t.Fatal(err)
+		}
+		stop()
+		if err := worker.finishSend(selection, lease, errDeploymentReceiverNotCurrent); !errors.Is(err, errDeploymentReceiverNotCurrent) || worker.err != nil || process.ActiveCount() != 0 {
+			t.Fatalf("receiver refusal changed reconciliation or drain: returned=%v drain=%v active=%d", err, worker.err, process.ActiveCount())
+		}
+		if err := worker.finishSend(selection, lease, errDeploymentReceiverNotCurrent); !errors.Is(err, worklifetime.ErrAlreadySettled) || !errors.Is(worker.err, worklifetime.ErrAlreadySettled) {
+			t.Fatalf("receiver refusal hid independent settlement: returned=%v drain=%v", err, worker.err)
+		}
+	})
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	process := worklifetime.NewProcess()
