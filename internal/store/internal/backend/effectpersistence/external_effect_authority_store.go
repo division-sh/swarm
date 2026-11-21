@@ -139,6 +139,17 @@ func ExternalEffectAuthorityCurrentSQLite(ctx context.Context, q interface {
 }
 
 func requireExternalEffectAuthorityPostgres(ctx context.Context, tx *sql.Tx, authority runtimeeffects.Authority, authorize bool) error {
+	return requireExternalEffectAuthorityPostgresAtPhase(ctx, tx, authority, authorityCheckPhase(authorize))
+}
+
+func authorityCheckPhase(authorize bool) runtimeeffects.MutationPhase {
+	if authorize {
+		return runtimeeffects.MutationAuthorization
+	}
+	return 0
+}
+
+func requireExternalEffectAuthorityPostgresAtPhase(ctx context.Context, tx *sql.Tx, authority runtimeeffects.Authority, phase runtimeeffects.MutationPhase) error {
 	if !authority.Valid() {
 		return invalidExternalAuthority(authority, "invalid")
 	}
@@ -150,14 +161,14 @@ func requireExternalEffectAuthorityPostgres(ctx context.Context, tx *sql.Tx, aut
 	if err := requireExternalEffectRunActivePostgres(ctx, tx, authority); err != nil {
 		return err
 	}
-	if authority.Kind == runtimeeffects.AuthorityConversationForkChat && authorize {
+	if authority.Kind == runtimeeffects.AuthorityConversationForkChat && phase == runtimeeffects.MutationAuthorization {
 		return claimOrValidateForkChatAuthorityPostgres(ctx, tx, authority)
 	}
-	if authority.Kind == runtimeeffects.AuthoritySelectedContractFork && authorize {
+	if authority.Kind == runtimeeffects.AuthoritySelectedContractFork && phase == runtimeeffects.MutationAuthorization {
 		return requireSelectedContractForkAuthorityPostgres(ctx, tx, authority, true)
 	}
-	if authority.Kind == runtimeeffects.AuthorityChannelDelivery && authorize {
-		return requireChannelDeliveryAuthorityTx(ctx, tx, authority, true, true)
+	if authority.Kind == runtimeeffects.AuthorityChannelDelivery && phase != 0 {
+		return requireChannelDeliveryAuthorityTx(ctx, tx, authority, true, phase)
 	}
 	return requireCurrentExternalEffectAuthorityPostgres(ctx, tx, authority)
 }
@@ -167,6 +178,10 @@ func (s *EffectPostgresOwner) RequireExternalEffectAuthorityTx(ctx context.Conte
 }
 
 func requireExternalEffectAuthoritySQLite(ctx context.Context, tx *sql.Tx, authority runtimeeffects.Authority, authorize bool) error {
+	return requireExternalEffectAuthoritySQLiteAtPhase(ctx, tx, authority, authorityCheckPhase(authorize))
+}
+
+func requireExternalEffectAuthoritySQLiteAtPhase(ctx context.Context, tx *sql.Tx, authority runtimeeffects.Authority, phase runtimeeffects.MutationPhase) error {
 	if !authority.Valid() {
 		return invalidExternalAuthority(authority, "invalid")
 	}
@@ -178,11 +193,11 @@ func requireExternalEffectAuthoritySQLite(ctx context.Context, tx *sql.Tx, autho
 	if err := requireExternalEffectRunActiveSQLite(ctx, tx, authority); err != nil {
 		return err
 	}
-	if authority.Kind == runtimeeffects.AuthorityConversationForkChat && authorize {
+	if authority.Kind == runtimeeffects.AuthorityConversationForkChat && phase == runtimeeffects.MutationAuthorization {
 		return claimOrValidateForkChatAuthoritySQLite(ctx, tx, authority)
 	}
-	if authority.Kind == runtimeeffects.AuthorityChannelDelivery && authorize {
-		return requireChannelDeliveryAuthorityTx(ctx, tx, authority, false, true)
+	if authority.Kind == runtimeeffects.AuthorityChannelDelivery && phase != 0 {
+		return requireChannelDeliveryAuthorityTx(ctx, tx, authority, false, phase)
 	}
 	return requireCurrentExternalEffectAuthoritySQLite(ctx, tx, authority)
 }
@@ -337,7 +352,7 @@ func requireCurrentExternalEffectAuthorityPostgres(ctx context.Context, tx *sql.
 			confirmation.PlanGeneration.Diagnostic(), confirmation.OnboardingOperationID, confirmation.OnboardingRevision,
 			confirmation.EffectOperationID)
 	case runtimeeffects.AuthorityChannelDelivery:
-		return requireChannelDeliveryAuthorityTx(ctx, tx, authority, true, false)
+		return requireChannelDeliveryAuthorityTx(ctx, tx, authority, true, 0)
 	case runtimeeffects.AuthorityChannelActionAck:
 		return requireChannelActionAckAuthorityTx(ctx, tx, authority, true)
 	case runtimeeffects.AuthorityChannelNativeSetting:
@@ -468,7 +483,7 @@ func requireCurrentExternalEffectAuthoritySQLite(ctx context.Context, tx *sql.Tx
 			confirmation.PlanGeneration.Diagnostic(), confirmation.OnboardingOperationID, confirmation.OnboardingRevision,
 			confirmation.EffectOperationID)
 	case runtimeeffects.AuthorityChannelDelivery:
-		return requireChannelDeliveryAuthorityTx(ctx, tx, authority, false, false)
+		return requireChannelDeliveryAuthorityTx(ctx, tx, authority, false, 0)
 	case runtimeeffects.AuthorityChannelActionAck:
 		return requireChannelActionAckAuthorityTx(ctx, tx, authority, false)
 	case runtimeeffects.AuthorityChannelNativeSetting:

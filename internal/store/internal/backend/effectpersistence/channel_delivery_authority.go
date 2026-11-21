@@ -16,7 +16,7 @@ import (
 // A delivery send owns no run or agent. The principal lock serializes default
 // changes with authorization and launch; the joined rows fence a replaced
 // binding or activation even when the immutable plan still exists.
-func requireChannelDeliveryAuthorityTx(ctx context.Context, tx *sql.Tx, authority runtimeeffects.Authority, postgres, authorize bool) error {
+func requireChannelDeliveryAuthorityTx(ctx context.Context, tx *sql.Tx, authority runtimeeffects.Authority, postgres bool, phase runtimeeffects.MutationPhase) error {
 	delivery := authority.ChannelDelivery
 	if delivery.Parent.Kind == channelnative.TransportDeploymentRegistration {
 		if err := channeldelivery.LockTransportParentTx(ctx, tx, delivery.Parent, postgres); err != nil {
@@ -39,8 +39,11 @@ func requireChannelDeliveryAuthorityTx(ctx context.Context, tx *sql.Tx, authorit
 	}
 	if frozen.Hash != delivery.RenderHash {
 		err := invalidExternalAuthority(authority, "source_changed")
-		if authorize {
+		switch phase {
+		case runtimeeffects.MutationAuthorization:
 			return &runtimeeffects.ChannelDeliveryRenderSuperseded{Cause: err}
+		case runtimeeffects.MutationLaunch:
+			return &runtimeeffects.ChannelDeliveryLaunchRenderSuperseded{Cause: err}
 		}
 		return err
 	}

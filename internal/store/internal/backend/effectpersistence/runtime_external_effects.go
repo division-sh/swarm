@@ -1908,7 +1908,7 @@ func (s *EffectPostgresOwner) MarkExternalAttemptLaunched(ctx context.Context, a
 			if err != nil {
 				return err
 			}
-			if err := requireExternalEffectAuthorityPostgres(txctx, tx, attempt.Authority, false); err != nil {
+			if err := requireExternalEffectAuthorityPostgresAtPhase(txctx, tx, attempt.Authority, runtimeeffects.MutationLaunch); err != nil {
 				return err
 			}
 			if err := s.validateProviderOrigin(txctx, tx, attempt.Authority, runtimeeffects.AuthorizeRequest{Kind: attempt.Kind, Origin: attempt.Origin}); err != nil {
@@ -1970,7 +1970,7 @@ func (s *EffectSQLiteOwner) MarkExternalAttemptLaunched(ctx context.Context, att
 			if err != nil {
 				return err
 			}
-			if err := requireExternalEffectAuthoritySQLite(txctx, tx, attempt.Authority, false); err != nil {
+			if err := requireExternalEffectAuthoritySQLiteAtPhase(txctx, tx, attempt.Authority, runtimeeffects.MutationLaunch); err != nil {
 				return err
 			}
 			if err := s.validateProviderOrigin(txctx, tx, attempt.Authority, runtimeeffects.AuthorizeRequest{Kind: attempt.Kind, Origin: attempt.Origin}); err != nil {
