@@ -2517,13 +2517,16 @@ func prepareServeRuntimeContextSet(ctx context.Context, contexts []serveRuntimeB
 			prepareErr = errors.Join(prepareErr, rollback())
 		}
 	}()
-	for _, contextDef := range contexts {
+	startupSources := make([]*runtime.StartupSource, len(contexts))
+	for i, contextDef := range contexts {
 		if contextDef.runtime == nil {
 			continue
 		}
-		if err := contextDef.runtime.PreflightDynamicTopologyStartup(ctx); err != nil {
+		source, err := contextDef.runtime.PreflightStartupSource(ctx)
+		if err != nil {
 			return nil, fmt.Errorf("preflight runtime dynamic topology: %w", err)
 		}
+		startupSources[i] = source
 	}
 	for _, contextDef := range contexts {
 		if contextDef.runtime == nil {
@@ -2533,14 +2536,17 @@ func prepareServeRuntimeContextSet(ctx context.Context, contexts []serveRuntimeB
 			return nil, fmt.Errorf("prepare author activity catalog: %w", err)
 		}
 	}
-	for _, rt := range prepared {
-		if err := rt.PrepareStartupLifecycle(ctx); err != nil {
+	for _, source := range startupSources {
+		if source == nil {
+			continue
+		}
+		if err := source.PrepareLifecycle(); err != nil {
 			return nil, fmt.Errorf("prepare runtime lifecycle: %w", err)
 		}
 	}
 	releases := make([]func() error, 0, len(contexts))
 	resetContexts := make([]runtime.BundleContext, 0, len(contexts))
-	for _, contextDef := range contexts {
+	for i, contextDef := range contexts {
 		if contextDef.runtime == nil {
 			continue
 		}
@@ -2548,17 +2554,18 @@ func prepareServeRuntimeContextSet(ctx context.Context, contexts []serveRuntimeB
 		if err != nil {
 			return nil, err
 		}
-		release, err := contextDef.runtime.PrepareStart(ctx)
+		source := startupSources[i]
+		release, err := source.PrepareStart()
 		if err != nil {
 			return nil, err
 		}
-		targets, activations, completeStanding, err := contextDef.runtime.PrepareStandingTargets(ctx)
+		targets, activations, completeStanding, err := source.PrepareStandingTargets()
 		if err != nil {
 			return nil, err
 		}
 		releases = append(releases, func() error {
 			if err := release.Start(func() error {
-				if err := contextDef.runtime.CompleteLiveFlowStartup(ctx); err != nil {
+				if err := source.CompleteLiveFlowStartup(); err != nil {
 					return err
 				}
 				if completeStanding != nil {
@@ -2572,13 +2579,13 @@ func prepareServeRuntimeContextSet(ctx context.Context, contexts []serveRuntimeB
 		})
 		if manager != nil {
 			contextTargets := serveRuntimeContextStandingTargets(targets, declaredTargets, activations)
-			rooted, err := contextDef.loaded.bundle.RootedSource()
+			root, err := source.RootAdmission()
 			if err != nil {
 				return nil, err
 			}
 			definition := runtime.BundleContext{
 				SourceArtifactFact:         contextDef.sourceArtifactFact,
-				RootAdmission:              rooted.Admission(),
+				RootAdmission:              root,
 				ProviderTriggerCatalog:     contextDef.runtime.Options.ProviderTriggerCatalog,
 				BundleIdentity:             contextDef.bootIdentity,
 				Source:                     contextDef.loaded.source,
