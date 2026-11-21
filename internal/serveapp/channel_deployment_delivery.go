@@ -2,6 +2,7 @@ package serveapp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -14,6 +15,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/effects"
 )
 
+var errDeploymentReceiverNotCurrent = errors.New("deployment physical registration is not exact-current")
+
 func (d *serveChannelDeliveryDispatcher) requireDeploymentReceiver(ctx context.Context, selected channelonboarding.Result) (string, error) {
 	if selected.Operation.Posture != channelonboarding.ActivationWebhookRegistration {
 		return "", nil
@@ -23,7 +26,7 @@ func (d *serveChannelDeliveryDispatcher) requireDeploymentReceiver(ctx context.C
 	}
 	registration, found := d.ingress.DeploymentRegistrationCurrent(ctx, d.now().UTC(), deploymentParent(selected))
 	if !found || !registration.Current || registration.Registration.SlotID == "" {
-		return "", fmt.Errorf("deployment physical registration is not exact-current")
+		return "", errDeploymentReceiverNotCurrent
 	}
 	return registration.Registration.SlotID, nil
 }
@@ -118,7 +121,7 @@ func (d *serveChannelDeliveryDispatcher) acknowledgeDeploymentAction(ctx context
 }
 
 func (d *serveChannelDeliveryDispatcher) dispatchDeploymentChannel(ctx context.Context, selected channelonboarding.Result, plan packs.OutboundBindingPlan,
-	candidate render.Candidate, prepared render.PreparedRender, operation string, previous any) error {
+	candidate render.Candidate, prepared render.PreparedRender, operation string, previous any, final bool) error {
 	if _, err := d.requireDeploymentReceiver(ctx, selected); err != nil {
 		return err
 	}
@@ -169,6 +172,9 @@ func (d *serveChannelDeliveryDispatcher) dispatchDeploymentChannel(ctx context.C
 			ConversationRef: candidate.Audience.ConversationRef}}
 	if !authority.Valid() {
 		return fmt.Errorf("deployment delivery authority is incomplete")
+	}
+	if current, err := d.selectedDeliveryAuthority(ctx, authority, final); err != nil || !current {
+		return err
 	}
 	ctx = effects.WithExecutionMode(ctx, authority.ExecutionMode)
 	ctx = effects.WithController(ctx, effects.NewController(d.effects).WithExecutionPosture(d.posture))

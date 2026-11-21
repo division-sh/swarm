@@ -129,7 +129,7 @@ func (d *serveChannelDeliveryDispatcher) reconcileDelivery(ctx context.Context, 
 		if current.State != "rendered" {
 			return nil, nil
 		}
-		if err := d.dispatchInitial(ctx, current, prepared); err != nil {
+		if err := d.dispatchInitial(ctx, current, prepared, final); err != nil {
 			return nil, fmt.Errorf("dispatch channel delivery %s: %w", candidate.DeliveryID, err)
 		}
 		return nil, nil
@@ -147,7 +147,7 @@ func (d *serveChannelDeliveryDispatcher) reconcileDelivery(ctx context.Context, 
 	if current.State != "rendered" {
 		return nil, fmt.Errorf("channel delivery %s has a changed render outside edit state", candidate.DeliveryID)
 	}
-	if err := d.dispatchEdit(ctx, current, prepared, receipt); err != nil {
+	if err := d.dispatchEdit(ctx, current, prepared, receipt, final); err != nil {
 		return nil, fmt.Errorf("edit channel delivery %s: %w", candidate.DeliveryID, err)
 	}
 	return nil, nil
@@ -587,8 +587,13 @@ func (w *serveChannelDeliveryWorker) beginSend(ctx context.Context) (*worklifeti
 
 func (w *serveChannelDeliveryWorker) finishSend(selectionCtx context.Context, lease *worklifetime.Lease, result error) error {
 	selectionEnded := selectionCtx.Err() != nil
+	receiverRefused := result == errDeploymentReceiverNotCurrent
+	if selectionEnded && receiverRefused {
+		// The guard refused before provider I/O or effect authorization.
+		logChannelDeliveryReconciliation(lease.Context(), result)
+	}
 	settlementErr := lease.Done()
-	if selectionEnded {
+	if selectionEnded && !receiverRefused {
 		w.err = errors.Join(w.err, result, settlementErr)
 	} else {
 		w.err = errors.Join(w.err, settlementErr)
