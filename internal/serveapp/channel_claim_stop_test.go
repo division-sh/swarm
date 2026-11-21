@@ -306,7 +306,7 @@ func TestGracefulStopJoinsAdmittedDeploymentWebhookClaimBothStores(t *testing.T)
 			s.shutdownOptions = runtime.ShutdownOptions{Grace: 5 * time.Second}
 			// Keep the original factory and handler. Only the injected native store waits.
 			runtimeOptions = deploymentRuntimeOptions{manager: manager, beginWebhookClaim: s.beginWebhookClaim}
-			handler := deploymentPendingClaimHandler(root, h.opts.ConfigPath, directory, stores, process, capability, factory, runtimeOptions)
+			handler := deploymentPendingClaimHandler(root, h.opts.ConfigPath, directory, stores, process, capability, fixtureRegistration(factory), runtimeOptions)
 			claimed := make(chan error, 1)
 			go func() {
 				payload := map[string]any{"update_id": 91, "message": map[string]any{"message_id": 91, "text": child.Challenge,
