@@ -2,8 +2,10 @@ package serveapp
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -130,5 +132,56 @@ func TestPublicIngressDegradationLowersReadyzWithoutBlockingLocalAPI(t *testing.
 	server.Handler.ServeHTTP(ready, httptest.NewRequest(http.MethodGet, "/readyz", nil))
 	if ready.Code != http.StatusServiceUnavailable {
 		t.Fatalf("readyz status = %d, want %d", ready.Code, http.StatusServiceUnavailable)
+	}
+}
+
+func TestPublicIngressListenerFailureStopsServing(t *testing.T) {
+	for _, phase := range []string{"before_ready", "running"} {
+		t.Run(phase, func(t *testing.T) {
+			isolateCLIAPIConfigEnv(t)
+			stubServeRuntimeWorkspaceLifecycle(t)
+			listener := reserveChannelOnboardingListener(t)
+			address := listener.Addr().String()
+			redirectExternalHosts(t, map[string]string{"hooks.channel-onboarding.test": "http://" + address})
+			transferred := make(chan *net.TCPListener, 1)
+			stopping := make(chan struct{})
+			opts := cliapp.ServeOptions{
+				SourceRoot:           filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
+				ConfigPath:           writeStoreBackendRuntimeConfigWithWorkspaceFields(t, "sqlite", filepath.Join(t.TempDir(), "listener.sqlite"), nil),
+				PublicWebhookBaseURL: "https://hooks.channel-onboarding.test", PublicWebhookListen: address,
+				PublicWebhookListener: listener, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
+				ProcessStop: func() { close(stopping) }, NoFeed: true,
+			}
+			p := startRuntimeTestProcessWithRunner(t, repoRootForTest(), opts, func(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
+				transferred <- opts.PublicWebhookListener
+				if phase == "before_ready" {
+					opts.TestBeforeReadinessCommit = func() error {
+						if err := opts.PublicWebhookListener.Close(); err != nil {
+							return err
+						}
+						select {
+						case <-stopping:
+						case <-time.After(time.Second):
+						}
+						return nil
+					}
+				}
+				return runFrom(ctx, repo, opts)
+			})
+			owned := <-transferred
+			if phase == "running" {
+				p.waitForReadyLine()
+				if err := owned.Close(); err != nil {
+					t.Fatal(err)
+				}
+			}
+			code, exited := p.waitForExit(5 * time.Second)
+			output := p.outputString()
+			if !exited || code == 0 || strings.Contains(output, "shutdown · complete") ||
+				!strings.Contains(output, "public ingress") || strings.Count(output, "use of closed network connection") != 1 ||
+				(phase == "before_ready" && strings.Contains(output, "ready in ")) {
+				t.Fatalf("listener loss did not produce one fatal cause and a nonzero exit: %d/%v\n%s", code, exited, output)
+			}
+		})
 	}
 }
