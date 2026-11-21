@@ -9,6 +9,12 @@ type ChannelDeliveryRenderSuperseded struct{ Cause error }
 func (e *ChannelDeliveryRenderSuperseded) Error() string { return e.Cause.Error() }
 func (e *ChannelDeliveryRenderSuperseded) Unwrap() error { return e.Cause }
 
+// ChannelDeliveryLaunchRenderSuperseded is a recomputed hash mismatch at native launch.
+type ChannelDeliveryLaunchRenderSuperseded struct{ Cause error }
+
+func (e *ChannelDeliveryLaunchRenderSuperseded) Error() string { return e.Cause.Error() }
+func (e *ChannelDeliveryLaunchRenderSuperseded) Unwrap() error { return e.Cause }
+
 // The zero tag preserves the existing runtime evidence shape, never an
 // implicit deployment case. Currentness is established by the store owners.
 func channelTransportValid(parent channelnative.TransportParent, activationID string, activationRevision int64,

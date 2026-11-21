@@ -3,16 +3,21 @@ package runtimepersistence
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/packs"
+	"github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/registration"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/internal/backend/channeldelivery"
+	"github.com/division-sh/swarm/tests/support/testutil/packfixture"
 )
 
 func proveChannelFirstSendEligibility(t *testing.T, ctx context.Context, mode string, selected selectedChannelDeliveryTestStore,
@@ -99,6 +104,15 @@ func proveChannelFirstSendEligibility(t *testing.T, ctx context.Context, mode st
 			t.Fatal("completed notice authorized")
 		} else if _, ok := err.(*runtimeeffects.ChannelDeliveryRenderSuperseded); !ok {
 			t.Fatalf("completed notice did not report a confirmed pre-authorization render change: %v", err)
+		}
+		return
+	}
+	if mode == "eligibility_http_launch_refusal" {
+		err := proveSettledHTTPLaunchRefusal(t, ctx, selected, runTx, authority, complete)
+		responsibility(false, false)
+		failure, ok := errors.Unwrap(err).(*failures.Error)
+		if !ok || failure.Unwrap() == nil {
+			t.Fatalf("settled launch refusal lost its direct failure and cause: %T: %v", err, err)
 		}
 		return
 	}
@@ -195,6 +209,59 @@ func proveChannelFirstSendEligibility(t *testing.T, ctx context.Context, mode st
 	}); err != nil {
 		t.Fatal(err)
 	}
+}
+
+type channelLaunchRefusalTransport struct{ calls int }
+
+func (transport *channelLaunchRefusalTransport) RoundTrip(*http.Request) (*http.Response, error) {
+	transport.calls++
+	return nil, errors.New("unexpected provider dispatch")
+}
+
+func proveSettledHTTPLaunchRefusal(t *testing.T, original context.Context, selected selectedChannelDeliveryTestStore,
+	runTx func(func(context.Context, *sql.Tx) error) error, authority runtimeeffects.Authority, complete func()) error {
+	t.Helper()
+	const toolID = "telegram.send_interactive"
+	tool := packfixture.ConnectorTool(t, "telegram", toolID).Tool
+	tool, err := tool.WithCompiledResult(contracts.CompiledResultProjection{
+		Fields: map[string]contracts.CompiledResultField{"id": {From: "result.message_id"}},
+		OutputSchema: contracts.MustToolInputSchema(contracts.ToolSchemaObject,
+			contracts.ToolSchemaProperties(map[string]contracts.ToolInputSchema{"id": contracts.MustToolInputSchema(contracts.ToolSchemaInteger)}),
+			contracts.ToolSchemaRequired("id")),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := runtimeeffects.WithController(runtimeeffects.WithAuthority(testAuthorActivityContextForBundle(authority.ChannelDelivery.BundleHash), authority),
+		runtimeeffects.NewController(selected).WithExecutionPosture(executionposture.Live))
+	ctx = startupownership.CarryMutationAuthority(ctx, original)
+	transport := &channelLaunchRefusalTransport{}
+	preflights := 0
+	executor := registration.HTTPExecutor{Client: &http.Client{Transport: transport}, Preflight: func(context.Context) error {
+		preflights++
+		if preflights == 2 {
+			complete()
+		}
+		return nil
+	}}
+	result, refusal := executor.DeliverChannelMessage(ctx, toolID, tool,
+		map[string]any{"chat_id": "42", "text": "Notice", "reply_markup": map[string]any{"inline_keyboard": []any{}}},
+		map[string]any{"telegram.telegram_bot_token": "test-token"}, nil)
+	if refusal == nil || result.OperationID != authority.ID || result.Output != nil || preflights != 2 || transport.calls != 0 {
+		t.Fatalf("result=%+v refusal=%v preflights=%d provider calls=%d", result, refusal, preflights, transport.calls)
+	}
+	var operation, attempt string
+	var launched bool
+	var receipts int
+	if err := runTx(func(ctx context.Context, tx *sql.Tx) error {
+		return tx.QueryRowContext(ctx, `SELECT o.state, a.state, a.launched_at IS NOT NULL,
+			(SELECT count(*) FROM channel_delivery_receipts r WHERE r.effect_operation_id=o.operation_id)
+			FROM runtime_external_effect_operations o JOIN runtime_external_effect_attempts a USING (operation_id)
+			WHERE o.operation_id=$1`, authority.ID).Scan(&operation, &attempt, &launched, &receipts)
+	}); err != nil || operation != "terminal_failure" || attempt != operation || launched || receipts != 0 {
+		t.Fatalf("operation=%s attempt=%s launched=%t receipts=%d err=%v", operation, attempt, launched, receipts, err)
+	}
+	return refusal
 }
 
 func retireFirstSendDestination(t *testing.T, runTx func(func(context.Context, *sql.Tx) error) error) {
