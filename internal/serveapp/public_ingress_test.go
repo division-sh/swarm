@@ -150,7 +150,7 @@ func TestPublicIngressListenerFailureStopsServing(t *testing.T) {
 				ConfigPath:           writeStoreBackendRuntimeConfigWithWorkspaceFields(t, "sqlite", filepath.Join(t.TempDir(), "listener.sqlite"), nil),
 				PublicWebhookBaseURL: "https://hooks.channel-onboarding.test", PublicWebhookListen: address,
 				PublicWebhookListener: listener, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
-				ProcessStop: func() { close(stopping) }, NoFeed: true,
+				ProcessStop: func() { close(stopping) },
 			}
 			p := startRuntimeTestProcessWithRunner(t, repoRootForTest(), opts, func(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 				transferred <- opts.PublicWebhookListener
