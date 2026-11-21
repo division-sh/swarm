@@ -15,6 +15,18 @@ type channelSessionAdmission struct {
 	owner operatorchannel.SessionAdmissionOwner
 }
 
+// ChannelPublicationCredentialNotCurrent marks a negative credential observation,
+// not a read failure or a conflict validating the completed projection.
+type ChannelPublicationCredentialNotCurrent struct{}
+
+func (ChannelPublicationCredentialNotCurrent) Error() string {
+	return channelonboarding.ErrRevisionConflict.Error() + ": channel publication credential admission is no longer current"
+}
+
+func (ChannelPublicationCredentialNotCurrent) Unwrap() error {
+	return channelonboarding.ErrRevisionConflict
+}
+
 func (rt *Runtime) nativeChannelExecution(ctx context.Context, activation channelonboarding.CompiledActivation) (sessionexecution.Channel, error) {
 	var absent sessionexecution.Channel
 	if err := rt.validateLearnedChannelPublication(ctx, activation); err != nil {
@@ -100,7 +112,7 @@ func (rt *Runtime) validateChannelPublication(ctx context.Context, publication c
 		}
 	}
 	if !allCurrent {
-		return fmt.Errorf("%w: channel publication credential admission is no longer current", channelonboarding.ErrRevisionConflict)
+		return ChannelPublicationCredentialNotCurrent{}
 	}
 	return projection.ValidateCurrent(ctx)
 }

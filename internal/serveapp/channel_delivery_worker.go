@@ -589,7 +589,8 @@ func (w *serveChannelDeliveryWorker) beginSend(ctx context.Context) (*worklifeti
 func (w *serveChannelDeliveryWorker) finishSend(selectionCtx context.Context, lease *worklifetime.Lease, result error) error {
 	selectionEnded := selectionCtx.Err() != nil
 	_, renderSuperseded := result.(*effects.ChannelDeliveryRenderSuperseded)
-	selectionRefused := result == errDeploymentReceiverNotCurrent || renderSuperseded
+	_, credentialRefused := result.(*ordinaryChannelCredentialRefusal)
+	selectionRefused := result == errDeploymentReceiverNotCurrent || renderSuperseded || credentialRefused
 	if selectionEnded && selectionRefused {
 		// The guard refused before provider I/O or effect authorization.
 		logChannelDeliveryReconciliation(lease.Context(), result)
