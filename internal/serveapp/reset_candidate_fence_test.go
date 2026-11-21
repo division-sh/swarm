@@ -426,13 +426,17 @@ func assertAcceptedMCPTransportDuringDrain(t *testing.T, ctx context.Context, su
 	if err != nil || parent == nil || !lookup.Loaded() {
 		t.Fatalf("admit registered outer MCP work: loaded=%v error=%v", lookup.Loaded(), err)
 	}
+	turn, err := rt.WorkOccurrence().Begin(parent.WorkContext())
+	if err != nil {
+		t.Fatalf("admit registered MCP turn: %v", errors.Join(err, parent.Done()))
+	}
 	release := sync.OnceFunc(func() {
-		if err := parent.Done(); err != nil {
+		if err := errors.Join(turn.Done(), parent.Done()); err != nil {
 			t.Error(err)
 		}
 	})
 	defer release()
-	token := rt.MCPTurns.RegisterTurnContextWithCapabilitySurface(parent.WorkContext(), time.Minute, surface)
+	token := rt.MCPTurns.RegisterTurnContextWithCapabilitySurface(turn.Context(), time.Minute, surface)
 	if token == "" {
 		t.Fatal("register synthetic current provider turn")
 	}
