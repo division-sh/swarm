@@ -17,11 +17,19 @@ import (
 // CompleteLiveFlowStartup gives a keyless live flow its no-argument construction
 // before ingress opens. Reopening a run reuses the immutable original receipt.
 func (rt *Runtime) CompleteLiveFlowStartup(ctx context.Context) error {
+	return rt.completeLiveFlowStartup(ctx, nil)
+}
+
+func (rt *Runtime) completeLiveFlowStartup(ctx context.Context, admitted *StartupSource) error {
 	if rt == nil || rt.Manager == nil || rt.Pipeline == nil || rt.Options.WorkflowModule == nil {
 		return fmt.Errorf("live flow startup requires its admitted runtime and source")
 	}
 	var err error
-	ctx, err = rt.mutationContext(ctx)
+	if admitted == nil {
+		ctx, err = rt.mutationContext(ctx)
+	} else {
+		ctx, err = rt.bindMutationContext(ctx, admitted)
+	}
 	if err != nil {
 		return err
 	}

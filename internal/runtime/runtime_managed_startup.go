@@ -67,14 +67,14 @@ func (rt *Runtime) managedProviderPreflightAuthority(authority runtimestartupown
 	}, nil
 }
 
-func (rt *Runtime) settleManagedStartupPreflight(ctx context.Context, surfaceIDs []string) (runtimestartupownership.GrantEvidence, error) {
-	if rt.startupGrant == nil {
+func settleManagedStartupPreflight(ctx context.Context, grant runtimestartupownership.LiveGenerationGrant, surfaceIDs []string) (runtimestartupownership.GrantEvidence, error) {
+	if grant == nil {
 		return runtimestartupownership.GrantEvidence{}, fmt.Errorf("runtime generation grant is missing")
 	}
-	if _, err := rt.startupGrant.MarkProbesSettled(ctx, surfaceIDs); err != nil {
+	if _, err := grant.MarkProbesSettled(ctx, surfaceIDs); err != nil {
 		return runtimestartupownership.GrantEvidence{}, err
 	}
-	return rt.startupGrant.AdmitExecution(ctx)
+	return grant.AdmitExecution(ctx)
 }
 
 func (rt *Runtime) admitManagedExecution(ctx context.Context, authority runtimestartupownership.GrantEvidence) (managedExecutionActivation, error) {

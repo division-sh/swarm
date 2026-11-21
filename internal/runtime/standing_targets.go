@@ -354,15 +354,15 @@ func (rt *Runtime) ensureStandingTargets(ctx context.Context, flowPath string) (
 }
 
 func (rt *Runtime) ensureStandingTargetsMutation(ctx context.Context, flowPath string) ([]StandingTarget, []StandingActivation, error) {
-	targets, activations, _, err := rt.standingTargetsMutation(ctx, flowPath, false)
+	targets, activations, _, err := rt.standingTargetsMutation(ctx, flowPath, false, nil)
 	return targets, activations, err
 }
 
 func (rt *Runtime) PrepareStandingTargets(ctx context.Context) ([]StandingTarget, []StandingActivation, func() error, error) {
-	return rt.standingTargetsMutation(ctx, "", true)
+	return rt.standingTargetsMutation(ctx, "", true, nil)
 }
 
-func (rt *Runtime) standingTargetsMutation(ctx context.Context, flowPath string, prepare bool) ([]StandingTarget, []StandingActivation, func() error, error) {
+func (rt *Runtime) standingTargetsMutation(ctx context.Context, flowPath string, prepare bool, admitted *StartupSource) ([]StandingTarget, []StandingActivation, func() error, error) {
 	if rt == nil {
 		return nil, nil, nil, fmt.Errorf("standing activation requires a runtime")
 	}
@@ -379,7 +379,11 @@ func (rt *Runtime) standingTargetsMutation(ctx context.Context, flowPath string,
 	if rt.workOccurrence == nil {
 		return nil, nil, nil, fmt.Errorf("standing activation requires a runtime work occurrence")
 	}
-	ctx, err = rt.compiledSourceContext(ctx)
+	if admitted == nil {
+		ctx, err = rt.compiledSourceContext(ctx)
+	} else {
+		err = admitted.requireCurrent()
+	}
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -464,6 +468,11 @@ func (rt *Runtime) standingTargetsMutation(ctx context.Context, flowPath string,
 	if prepare {
 		finish := complete
 		complete = func() error {
+			if admitted != nil {
+				if err := admitted.requireCurrent(); err != nil {
+					return err
+				}
+			}
 			if err := finish(); err != nil {
 				return err
 			}
