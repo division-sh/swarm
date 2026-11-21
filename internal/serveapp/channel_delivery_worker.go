@@ -13,6 +13,7 @@ import (
 	runtimechannelnative "github.com/division-sh/swarm/internal/runtime/channelnative"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
+	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -587,13 +588,14 @@ func (w *serveChannelDeliveryWorker) beginSend(ctx context.Context) (*worklifeti
 
 func (w *serveChannelDeliveryWorker) finishSend(selectionCtx context.Context, lease *worklifetime.Lease, result error) error {
 	selectionEnded := selectionCtx.Err() != nil
-	receiverRefused := result == errDeploymentReceiverNotCurrent
-	if selectionEnded && receiverRefused {
+	_, renderSuperseded := result.(*effects.ChannelDeliveryRenderSuperseded)
+	selectionRefused := result == errDeploymentReceiverNotCurrent || renderSuperseded
+	if selectionEnded && selectionRefused {
 		// The guard refused before provider I/O or effect authorization.
 		logChannelDeliveryReconciliation(lease.Context(), result)
 	}
 	settlementErr := lease.Done()
-	if selectionEnded && !receiverRefused {
+	if selectionEnded && !selectionRefused {
 		w.err = errors.Join(w.err, result, settlementErr)
 	} else {
 		w.err = errors.Join(w.err, settlementErr)
