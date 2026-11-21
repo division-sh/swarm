@@ -503,7 +503,7 @@ units:
   conformance-1:
     packages:
       - github.com/division-sh/swarm/internal/runtime/conformance
-    run: '^Test([FH].*|NumericFanOutReporterShapeCompletesAndPreservesSemanticRejectionsOnBothBackends)$'
+    run: '^Test(F(an(In.*|Out(Payload|Production|Semantic|Serving|Shared).*)|i.*)|H.*|NumericFanOutReporterShapeCompletesAndPreservesSemanticRejectionsOnBothBackends)$'
     count_mode: count-1
     environment_ids: *postgres_gateway_empty
     budget_class: broad
@@ -555,9 +555,10 @@ units:
   conformance-2394-reporter-window:
     packages:
       - github.com/division-sh/swarm/internal/runtime/conformance
-    run: '^TestIssue2394ReporterFiveHundredServingWindowBothStores$'
+    run: '^Test(FanOutDeliveryBarrierCompletesThroughRealEventBusAndPublicReadbackOnBothBackends|Issue2394ReporterFiveHundredServingWindowBothStores)$'
     required_children:
       TestIssue2394ReporterFiveHundredServingWindowBothStores: [sqlite, postgres]
+      TestFanOutDeliveryBarrierCompletesThroughRealEventBusAndPublicReadbackOnBothBackends: [sqlite, postgres, sqlite/hundred_settled_outcomes, postgres/hundred_settled_outcomes]
     count_mode: count-1
     environment_ids: *postgres_gateway_empty
     budget_class: broad

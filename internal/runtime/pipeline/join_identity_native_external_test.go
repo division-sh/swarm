@@ -74,6 +74,22 @@ func TestWorkflowGateAnswerUpgradeNativeOrdersBothStores(t *testing.T) {
 	pipeline.VerifyGateAnswerUpgradeOrdersBothStoresForTest(t, pipelineDeliveryNativeUpgradeFixture)
 }
 
+func TestWorkflowGateReplacementBothStores(t *testing.T) {
+	pipeline.VerifyGateReplacementKeepsEqualAndReplacesChangedBothStoresForTest(t, pipelineDeliveryNativeUpgradeFixture)
+}
+
+func TestWorkflowGateReplacementRollbackAcrossRunsBothStores(t *testing.T) {
+	pipeline.VerifyGateReplacementRollbackAcrossRunsBothStoresForTest(t, pipelineDeliveryNativeUpgradeFixture)
+}
+
+func TestWorkflowGateReplacementPageBoundaryBothStores(t *testing.T) {
+	pipeline.VerifyGateReplacementPageBoundaryAndAtomicRollbackBothStoresForTest(t, pipelineDeliveryNativeUpgradeFixture)
+}
+
+func TestWorkflowGateReplacementRetainedMismatchBothStores(t *testing.T) {
+	pipeline.VerifyGateReplacementRetainedMismatchBothStoresForTest(t, pipelineDeliveryNativeUpgradeFixture)
+}
+
 func TestWorkflowGateEntryCreatesMatchingActivationAndCardOnBothStores(t *testing.T) {
 	pipeline.VerifyNativeWorkflowGateEntryCreatesMatchingActivationAndCardOnBothStoresForTest(t, pipelineDeliveryNativeFixture)
 }

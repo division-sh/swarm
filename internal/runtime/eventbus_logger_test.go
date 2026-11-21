@@ -16,6 +16,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -95,6 +96,62 @@ func TestEventBusRejectsMalformedFailureBeforeRuntimeLog(t *testing.T) {
 
 func TestRuntimePayloadAdmitter_AllowsValidSchemaPayload(t *testing.T) {
 	t.Parallel()
+	t.Run("nested occurrence evidence", func(t *testing.T) {
+		repo := canonicalrouting.RepoRoot(t)
+		bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, canonicalrouting.CopyNestedEventSchema(t), runtimecontracts.DefaultPlatformSpecFile(repo))
+		if err != nil {
+			t.Fatal(err)
+		}
+		admit := testRuntimePayloadAdmitter(t, bundle)
+		for _, scope := range []struct{ flow, instance, node, event string }{
+			{"account/ticket", "account/ti-a/ticket/ti-t", "cross-reporter", "ticket.cross"},
+			{"account/audit", "account/ti-a/audit", "audit", "audit.ready"},
+		} {
+			node := identitytest.ExecutableNode(t, scope.flow, scope.node)
+			producer, err := events.NewProducerIdentity(events.EventProducerNode, node.Key())
+			if err != nil {
+				t.Fatal(err)
+			}
+			source := eventtest.StaticFlowRoutingSource(scope.flow, scope.instance, "entity-proof")
+			if scope.flow == "account/ticket" {
+				source = eventtest.ConcreteTemplateRoutingSource(scope.flow, scope.instance, "entity-proof")
+			}
+			parent := eventtest.RunCreatingRootIngress(uuid.NewString(), "opened", "", "", []byte(`{}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Time{})
+			schema, found, err := bundle.ResolveCompiledFlowEventSchema(scope.flow, scope.event)
+			if err != nil || !found {
+				t.Fatalf("declared schema missing: %t %v", found, err)
+			}
+			for _, cell := range []struct {
+				event, payload string
+				invalid        bool
+			}{
+				{scope.event, `{"target_account_id":"target","note":null}`, false},
+				{scope.event, `{"target_account_id":false}`, true},
+				{"fixture.untyped", `{}`, false},
+			} {
+				event := eventtest.ChildForProducerWithRoutingSource(uuid.NewString(), events.EventType(scope.instance+"/"+cell.event), producer, "", []byte(cell.payload), 1, events.LineageFromEvent(parent), events.EventEnvelope{EntityID: "entity-proof"}, source, time.Time{})
+				admission, err := admit(context.Background(), event, events.AuthoredPayloadProducer(scope.flow))
+				if cell.invalid {
+					if err == nil || admission.Valid() {
+						t.Fatalf("nested schema violation gained persistence admission: %+v %v", admission, err)
+					}
+					continue
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				if cell.event == "fixture.untyped" {
+					if admission.Binding().SchemaClass() != events.PayloadSchemaSchemaLess {
+						t.Fatal("undeclared occurrence gained an authored schema")
+					}
+					continue
+				}
+				if admission.Binding().SchemaClass() != events.PayloadSchemaAuthored || admission.Binding().SchemaDigest() != schema.AcceptanceSchemaDigest() || admission.Binding().FlowID() != scope.flow || !bytes.Equal(admission.Payload(), []byte(`{"target_account_id":"target"}`)) {
+					t.Fatalf("nested occurrence lost class/digest/optional normalization: %+v payload=%s", admission.Binding(), admission.Payload())
+				}
+			}
+		}
+	})
 
 	admitter := testRuntimePayloadAdmitter(t, booleanPayloadBundle(t))
 	event, err := admitRuntimePayload(admitter, "task.completed", []byte(`{"ok":true}`))

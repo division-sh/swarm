@@ -172,11 +172,13 @@ func (s *channelDeliveryWorkerStore) GetCurrentChannelDeliveryPlan(_ context.Con
 }
 
 func TestChannelDeliveryWorkerRechecksResponsibilityBeforeRender(t *testing.T) {
-	for _, cut := range []string{"source_lost", "accepted_work"} {
+	for _, cut := range []string{"source_lost", "accepted_work", "uncertain", "retired"} {
 		t.Run(cut, func(t *testing.T) {
 			selected := &channelDeliveryWorkerStore{absent: cut == "source_lost"}
 			if cut == "accepted_work" {
 				selected.currentOverride = &runtimechanneldelivery.Candidate{DeliveryID: "stale", State: "rendered", RecoveryPending: true}
+			} else if cut == "uncertain" || cut == "retired" {
+				selected.currentOverride = &runtimechanneldelivery.Candidate{DeliveryID: "stale", State: cut, CurrentReceiptID: "receipt"}
 			}
 			d := &serveChannelDeliveryDispatcher{store: selected}
 			if preparation, dispatch := d.reconcileDelivery(context.Background(), runtimechanneldelivery.Candidate{DeliveryID: "stale", State: "planned"}, false); preparation != nil || dispatch != nil {

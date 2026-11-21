@@ -35,9 +35,10 @@ type UpgradeReader interface {
 // Sources retain declarations, not an admission result. The transition rereads
 // domain state and derives the affected runs before performing any mutation.
 type UpgradePlan struct {
-	BundleHash string                         `json:"bundle_hash"`
-	Runs       map[string]string              `json:"runs"`
-	Sources    map[string]semanticview.Source `json:"-"`
+	BundleHash  string                         `json:"bundle_hash"`
+	Runs        map[string]string              `json:"runs"`
+	Sources     map[string]semanticview.Source `json:"-"`
+	CardCadence decisioncard.CadencePolicy     `json:"card_cadence"`
 }
 
 func AdmitPinnedSources(ctx context.Context, reader UpgradeReader, candidate semanticview.Source, load func(context.Context, sourceartifact.RootAdmissionReference) (semanticview.Source, error)) (*UpgradePlan, error) {

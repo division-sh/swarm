@@ -289,6 +289,7 @@ type compiledFlowEventSchemas struct {
 	path        string
 	template    bool
 	descendants []string
+	occurrence  []string
 	bindings    map[string]CompiledEventSchema
 }
 
@@ -329,7 +330,43 @@ func (bindings compiledFlowEventSchemas) resolveEventName(eventType string) (str
 			return local, ok
 		}
 	}
-	return "", false
+	return bindings.resolveOccurrenceEventName(name)
+}
+
+func (bindings compiledFlowEventSchemas) resolveOccurrenceEventName(name string) (string, bool) {
+	if len(bindings.occurrence) == 0 || !runtimeidentity.IsCanonicalEventName(name) {
+		return "", false
+	}
+	parts := strings.Split(name, "/")
+	if len(parts) != len(bindings.occurrence)+1 {
+		return "", false
+	}
+	for i, segment := range bindings.occurrence {
+		if segment != "" && parts[i] != segment {
+			return "", false
+		}
+	}
+	local := parts[len(bindings.occurrence)]
+	_, ok := bindings.bindings[local]
+	return local, ok
+}
+
+func compiledEventOccurrencePath(view *FlowContractView) []string {
+	var ancestors []*FlowContractView
+	for ancestor := view; ancestor != nil && ancestor.Paths.FlowPath != "."; ancestor = ancestor.Parent {
+		ancestors = append(ancestors, ancestor)
+	}
+	var occurrence []string
+	for i := len(ancestors) - 1; i >= 0; i-- {
+		ancestor := ancestors[i]
+		path := ancestor.Paths.FlowPath
+		occurrence = append(occurrence, path[strings.LastIndex(path, "/")+1:])
+		if !ancestor.Schema.Instance.Empty() {
+			// An empty segment matches only this admitted level's opaque discriminator.
+			occurrence = append(occurrence, "")
+		}
+	}
+	return occurrence
 }
 
 // compileEventSchemaBindings admits producer declarations before pins capture
@@ -341,6 +378,7 @@ func (b *WorkflowContractBundle) compileEventSchemaBindings() error {
 	views := b.FlowViews()
 	for _, view := range views {
 		scope := compiledFlowEventSchemas{path: view.Path, template: view.Schema.EffectiveMode() == "template", bindings: make(map[string]CompiledEventSchema)}
+		scope.occurrence = compiledEventOccurrencePath(&view)
 		for _, descendant := range views {
 			if strings.HasPrefix(descendant.Path, view.Path+"/") {
 				scope.descendants = append(scope.descendants, strings.TrimPrefix(descendant.Path, view.Path+"/"))

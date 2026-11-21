@@ -8,6 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimeeventschema "github.com/division-sh/swarm/internal/runtime/eventschema"
+	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 )
 
 func TestCompiledEventSchemasOwnOptionalityAndCanonicalSchema(t *testing.T) {
@@ -111,6 +112,70 @@ func TestCompileCurrentEventDeclarationRejectsNoncanonicalIdentity(t *testing.T)
 }
 
 func TestCompiledEventSchemasPreserveFilesystemFlowOwner(t *testing.T) {
+	t.Run("nested occurrences", func(t *testing.T) {
+		repo := repoRootForContractsTest(t)
+		bundle, err := LoadWorkflowContractBundleWithOverrides(repo, canonicalrouting.CopyNestedEventSchema(t), DefaultPlatformSpecFile(repo))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, scope := range []struct{ flow, event, occurrence string }{
+			{"account/ticket", "ticket.cross", "account/ti-a/ticket/ti-t/ticket.cross"},
+			{"account/audit", "audit.ready", "account/ti-a/audit/audit.ready"},
+		} {
+			want, found, err := bundle.ResolveCompiledFlowEventSchema(scope.flow, scope.event)
+			if err != nil || !found {
+				t.Fatalf("local declaration: found=%t err=%v", found, err)
+			}
+			for _, name := range []string{scope.event, scope.flow + "/" + scope.event, scope.occurrence} {
+				got, found, err := bundle.ResolveCompiledFlowEventSchema(scope.flow, name)
+				if err != nil || !found || got.value != want.value {
+					t.Fatalf("%s:%s lost exact declaration: found=%t err=%v", scope.flow, name, found, err)
+				}
+			}
+		}
+		for _, scope := range []struct{ flow, event, occurrence string }{
+			{"account/ticket", "cross.requested", "account/ti-a/ticket/ti-t/cross.requested"},
+			{"account/audit", "ticket.done", "account/ti-a/audit/ticket.done"},
+		} {
+			want, found, err := bundle.ConnectionInputs().ReceiverCommonEventSchema(scope.flow, scope.event)
+			got, concrete, concreteErr := bundle.ConnectionInputs().ReceiverCommonEventSchema(scope.flow, scope.occurrence)
+			local, owned := bundle.ConnectionInputs().ReceiverEvent(scope.flow, scope.occurrence)
+			if err != nil || concreteErr != nil || !found || !concrete || got.value != want.value || !owned || local != scope.event {
+				t.Fatalf("receiver %s:%s lost owned schema/local name: %t/%t/%t %q %v/%v", scope.flow, scope.occurrence, found, concrete, owned, local, err, concreteErr)
+			}
+		}
+		for _, name := range []string{
+			"foreign/ti-a/ticket/ti-t/ticket.cross", "account/ti-a/audit/ti-t/ticket.cross",
+			"account/ti-a/ticket/ti-t/child/ti-c/ticket.cross", "account/ti-a/ticket/ticket.cross",
+			"account/ti-a/extra/ticket/ti-t/ticket.cross", "account/ti-a/ticket/ti-t/unknown",
+		} {
+			if _, found, err := bundle.ResolveCompiledFlowEventSchema("account/ticket", name); err != nil || found {
+				t.Fatalf("foreign/new malformed occurrence %s gained producer schema: %t %v", name, found, err)
+			}
+			receiverName := strings.ReplaceAll(name, "ticket.cross", "cross.requested")
+			if _, found := bundle.ConnectionInputs().ReceiverEvent("account/ticket", receiverName); found {
+				t.Fatalf("foreign/new malformed occurrence %s gained receiver event", receiverName)
+			}
+			if _, found, err := bundle.ConnectionInputs().ReceiverCommonEventSchema("account/ticket", receiverName); err != nil || found {
+				t.Fatalf("foreign/new malformed occurrence %s gained common receiver schema: %t %v", receiverName, found, err)
+			}
+		}
+		for _, name := range []string{"ticket.cross", "account/ticket/ticket.cross", "account/ticket/ti-flat/ticket.cross"} {
+			if _, found, err := bundle.ResolveCompiledFlowEventSchema("account/ticket", name); err != nil || !found {
+				t.Fatalf("existing spelling %s tightened: %t %v", name, found, err)
+			}
+		}
+		if _, found, err := bundle.ResolveCompiledFlowEventSchema("account/ti-a/ticket/ti-t", "ticket.cross"); err != nil || found {
+			t.Fatalf("instance became declaration owner: %t %v", found, err)
+		}
+		wrapped, err := LoadWorkflowContractBundleWithOverrides(repo, canonicalrouting.CopyWrappedLexicalAddressing(t, false), DefaultPlatformSpecFile(repo))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, found, err := wrapped.ResolveCompiledFlowEventSchema("envelope/account/ticket", "envelope/account/ti-a/ticket/ti-t/ticket.cross"); err != nil || !found || got.FlowPath() != "envelope/account/ticket" {
+			t.Fatalf("keyless ancestor lost exact nested declaration: found=%t err=%v", found, err)
+		}
+	})
 	repo := repoRootForContractsTest(t)
 	root := t.TempDir()
 	writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")

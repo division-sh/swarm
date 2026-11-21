@@ -94,11 +94,12 @@ type mailboxEffectState struct {
 
 type mailboxDecisionCard struct {
 	mailboxDecisionCardSummary
-	CardContentHash string         `json:"card_content_hash"`
-	Snapshot        map[string]any `json:"snapshot"`
-	Verdict         string         `json:"verdict,omitempty"`
-	Fields          map[string]any `json:"fields,omitempty"`
-	DecidedAt       string         `json:"decided_at,omitempty"`
+	CardContentHash  string         `json:"card_content_hash"`
+	Snapshot         map[string]any `json:"snapshot"`
+	Verdict          string         `json:"verdict,omitempty"`
+	Fields           map[string]any `json:"fields,omitempty"`
+	DecidedAt        string         `json:"decided_at,omitempty"`
+	SupersededReason string         `json:"superseded_reason,omitempty"`
 }
 
 type mailboxListResult struct {
@@ -599,6 +600,9 @@ func writeMailboxDetailResult(out io.Writer, result mailboxDetailProjection) {
 	}
 	card := result.DecisionCard
 	writeCLITitle(out, "Decision card "+card.CardID)
+	if card.Status == decisioncard.StatusSuperseded {
+		fmt.Fprintln(out, decisioncard.SupersededMessage(card.SupersededReason))
+	}
 	writeCLIFieldLine(out, cliDetailField{Key: "status", Value: card.Status}, cliDetailField{Key: "anchor_kind", Value: card.AnchorKind}, cliDetailField{Key: "scope", Value: mailboxDecisionCardScopeLabel(card.Scope)})
 	if card.AnchorKind == "stage_gate" {
 		writeCLIFieldLine(out, cliDetailField{Key: "decision", Value: card.Decision}, cliDetailField{Key: "stage", Value: card.Anchor.Stage})
