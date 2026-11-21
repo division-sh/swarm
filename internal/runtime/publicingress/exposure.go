@@ -187,6 +187,8 @@ func ValidateConfiguration(mode, publicOrigin, listenAddress string) error {
 	return nil
 }
 
+// Start does not join the serving listener on failure. Its owner must call Stop
+// with the shutdown context even when Start fails.
 func (c *Controller) Start(ctx context.Context) error {
 	if c == nil {
 		return fmt.Errorf("public exposure controller is required")
@@ -239,9 +241,10 @@ func (c *Controller) Start(ctx context.Context) error {
 	err = c.establish(ctx)
 	c.mu.Lock()
 	if err != nil || c.serveErr != nil {
+		failure := c.serveErr
 		c.mu.Unlock()
-		_ = c.Stop(context.Background())
-		if failure := c.ListenerFailure(); failure != nil {
+		cancel()
+		if failure != nil {
 			if err == nil || err == context.Canceled || err == failure {
 				return failure
 			}
