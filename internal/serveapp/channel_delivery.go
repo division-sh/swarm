@@ -482,19 +482,19 @@ func channelAcknowledgmentInput(plan packs.OutboundBindingPlan, storedInteractio
 	return input, err
 }
 
-func (d *serveChannelDeliveryDispatcher) dispatchInitial(ctx context.Context, candidate runtimechanneldelivery.Candidate, prepared runtimechanneldelivery.PreparedRender) error {
+func (d *serveChannelDeliveryDispatcher) dispatchInitial(ctx context.Context, candidate runtimechanneldelivery.Candidate, prepared runtimechanneldelivery.PreparedRender, final bool) error {
 	if candidate.CurrentReceiptID != "" {
 		return fmt.Errorf("initial channel delivery already has a receipt")
 	}
-	return d.dispatchChannel(ctx, candidate, prepared, "deliver", nil)
+	return d.dispatchChannel(ctx, candidate, prepared, "deliver", nil, final)
 }
 
-func (d *serveChannelDeliveryDispatcher) dispatchEdit(ctx context.Context, candidate runtimechanneldelivery.Candidate, prepared runtimechanneldelivery.PreparedRender, previous runtimechanneldelivery.SentReceipt) error {
+func (d *serveChannelDeliveryDispatcher) dispatchEdit(ctx context.Context, candidate runtimechanneldelivery.Candidate, prepared runtimechanneldelivery.PreparedRender, previous runtimechanneldelivery.SentReceipt, final bool) error {
 	if candidate.CurrentReceiptID == "" || previous.OperationID != candidate.CurrentReceiptID ||
 		previous.DeliveryID != candidate.DeliveryID || previous.RenderID == prepared.RenderID || previous.DeliveryReference == nil {
 		return fmt.Errorf("channel edit lacks an exact predecessor receipt")
 	}
-	return d.dispatchChannel(ctx, candidate, prepared, "edit", previous.DeliveryReference)
+	return d.dispatchChannel(ctx, candidate, prepared, "edit", previous.DeliveryReference, final)
 }
 
 func (d *serveChannelDeliveryDispatcher) currentCompiledDelivery(ctx context.Context, candidate runtimechanneldelivery.Candidate) (channelonboarding.ConnectedChannelActivation, packs.OutboundBindingPlan, *runtimechannelactivation.Lease, error) {
@@ -630,7 +630,7 @@ func validateChannelDispatch(candidate runtimechanneldelivery.Candidate, prepare
 	return nil
 }
 
-func (d *serveChannelDeliveryDispatcher) dispatchChannel(ctx context.Context, candidate runtimechanneldelivery.Candidate, prepared runtimechanneldelivery.PreparedRender, operation string, previousReference any) (result error) {
+func (d *serveChannelDeliveryDispatcher) dispatchChannel(ctx context.Context, candidate runtimechanneldelivery.Candidate, prepared runtimechanneldelivery.PreparedRender, operation string, previousReference any, final bool) (result error) {
 	if d == nil || d.store == nil || d.activations == nil || d.manager == nil || d.effects == nil || d.credentials == nil ||
 		!d.posture.Valid() || strings.TrimSpace(d.runtimeInstanceID) == "" || d.now == nil {
 		return fmt.Errorf("channel delivery dispatcher is incomplete")
@@ -653,12 +653,12 @@ func (d *serveChannelDeliveryDispatcher) dispatchChannel(ctx context.Context, ca
 		if err != nil {
 			return err
 		}
-		return d.dispatchDeploymentChannel(ctx, selected, plan, candidate, prepared, operation, previousReference)
+		return d.dispatchDeploymentChannel(ctx, selected, plan, candidate, prepared, operation, previousReference, final)
 	}
-	return d.dispatchRuntimeChannel(ctx, candidate, prepared, operation, previousReference)
+	return d.dispatchRuntimeChannel(ctx, candidate, prepared, operation, previousReference, final)
 }
 
-func (d *serveChannelDeliveryDispatcher) dispatchRuntimeChannel(ctx context.Context, candidate runtimechanneldelivery.Candidate, prepared runtimechanneldelivery.PreparedRender, operation string, previousReference any) error {
+func (d *serveChannelDeliveryDispatcher) dispatchRuntimeChannel(ctx context.Context, candidate runtimechanneldelivery.Candidate, prepared runtimechanneldelivery.PreparedRender, operation string, previousReference any, final bool) error {
 	selected, plan, lease, err := d.currentCompiledDelivery(ctx, candidate)
 	if err != nil {
 		return err
@@ -726,6 +726,9 @@ func (d *serveChannelDeliveryDispatcher) dispatchRuntimeChannel(ctx context.Cont
 	if !authority.Valid() {
 		return fmt.Errorf("channel delivery authority is invalid")
 	}
+	if current, err := d.selectedDeliveryAuthority(ctx, authority, final); err != nil || !current {
+		return err
+	}
 	effectCtx := runtimeeffects.WithExecutionMode(ctx, authority.ExecutionMode)
 	effectCtx = runtimeeffects.WithController(effectCtx, runtimeeffects.NewController(d.effects).WithExecutionPosture(d.posture))
 	effectCtx = runtimeeffects.WithAuthority(effectCtx, authority)
@@ -737,6 +740,15 @@ func (d *serveChannelDeliveryDispatcher) dispatchRuntimeChannel(ctx context.Cont
 		channelCredentialHTTPExecutor(d.httpClient, d.credentials, plan, selected.CredentialAdmissions, tool),
 	)
 	return err
+}
+
+// Final output selects only exact-current work. The transport's authorization
+// and launch checks still apply; this read cannot authorize a send.
+func (d *serveChannelDeliveryDispatcher) selectedDeliveryAuthority(ctx context.Context, authority runtimeeffects.Authority, final bool) (bool, error) {
+	if !final {
+		return true, nil
+	}
+	return d.effects.IsExternalEffectAuthorityCurrent(ctx, authority)
 }
 
 func (d *serveChannelDeliveryDispatcher) requireRuntimeDeliveryReceiver(ctx context.Context, selected channelonboarding.ConnectedChannelActivation, lease *runtimechannelactivation.Lease) error {
