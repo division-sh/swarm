@@ -225,8 +225,9 @@ func TestGracefulStopJoinsAdmittedDeploymentWebhookClaimBothStores(t *testing.T)
 			} else {
 				var err error
 				stores, err = storeselected.OpenRuntime(ctx, storeselected.RuntimeRequest{
-					Selection:   storebackend.Selection{Backend: storebackend.BackendPostgres},
-					PostgresDSN: h.storeDSN,
+					Selection:     storebackend.Selection{Backend: storebackend.BackendPostgres},
+					PostgresDSN:   h.storeDSN,
+					ProviderFacts: installedChannelFactsFor,
 				})
 				if err != nil {
 					t.Fatal(err)
