@@ -658,6 +658,10 @@ func (d *serveChannelDeliveryDispatcher) dispatchChannel(ctx context.Context, ca
 	return d.dispatchRuntimeChannel(ctx, candidate, prepared, operation, previousReference, final)
 }
 
+type ordinaryChannelCredentialRefusal struct{ error }
+
+func (r *ordinaryChannelCredentialRefusal) Unwrap() error { return r.error }
+
 func (d *serveChannelDeliveryDispatcher) dispatchRuntimeChannel(ctx context.Context, candidate runtimechanneldelivery.Candidate, prepared runtimechanneldelivery.PreparedRender, operation string, previousReference any, final bool) error {
 	selected, plan, lease, err := d.currentCompiledDelivery(ctx, candidate)
 	if err != nil {
@@ -673,6 +677,9 @@ func (d *serveChannelDeliveryDispatcher) dispatchRuntimeChannel(ctx context.Cont
 	}
 	ctx, err = withChannelProviderAdmission(ctx, lease, plan)
 	if err != nil {
+		if _, refused := err.(runtime.ChannelPublicationCredentialNotCurrent); !final && refused {
+			return &ordinaryChannelCredentialRefusal{err}
+		}
 		return err
 	}
 	if err := d.requireRuntimeDeliveryReceiver(ctx, selected, lease); err != nil {
