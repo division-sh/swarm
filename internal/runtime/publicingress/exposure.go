@@ -1,6 +1,7 @@
 package publicingress
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"crypto/tls"
@@ -426,7 +427,7 @@ func (c *Controller) renewPass(ctx context.Context, register bool) (selected boo
 	if err != nil {
 		return false, err, nil
 	}
-	defer func() { finish(errors.Join(reachability, registration)) }()
+	defer func() { finish(cmp.Or(reachability, registration)) }()
 	reachability = c.renew(ctx)
 	if reachability == nil && register && c.opts.OnGeneration != nil {
 		registration = c.opts.OnGeneration(ctx, c.Generation())
@@ -467,11 +468,12 @@ func (c *Controller) beginUpdate(ctx context.Context, generation bool) (context.
 		cancel()
 		c.mu.Lock()
 		defer c.mu.Unlock()
-		if generation {
+		servingCause := c.serveErr != nil && result == c.serveErr
+		if !servingCause && generation {
 			if c.supervising || c.sealed {
 				c.genErr = result
 			}
-		} else if c.sealed {
+		} else if !servingCause && c.sealed {
 			c.updateErr = errors.Join(c.updateErr, result)
 		}
 		c.updateN--
