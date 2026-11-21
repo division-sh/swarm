@@ -102,13 +102,20 @@ func TestExposureReportsListenerLossAndRefusesStaleProbe(t *testing.T) {
 			if ready.Load() {
 				t.Error("dead listener still advertised ready")
 			}
-			resume()
 			if renewed != nil {
+				stopped := make(chan error, 1)
+				go func() { stopped <- c.Stop(t.Context()) }()
+				awaitExposure(t, c.UpdateAdmissionClosed())
+				resume()
 				if got := awaitExposure(t, renewed); !errors.Is(got, net.ErrClosed) {
 					t.Errorf("stale successful probe did not observe listener loss: %v", got)
 				}
+				if got := awaitExposure(t, stopped); got != nil {
+					t.Errorf("shutdown repeated the serving cause already delivered to OnFatal: %v", got)
+				}
+			} else {
+				_ = c.Stop(context.Background())
 			}
-			_ = c.Stop(context.Background())
 			if ready.Snapshot(time.Now()).Exposure != nil {
 				t.Error("listener outage left exposure after stop")
 			}
