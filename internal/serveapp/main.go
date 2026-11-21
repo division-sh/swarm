@@ -2015,6 +2015,7 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 			return 1
 		}
 		if err := publicExposure.Start(runtimeCtx); err != nil {
+			// The host defer owns the same bounded cutoff even on startup failure.
 			presenter.fail(22, "public_ingress", err)
 			return 1
 		}

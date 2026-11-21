@@ -66,6 +66,9 @@ func TestBoundPublicIngressListenerOwnsEntireStartupAndShutdown(t *testing.T) {
 					if err == nil || !strings.Contains(err.Error(), "controlled public route failure") || controller.Generation().ID != "" {
 						t.Fatalf("failed probe admitted generation: %v, %+v", err, controller.Generation())
 					}
+					if err := controller.Stop(t.Context()); err != nil {
+						t.Fatal(err)
+					}
 					requireListenerReleased(t, address)
 				} else {
 					if err != nil || controller.Generation().ListenAddress != address || controller.Generation().ID == "" {
