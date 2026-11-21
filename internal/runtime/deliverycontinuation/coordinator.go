@@ -550,9 +550,9 @@ func (c *Coordinator) DispatchPublished(event events.Event, routes []events.Deli
 	for _, job := range jobs {
 		go func() {
 			defer c.workers.Done()
-			deferred, err := c.dispatchAttempt(job.lease.Context(), job)
+			disposition, err := c.dispatchAttempt(job.lease.Context(), job)
 			c.mu.Lock()
-			wake := c.dispatchResultWakeLocked(err, deferred, job.wakeVersion)
+			wake := c.dispatchResultWakeLocked(err, disposition == DispatchDeferred, job.wakeVersion)
 			c.mu.Unlock()
 			if wake {
 				c.notify()
@@ -760,8 +760,8 @@ func (c *Coordinator) dispatch(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case job := <-c.jobs:
-			deferred, err := c.dispatchAttempt(ctx, job)
-			c.completeDispatchWithWake(job.deliveryID, err, deferred, job.wakeVersion)
+			disposition, err := c.dispatchAttempt(ctx, job)
+			c.completeDispatchWithWake(job.deliveryID, err, disposition, job.wakeVersion)
 			if err != nil || ctx.Err() != nil {
 				return
 			}
@@ -769,16 +769,18 @@ func (c *Coordinator) dispatch(ctx context.Context) {
 	}
 }
 
-func (c *Coordinator) dispatchAttempt(ctx context.Context, job dispatchJob) (bool, error) {
+func (c *Coordinator) dispatchAttempt(ctx context.Context, job dispatchJob) (DispatchDisposition, error) {
 	if ctx.Err() != nil {
-		return false, job.lease.Done()
+		return 0, job.lease.Done()
 	}
 	result := c.dispatcher.DispatchDeliveryContinuation(job.lease.Context(), job.event, job.route)
+	var disposition DispatchDisposition
 	var err error
 	if validationErr := result.Validate(); validationErr != nil {
 		err = fmt.Errorf("dispatch delivery continuation %s returned invalid result: %w", job.deliveryID, validationErr)
 	} else {
-		switch result.Disposition() {
+		disposition = result.Disposition()
+		switch disposition {
 		case DispatchTransferred, DispatchAlreadyOwned, DispatchDeferred:
 		case DispatchTerminal:
 			err = c.releaseTerminal(job.deliveryID)
@@ -794,14 +796,18 @@ func (c *Coordinator) dispatchAttempt(ctx context.Context, job dispatchJob) (boo
 	if ordinaryCoordinatorStop(job.lease.Context(), err, retired) {
 		err = nil
 	}
-	deferred := err == nil && result.Disposition() == DispatchDeferred
-	return deferred, errors.Join(err, job.lease.Done())
+	return disposition, errors.Join(err, job.lease.Done())
 }
 
-func (c *Coordinator) completeDispatchWithWake(deliveryID string, err error, deferred bool, wakeVersion uint64) {
+func (c *Coordinator) completeDispatchWithWake(deliveryID string, err error, disposition DispatchDisposition, wakeVersion uint64) {
 	c.mu.Lock()
+	_, reserved := c.reserved[deliveryID]
 	delete(c.reserved, deliveryID)
-	wake := c.dispatchResultWakeLocked(err, deferred, wakeVersion)
+	wake := c.dispatchResultWakeLocked(err, disposition == DispatchDeferred, wakeVersion)
+	// The return wake may have been handled before the losing job cleared its reservation.
+	if reserved && err == nil && c.workerFailure == nil && !c.retired && disposition == DispatchAlreadyOwned {
+		wake = wake || c.entries[deliveryID].state == ownershipCoordinator
+	}
 	c.mu.Unlock()
 	if wake {
 		c.notify()
