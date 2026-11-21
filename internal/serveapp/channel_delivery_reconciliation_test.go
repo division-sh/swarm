@@ -12,6 +12,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/channelnative"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
+	"github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 )
 
 type channelWorkerControlStore struct {
@@ -199,6 +201,7 @@ func TestChannelWorkerDoesNotCreditFailedPass(t *testing.T) {
 			t.Fatalf("receiver refusal hid independent settlement: returned=%v drain=%v", err, worker.err)
 		}
 	})
+	t.Run("superseded_render_during_stop", testChannelWorkerSupersededRenderDuringStop)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	process := worklifetime.NewProcess()
@@ -242,6 +245,39 @@ func TestChannelWorkerDoesNotCreditFailedPass(t *testing.T) {
 		}
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
+	}
+}
+
+func testChannelWorkerSupersededRenderDuringStop(t *testing.T) {
+	stale := failures.New(failures.ClassSupersededGeneration, "external_effect_authority_stale", "external-effects", "check_authority", nil)
+	refused := &effects.ChannelDeliveryRenderSuperseded{Cause: stale}
+	storageErr := errors.New("independent storage failure")
+	for _, tc := range []struct {
+		name              string
+		result, wantDrain error
+	}{
+		{"exact_pre_authorize_refusal", refused, nil},
+		{"generic_stale", stale, stale},
+		{"compound_failure", errors.Join(refused, storageErr), storageErr},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			process := worklifetime.NewProcess()
+			worker := &serveChannelDeliveryWorker{owner: process, workCtx: t.Context()}
+			selection, stop := context.WithCancel(t.Context())
+			lease, err := worker.beginSend(selection)
+			stop()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := worker.finishSend(selection, lease, tc.result); !errors.Is(err, tc.result) || !errors.Is(worker.err, tc.wantDrain) || process.ActiveCount() != 0 {
+				t.Fatalf("reconciliation=%v drain=%v active=%d", err, worker.err, process.ActiveCount())
+			}
+			if tc.wantDrain == nil {
+				if err := worker.finishSend(selection, lease, tc.result); !errors.Is(err, worklifetime.ErrAlreadySettled) || !errors.Is(worker.err, worklifetime.ErrAlreadySettled) {
+					t.Fatalf("refusal hid settlement failure: returned=%v drain=%v", err, worker.err)
+				}
+			}
+		})
 	}
 }
 

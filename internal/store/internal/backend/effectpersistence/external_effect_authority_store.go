@@ -156,6 +156,9 @@ func requireExternalEffectAuthorityPostgres(ctx context.Context, tx *sql.Tx, aut
 	if authority.Kind == runtimeeffects.AuthoritySelectedContractFork && authorize {
 		return requireSelectedContractForkAuthorityPostgres(ctx, tx, authority, true)
 	}
+	if authority.Kind == runtimeeffects.AuthorityChannelDelivery && authorize {
+		return requireChannelDeliveryAuthorityTx(ctx, tx, authority, true, true)
+	}
 	return requireCurrentExternalEffectAuthorityPostgres(ctx, tx, authority)
 }
 
@@ -177,6 +180,9 @@ func requireExternalEffectAuthoritySQLite(ctx context.Context, tx *sql.Tx, autho
 	}
 	if authority.Kind == runtimeeffects.AuthorityConversationForkChat && authorize {
 		return claimOrValidateForkChatAuthoritySQLite(ctx, tx, authority)
+	}
+	if authority.Kind == runtimeeffects.AuthorityChannelDelivery && authorize {
+		return requireChannelDeliveryAuthorityTx(ctx, tx, authority, false, true)
 	}
 	return requireCurrentExternalEffectAuthoritySQLite(ctx, tx, authority)
 }
@@ -331,7 +337,7 @@ func requireCurrentExternalEffectAuthorityPostgres(ctx context.Context, tx *sql.
 			confirmation.PlanGeneration.Diagnostic(), confirmation.OnboardingOperationID, confirmation.OnboardingRevision,
 			confirmation.EffectOperationID)
 	case runtimeeffects.AuthorityChannelDelivery:
-		return requireChannelDeliveryAuthorityTx(ctx, tx, authority, true)
+		return requireChannelDeliveryAuthorityTx(ctx, tx, authority, true, false)
 	case runtimeeffects.AuthorityChannelActionAck:
 		return requireChannelActionAckAuthorityTx(ctx, tx, authority, true)
 	case runtimeeffects.AuthorityChannelNativeSetting:
@@ -462,7 +468,7 @@ func requireCurrentExternalEffectAuthoritySQLite(ctx context.Context, tx *sql.Tx
 			confirmation.PlanGeneration.Diagnostic(), confirmation.OnboardingOperationID, confirmation.OnboardingRevision,
 			confirmation.EffectOperationID)
 	case runtimeeffects.AuthorityChannelDelivery:
-		return requireChannelDeliveryAuthorityTx(ctx, tx, authority, false)
+		return requireChannelDeliveryAuthorityTx(ctx, tx, authority, false, false)
 	case runtimeeffects.AuthorityChannelActionAck:
 		return requireChannelActionAckAuthorityTx(ctx, tx, authority, false)
 	case runtimeeffects.AuthorityChannelNativeSetting:

@@ -2,6 +2,13 @@ package effects
 
 import "github.com/division-sh/swarm/internal/runtime/channelnative"
 
+// ChannelDeliveryRenderSuperseded marks a successful current-source read that
+// refused a different render before an effect attempt could be authorized.
+type ChannelDeliveryRenderSuperseded struct{ Cause error }
+
+func (e *ChannelDeliveryRenderSuperseded) Error() string { return e.Cause.Error() }
+func (e *ChannelDeliveryRenderSuperseded) Unwrap() error { return e.Cause }
+
 // The zero tag preserves the existing runtime evidence shape, never an
 // implicit deployment case. Currentness is established by the store owners.
 func channelTransportValid(parent channelnative.TransportParent, activationID string, activationRevision int64,
