@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/apiv1"
+	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/runtime"
 	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	"github.com/division-sh/swarm/internal/runtime/channelnative"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
@@ -251,6 +253,8 @@ func TestChannelWorkerDoesNotCreditFailedPass(t *testing.T) {
 func testChannelWorkerSupersededRenderDuringStop(t *testing.T) {
 	stale := failures.New(failures.ClassSupersededGeneration, "external_effect_authority_stale", "external-effects", "check_authority", nil)
 	refused := &effects.ChannelDeliveryRenderSuperseded{Cause: stale}
+	credentialNotCurrent := runtime.ChannelPublicationCredentialNotCurrent{}
+	credentialRefused := &ordinaryChannelCredentialRefusal{credentialNotCurrent}
 	storageErr := errors.New("independent storage failure")
 	for _, tc := range []struct {
 		name              string
@@ -259,6 +263,10 @@ func testChannelWorkerSupersededRenderDuringStop(t *testing.T) {
 		{"exact_pre_authorize_refusal", refused, nil},
 		{"generic_stale", stale, stale},
 		{"compound_failure", errors.Join(refused, storageErr), storageErr},
+		{"ordinary_credential_refusal", credentialRefused, nil},
+		{"unmarked_credential_refusal", credentialNotCurrent, credentialNotCurrent},
+		{"generic_revision_conflict", channelonboarding.ErrRevisionConflict, channelonboarding.ErrRevisionConflict},
+		{"compound_credential_refusal", errors.Join(credentialRefused, storageErr), storageErr},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			process := worklifetime.NewProcess()
