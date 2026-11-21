@@ -445,10 +445,10 @@ func (rt *Runtime) PrepareStartupLifecycle(ctx context.Context) error {
 	}
 	rt.startupPrepareMu.Lock()
 	defer rt.startupPrepareMu.Unlock()
-	return rt.prepareStartupLifecycleLocked(ctx)
+	return rt.prepareStartupLifecycleLocked(ctx, nil)
 }
 
-func (rt *Runtime) prepareStartupLifecycleLocked(ctx context.Context) error {
+func (rt *Runtime) prepareStartupLifecycleLocked(ctx context.Context, source *StartupSource) error {
 	if rt.Manager == nil {
 		return nil
 	}
@@ -456,6 +456,10 @@ func (rt *Runtime) prepareStartupLifecycleLocked(ctx context.Context) error {
 	if rt.cancelStart != nil {
 		rt.lifecycleMu.Unlock()
 		return errors.New("runtime already started")
+	}
+	if source != nil && source.grant != rt.startupGrant {
+		rt.lifecycleMu.Unlock()
+		return errors.New("runtime generation changed during startup preparation")
 	}
 	if rt.startupLifecyclePrepared {
 		rt.lifecycleMu.Unlock()
@@ -466,9 +470,12 @@ func (rt *Runtime) prepareStartupLifecycleLocked(ctx context.Context) error {
 	if grant == nil {
 		return errors.New("runtime generation grant is required before startup preparation")
 	}
-	ctx, err := rt.compiledSourceContext(ctx)
-	if err != nil {
-		return err
+	var err error
+	if source == nil {
+		ctx, err = rt.compiledSourceContext(ctx)
+		if err != nil {
+			return err
+		}
 	}
 	ctx, err = runtimestartupownership.WithRuntimeMutationAuthority(ctx, grant)
 	if err != nil {
@@ -511,6 +518,13 @@ func (rt *Runtime) PreflightDynamicTopologyStartup(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	return rt.preflightDynamicTopologyStartupChecked(ctx)
+}
+
+func (rt *Runtime) preflightDynamicTopologyStartupChecked(ctx context.Context) error {
+	if rt.Manager == nil {
+		return nil
+	}
 	projection, err := rt.Manager.InspectDynamicFlowRuntimeReadinessForSource(ctx, rt.Options.SourceArtifactFact)
 	if err != nil {
 		return fmt.Errorf("inspect source-scoped dynamic topology startup: %w", err)
@@ -532,28 +546,33 @@ func (rt *Runtime) PreflightDynamicTopologyStartup(ctx context.Context) error {
 }
 
 func (rt *Runtime) compiledSourceContext(ctx context.Context) (context.Context, error) {
+	checked, _, err := rt.checkCompiledSource(ctx)
+	return checked, err
+}
+
+func (rt *Runtime) checkCompiledSource(ctx context.Context) (context.Context, sourceartifact.RootAdmission, error) {
 	if rt.Options.WorkflowModule == nil {
-		return nil, errors.New("startup source observation requires its compiled workflow module")
+		return nil, sourceartifact.RootAdmission{}, errors.New("startup source observation requires its compiled workflow module")
 	}
 	bundle, present := semanticview.Bundle(rt.Options.WorkflowModule.SemanticSource())
 	if !present || bundle == nil {
-		return nil, errors.New("startup source observation requires its compiled bundle")
+		return nil, sourceartifact.RootAdmission{}, errors.New("startup source observation requires its compiled bundle")
 	}
 	rooted, err := bundle.RootedSource()
 	if err != nil {
-		return nil, err
+		return nil, sourceartifact.RootAdmission{}, err
 	}
 	if rooted.Admission().BundleHash() != rt.Options.SourceArtifactFact.BundleHash() {
-		return nil, errors.New("startup source observation compiled root differs from runtime source")
+		return nil, sourceartifact.RootAdmission{}, errors.New("startup source observation compiled root differs from runtime source")
 	}
 	if fact, supplied := runtimecorrelation.SourceArtifactFactFromContext(ctx); supplied && fact.BundleHash() != rt.Options.SourceArtifactFact.BundleHash() {
-		return nil, errors.New("startup source observation context differs from runtime source")
+		return nil, sourceartifact.RootAdmission{}, errors.New("startup source observation context differs from runtime source")
 	}
 	if err := runtimecorrelation.CheckRootAdmissionContext(ctx, rooted.Admission().Reference()); err != nil {
-		return nil, err
+		return nil, sourceartifact.RootAdmission{}, err
 	}
 	ctx = runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(ctx, rt.Options.SourceArtifactFact), rooted.Admission())
-	return ctx, nil
+	return ctx, rooted.Admission(), nil
 }
 
 // PreparedSourceSetGenerationRefresh reserves one runtime generation and all
@@ -1209,11 +1228,23 @@ func (rt *Runtime) mutationContext(ctx context.Context) (context.Context, error)
 	if err != nil {
 		return nil, err
 	}
+	return rt.bindMutationContext(ctx, nil)
+}
+
+func (rt *Runtime) bindMutationContext(ctx context.Context, source *StartupSource) (context.Context, error) {
+	if source != nil {
+		if err := source.requireCurrent(); err != nil {
+			return nil, err
+		}
+	}
 	if runtimestartupownership.HasMutationAuthority(ctx) {
 		original, err := runtimestartupownership.CaptureMutationAuthority(ctx)
-		if err != nil || original.HasRuntimeGrant() {
+		if err != nil || source == nil && original.HasRuntimeGrant() {
 			return ctx, err
 		}
+	}
+	if source != nil {
+		return runtimestartupownership.WithRuntimeMutationAuthority(ctx, source.grant)
 	}
 	rt.lifecycleMu.Lock()
 	grant := rt.startupGrant
@@ -1707,7 +1738,7 @@ func (rt *Runtime) Start(ctx context.Context) (startErr error) {
 			startErr = errors.Join(startErr, rt.stopWithOptions(DefaultShutdownOptions()))
 		}
 	}()
-	prepared, err := rt.prepareStartLocked(ctx)
+	prepared, err := rt.prepareStartLocked(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -1754,25 +1785,32 @@ func (rt *Runtime) PrepareStart(ctx context.Context) (*PreparedStartup, error) {
 	}
 	rt.startupPrepareMu.Lock()
 	defer rt.startupPrepareMu.Unlock()
-	return rt.prepareStartLocked(ctx)
+	return rt.prepareStartLocked(ctx, nil)
 }
 
-func (rt *Runtime) prepareStartLocked(ctx context.Context) (*PreparedStartup, error) {
-	ctx, err := rt.compiledSourceContext(ctx)
-	if err != nil {
+func (rt *Runtime) prepareStartLocked(ctx context.Context, checked *StartupSource) (*PreparedStartup, error) {
+	var err error
+	if checked == nil {
+		checked, err = rt.admitStartupSource(ctx)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if err := checked.requireCurrent(); err != nil {
 		return nil, err
 	}
-	if err := rt.PreflightDynamicTopologyStartup(ctx); err != nil {
+	ctx = checked.ctx
+	if err := rt.preflightDynamicTopologyStartupChecked(ctx); err != nil {
 		return nil, err
 	}
 	if err := rt.PrepareAuthorActivityCatalog(); err != nil {
 		return nil, err
 	}
-	if err := rt.prepareStartupLifecycleLocked(ctx); err != nil {
+	if err := rt.prepareStartupLifecycleLocked(ctx, checked); err != nil {
 		return nil, err
 	}
 	ctx = rt.authorActivityContext(ctx)
-	ctx, err = rt.mutationContext(ctx)
+	ctx, err = rt.bindMutationContext(ctx, checked)
 	if err != nil {
 		return nil, err
 	}
@@ -1799,6 +1837,9 @@ func (rt *Runtime) prepareStartLocked(ctx context.Context) (*PreparedStartup, er
 			return fmt.Errorf("runtime already started")
 		}
 		grant := rt.startupGrant
+		if grant != checked.grant {
+			return errors.New("runtime generation changed during startup preparation")
+		}
 		if grant == nil {
 			return fmt.Errorf("runtime generation grant is required before start")
 		}
@@ -1927,7 +1968,7 @@ func (rt *Runtime) prepareStartLocked(ctx context.Context) (*PreparedStartup, er
 		return nil, fmt.Errorf("claude runtime workspace validation failed: %w", err)
 	}
 	rt.emitBootProgress(14, "workspace_validation_and_system_containers", "ok", fmt.Sprintf("%d system containers", len(rt.Options.SystemContainers)))
-	startupAuthority, err := rt.currentStartupProbeAuthority()
+	startupAuthority, err := checked.grant.Evidence()
 	if err != nil {
 		rt.emitBootProgress(15, "mcp_tool_validation", "FAILED", err.Error())
 		return nil, err
@@ -1970,7 +2011,10 @@ func (rt *Runtime) prepareStartLocked(ctx context.Context) (*PreparedStartup, er
 		if rt.shutdownAdmissionClosed() {
 			return fmt.Errorf("prepared runtime was shut down before release")
 		}
-		settledAuthority, err := rt.settleManagedStartupPreflight(ctx, surfaceIDs)
+		if err := checked.requireCurrent(); err != nil {
+			return err
+		}
+		settledAuthority, err := settleManagedStartupPreflight(ctx, checked.grant, surfaceIDs)
 		if err != nil {
 			rt.emitBootProgress(15, "mcp_tool_validation", "FAILED", err.Error())
 			return fmt.Errorf("settle managed startup preflight: %w", err)

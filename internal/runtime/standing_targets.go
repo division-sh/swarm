@@ -354,15 +354,15 @@ func (rt *Runtime) ensureStandingTargets(ctx context.Context, flowPath string) (
 }
 
 func (rt *Runtime) ensureStandingTargetsMutation(ctx context.Context, flowPath string) ([]StandingTarget, []StandingActivation, error) {
-	targets, activations, _, err := rt.standingTargetsMutation(ctx, flowPath, false)
+	targets, activations, _, err := rt.standingTargetsMutation(ctx, flowPath, false, nil)
 	return targets, activations, err
 }
 
 func (rt *Runtime) PrepareStandingTargets(ctx context.Context) ([]StandingTarget, []StandingActivation, func() error, error) {
-	return rt.standingTargetsMutation(ctx, "", true)
+	return rt.standingTargetsMutation(ctx, "", true, nil)
 }
 
-func (rt *Runtime) standingTargetsMutation(ctx context.Context, flowPath string, prepare bool) ([]StandingTarget, []StandingActivation, func() error, error) {
+func (rt *Runtime) standingTargetsMutation(ctx context.Context, flowPath string, prepare bool, admitted *StartupSource) ([]StandingTarget, []StandingActivation, func() error, error) {
 	if rt == nil {
 		return nil, nil, nil, fmt.Errorf("standing activation requires a runtime")
 	}
@@ -379,7 +379,11 @@ func (rt *Runtime) standingTargetsMutation(ctx context.Context, flowPath string,
 	if rt.workOccurrence == nil {
 		return nil, nil, nil, fmt.Errorf("standing activation requires a runtime work occurrence")
 	}
-	ctx, err = rt.compiledSourceContext(ctx)
+	if admitted == nil {
+		ctx, err = rt.compiledSourceContext(ctx)
+	} else {
+		err = admitted.requireCurrent()
+	}
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -441,6 +445,25 @@ func (rt *Runtime) standingTargetsMutation(ctx context.Context, flowPath string,
 	if len(results) != len(selectedPlans) {
 		return nil, nil, nil, fmt.Errorf("standing target mutation returned %d results for %d plans", len(results), len(selectedPlans))
 	}
+	targets, activations := standingTargetsFromResults(fact, selectedPlans, results)
+	if prepare {
+		finish := complete
+		complete = func() error {
+			if admitted != nil {
+				if err := admitted.requireCurrent(); err != nil {
+					return err
+				}
+			}
+			if err := finish(); err != nil {
+				return err
+			}
+			return rt.restoreAdoptedStandingWorkflowTimers(ctx, activations)
+		}
+	}
+	return targets, activations, complete, nil
+}
+
+func standingTargetsFromResults(fact runtimecorrelation.SourceArtifactFact, selectedPlans []standingTargetPlan, results []runtimepipeline.LiveTargetMutationResult) ([]StandingTarget, []StandingActivation) {
 	targets := make([]StandingTarget, 0)
 	activations := make([]StandingActivation, 0, len(selectedPlans))
 	for i, plan := range selectedPlans {
@@ -461,16 +484,7 @@ func (rt *Runtime) standingTargetsMutation(ctx context.Context, flowPath string,
 			targets = append(targets, target.normalized())
 		}
 	}
-	if prepare {
-		finish := complete
-		complete = func() error {
-			if err := finish(); err != nil {
-				return err
-			}
-			return rt.restoreAdoptedStandingWorkflowTimers(ctx, activations)
-		}
-	}
-	return targets, activations, complete, nil
+	return targets, activations
 }
 
 func (rt *Runtime) restoreAdoptedStandingWorkflowTimers(ctx context.Context, activations []StandingActivation) error {
