@@ -72,7 +72,7 @@ func TestGracefulStopRefusesOnlyMatchedDeploymentWebhookClaimBothStores(t *testi
 			defer restore()
 			args := channelFixtureArguments(h.opts.ConfigPath, "channel", "connect", "telegram", "420079", "--yes", "--client-language", "en", "--api-server", h.endpoint)
 			go func() {
-				code := cliapp.Execute(ctx, args, out, errOut, nil, nil, OpenChannelRegistration)
+				code := cliapp.Execute(ctx, args, out, errOut, nil, nil, ChannelRegistrations())
 				done <- code
 				progress <- code
 			}()
@@ -83,7 +83,7 @@ func TestGracefulStopRefusesOnlyMatchedDeploymentWebhookClaimBothStores(t *testi
 			})
 			var listed struct{ Accounts []channelonboarding.Result }
 			var listOut, listErr lockedBuffer
-			if code := cliapp.Execute(ctx, channelFixtureArguments(h.opts.ConfigPath, "channel", "list", "--api-server", h.endpoint, "--json"), &listOut, &listErr, nil, nil, OpenChannelRegistration); code != 0 || json.Unmarshal([]byte(listOut.String()), &listed) != nil {
+			if code := cliapp.Execute(ctx, channelFixtureArguments(h.opts.ConfigPath, "channel", "list", "--api-server", h.endpoint, "--json"), &listOut, &listErr, nil, nil, ChannelRegistrations()); code != 0 || json.Unmarshal([]byte(listOut.String()), &listed) != nil {
 				t.Fatalf("cannot read exact deployment claim: exit=%d err=%s", code, listErr.String())
 			}
 			if stores == nil || len(listed.Accounts) != 1 || listed.Accounts[0].IdentityOperation == nil || listed.Accounts[0].IdentityOperation.Challenge != challenge {
@@ -111,7 +111,11 @@ func TestGracefulStopRefusesOnlyMatchedDeploymentWebhookClaimBothStores(t *testi
 			}
 			t.Logf("credential-bound callback accepted before stop: events=%d, exact pending claim unchanged", len(live.EventIDs))
 			ref := channelonboarding.AccountReference{Provider: parent.Provider, Account: parent.AccountReference}
-			holders, err := manager.AccountHolders(ctx, ref)
+			facts, installed := installedChannelFactsFor(ref.Provider)
+			if !installed {
+				t.Fatal("pending claim has no installed provider facts")
+			}
+			holders, err := manager.AccountHolders(ctx, ref, facts)
 			if err != nil || len(holders) != 1 {
 				t.Fatalf("ordinary holder discovery did not find the exact current holder: count=%d err=%v", len(holders), err)
 			}
@@ -173,7 +177,7 @@ func TestGracefulStopRefusesOnlyMatchedDeploymentWebhookClaimBothStores(t *testi
 					t.Errorf("unexpected claim receipt for event %s: found=%t err=%v", event, found, err)
 				}
 			}
-			retained, err := manager.RegistrationAccountHolders(cut, ref)
+			retained, err := manager.RegistrationAccountHolders(cut, ref, facts)
 			if err != nil || !reflect.DeepEqual(retained, holders) {
 				t.Errorf("registration observation lost the original holder during stop: count=%d err=%v", len(retained), err)
 			}
@@ -189,14 +193,14 @@ func TestGracefulStopRefusesOnlyMatchedDeploymentWebhookClaimBothStores(t *testi
 				t.Fatal(err)
 			}
 			foreign := runtimecorrelation.WithSourceArtifactFact(cut, foreignFact)
-			if rows, err := manager.RegistrationAccountHolders(foreign, ref); len(rows) != 0 || err == nil {
+			if rows, err := manager.RegistrationAccountHolders(foreign, ref, facts); len(rows) != 0 || err == nil {
 				t.Errorf("registration observation accepted a foreign source: count=%d err=%v", len(rows), err)
 			}
 			if err := accepted.Done(); err != nil {
 				t.Fatal(err)
 			}
 			h.stop(t)
-			if rows, err := manager.RegistrationAccountHolders(ctx, ref); len(rows) != 0 {
+			if rows, err := manager.RegistrationAccountHolders(ctx, ref, facts); len(rows) != 0 {
 				t.Errorf("registration observation survived cutoff: count=%d err=%v", len(rows), err)
 			}
 		})
@@ -275,7 +279,7 @@ func TestGracefulStopJoinsAdmittedDeploymentWebhookClaimBothStores(t *testing.T)
 				}
 				return session, err
 			}
-			client, err := cliapp.UseDeploymentChannelControl(ctx, root, h.opts.ConfigPath, directory, "telegram", stores, process, factory)
+			client, err := cliapp.UseDeploymentChannelControl(ctx, root, h.opts.ConfigPath, directory, "telegram", stores, process, fixtureRegistration(factory))
 			if err != nil {
 				t.Fatal(err)
 			}
