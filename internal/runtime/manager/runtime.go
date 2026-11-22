@@ -150,6 +150,16 @@ func (am *AgentManager) CheckShutdownAdmission() error {
 }
 
 func (am *AgentManager) ShutdownWithOptions(opts ShutdownOptions) error {
+	return am.shutdownWithBudget(opts, nil)
+}
+
+// ShutdownWithDrainContext uses the host's existing stop budget for this caller
+// and any transition it elects, without changing an already elected transition.
+func (am *AgentManager) ShutdownWithDrainContext(ctx context.Context, grace time.Duration) error {
+	return am.shutdownWithBudget(ShutdownOptions{Grace: grace}, ctx)
+}
+
+func (am *AgentManager) shutdownWithBudget(opts ShutdownOptions, budget context.Context) error {
 	grace, err := ResolveShutdownGrace(opts.Grace)
 	if err != nil {
 		return err
@@ -157,9 +167,13 @@ func (am *AgentManager) ShutdownWithOptions(opts ShutdownOptions) error {
 	if err := am.CheckShutdownAdmission(); err != nil {
 		return err
 	}
-	drainCtx, cancelDrain := context.WithTimeout(context.Background(), grace)
-	defer cancelDrain()
-	transition := am.lifecycle.prepareShutdownTransitionWithGrace(true, grace)
+	drainCtx := budget
+	if drainCtx == nil {
+		var cancelDrain context.CancelFunc
+		drainCtx, cancelDrain = context.WithTimeout(context.Background(), grace)
+		defer cancelDrain()
+	}
+	transition := am.lifecycle.prepareShutdownTransitionWithBudget(true, grace, budget)
 	if transition == nil {
 		var dependencyErr error
 		if am.lifecycle.shutdownJoin != nil && am.runtimeShutdownAdmissionClosed != nil && am.runtimeShutdownAdmissionClosed() {

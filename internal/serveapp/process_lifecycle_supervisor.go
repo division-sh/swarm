@@ -25,6 +25,7 @@ type processLifecycleSupervisor struct {
 	ready             serveReadiness
 	processCapability runtimestartupownership.ProcessCapability
 	shutdownOptions   runtime.ShutdownOptions
+	stopClock         serveStopClock
 	shutdownRuntime   func(context.Context, *runtime.Runtime, runtime.ShutdownOptions) error
 	operationMu       sync.Mutex
 	shutdownMu        sync.Mutex

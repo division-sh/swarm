@@ -8065,12 +8065,16 @@ func startOwnedMockLifecycleTestProcess(t *testing.T, repo, retainedRoot string,
 }
 
 func startOwnedLifecycleTestProcess(t *testing.T, repo, retainedRoot string, opts cliapp.ServeOptions, posture executionposture.Posture) *serveRuntimeTestProcess {
+	return startOwnedLifecycleWithStopClock(t, repo, retainedRoot, opts, posture, nil)
+}
+
+func startOwnedLifecycleWithStopClock(t *testing.T, repo, retainedRoot string, opts cliapp.ServeOptions, posture executionposture.Posture, clock serveStopClock) *serveRuntimeTestProcess {
 	t.Helper()
 	t.Logf("proof_surface=H in-process retained lifecycle posture=%s; not public serve/test", posture)
 	return startRuntimeTestProcessWithRunner(t, repo, opts, func(ctx context.Context, root string, opts cliapp.ServeOptions) int {
-		code, err := runOwnedLifecycle(ctx, root, retainedRoot, opts, apiv1.AuthTokenResolution{
+		code, err := runOwnedLifecycleWithStopClock(ctx, root, retainedRoot, opts, apiv1.AuthTokenResolution{
 			Tokens: []string{apiv1.DefaultLoopbackAPIToken}, Source: "internal-lifecycle-parent", Explicit: true,
-		}, posture, "")
+		}, posture, "", clock)
 		if err != nil {
 			fmt.Fprintf(opts.Output, "internal lifecycle setup: %v\n", err)
 		}

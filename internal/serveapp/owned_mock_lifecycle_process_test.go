@@ -149,6 +149,10 @@ func observeGoldenCrashCut(ctx context.Context, raw string, out io.Writer) (retE
 // The test caller owns source selection and explicit execution posture. Retained
 // live-node recovery must not relabel existing work as mock-only execution.
 func runOwnedLifecycle(ctx context.Context, root, retainedRoot string, opts cliapp.ServeOptions, auth apiv1.AuthTokenResolution, posture executionposture.Posture, storedHash string, providerStore ...func(runtimecredentials.Store) runtimecredentials.Store) (int, error) {
+	return runOwnedLifecycleWithStopClock(ctx, root, retainedRoot, opts, auth, posture, storedHash, nil, providerStore...)
+}
+
+func runOwnedLifecycleWithStopClock(ctx context.Context, root, retainedRoot string, opts cliapp.ServeOptions, auth apiv1.AuthTokenResolution, posture executionposture.Posture, storedHash string, clock serveStopClock, providerStore ...func(runtimecredentials.Store) runtimecredentials.Store) (int, error) {
 	if storedHash != "" && (opts.SourceRoot != "" || opts.Dev) {
 		return 1, errors.New("retained artifact proof requires one exact stored hash, no directory or dev scratch")
 	}
@@ -291,6 +295,7 @@ func runOwnedLifecycle(ctx context.Context, root, retainedRoot string, opts clia
 		ScratchAuthority: scratch,
 		Credentials:      credentials, ProviderCredentials: providerCredentials, ManagedCredentials: managedCredentials,
 		Presenter: presenter, NoticePresentation: newServeNoticePresentationSink(presenter), Cancel: cancel,
+		StopClock:     clock,
 		BootStartedAt: time.Now().UTC(), RuntimeInstanceID: runtimeID,
 		DataProjectionRoot: filepath.Join(swarmDir.Path, "lifecycle-data-projections"),
 	})

@@ -2167,12 +2167,12 @@ func (m *RuntimeContextManager) acquireRun(ctx context.Context, runID string, re
 	}
 	if registration && read != nil && entry.stopObservation != nil {
 		stop := entry.stopObservation
-		deadline, bounded := stop.ctx.Deadline()
+		_, bounded := stop.ctx.Deadline()
 		if stop != m.inboundStopObservation || m.resetExecutionFenced || !bounded || stop.ctx.Err() != nil {
 			m.mu.RUnlock()
 			return nil, lookup, availability, worklifetime.ErrAdmissionFenced
 		}
-		boundedCtx, cancel := context.WithDeadline(ctx, deadline)
+		boundedCtx, cancel := worklifetime.WithStopDeadline(ctx, stop.ctx)
 		defer cancel()
 		readCtx, release, admitted := m.inboundRequests.BeginContext(boundedCtx)
 		definition := *entry.context

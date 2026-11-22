@@ -1413,15 +1413,29 @@ func (c *agentLifecycleCoordinator) prepareShutdownTransition(drain bool) *runti
 }
 
 func (c *agentLifecycleCoordinator) prepareShutdownTransitionWithGrace(drain bool, grace time.Duration) *runtimeLifecycleTransition {
+	return c.prepareShutdownTransitionWithBudget(drain, grace, nil)
+}
+
+func (c *agentLifecycleCoordinator) prepareShutdownTransitionWithBudget(drain bool, grace time.Duration, budget context.Context) *runtimeLifecycleTransition {
 	if c == nil {
 		return nil
+	}
+	newTransition := func() *runtimeLifecycleTransition {
+		if budget == nil {
+			return newRuntimeLifecycleTransition(runtimeLifecycleTransitionShutdown, grace)
+		}
+		ctx, cancel := worklifetime.WithStopDeadline(context.Background(), budget)
+		return &runtimeLifecycleTransition{
+			kind: runtimeLifecycleTransitionShutdown, done: make(chan struct{}),
+			drainCtx: ctx, drainCancel: cancel, drainGrace: grace,
+		}
 	}
 	c.mu.Lock()
 	var cancel context.CancelFunc
 	var transition *runtimeLifecycleTransition
 	switch c.phase {
 	case runtimeLifecycleRunning:
-		transition = newRuntimeLifecycleTransition(runtimeLifecycleTransitionShutdown, grace)
+		transition = newTransition()
 		transition.drainAccepted = drain
 		c.transition = transition
 		c.phase = runtimeLifecycleShuttingDown
@@ -1432,7 +1446,7 @@ func (c *agentLifecycleCoordinator) prepareShutdownTransitionWithGrace(drain boo
 		hasRunOwner := c.runOwner != nil
 		c.workMu.Unlock()
 		if hasRunOwner {
-			transition = newRuntimeLifecycleTransition(runtimeLifecycleTransitionShutdown, grace)
+			transition = newTransition()
 			transition.drainAccepted = drain
 			c.transition = transition
 			c.phase = runtimeLifecycleShuttingDown

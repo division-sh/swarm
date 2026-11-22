@@ -3,16 +3,31 @@ package serveapp
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/publicingress"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 )
 
+type serveStopClock interface {
+	StartGrace(time.Duration) (context.Context, context.CancelFunc)
+}
+
+type realServeStopClock struct{}
+
+func (realServeStopClock) StartGrace(grace time.Duration) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), grace)
+}
+
 func (s *processLifecycleSupervisor) prepareInboundStop() context.Context {
 	s.mu.Lock()
 	if s.inboundStopCtx == nil {
-		s.inboundStopCtx, s.inboundStopCancel = context.WithTimeout(context.Background(), s.shutdownOptions.Grace)
+		clock := s.stopClock
+		if clock == nil {
+			clock = realServeStopClock{}
+		}
+		s.inboundStopCtx, s.inboundStopCancel = clock.StartGrace(s.shutdownOptions.Grace)
 	}
 	s.stopping, s.apiReady = true, false
 	manager, current, ctx := s.runtimeContexts, s.currentRT, s.inboundStopCtx

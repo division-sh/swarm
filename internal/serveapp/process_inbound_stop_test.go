@@ -19,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/servedparity"
 	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/tests/support/testutil"
 )
 
 func TestInboundStopJoinsRegistrationWriterBeforeOrdinaryFenceBothStores(t *testing.T) {
@@ -197,6 +198,31 @@ func proveInboundStopRegistrationWriter(t *testing.T, backend servedparity.Backe
 }
 
 func TestInboundStopRetainsOriginalDeadlineThroughOuterFinalization(t *testing.T) {
+	t.Run("owning_context", testStopDeadlineKeepsOwningLifetime)
+	t.Run("controlled_reservation", func(t *testing.T) {
+		s := newProcessLifecycleSupervisor(nil, nil)
+		s.runtimeContexts = &runtime.RuntimeContextManager{}
+		clock := newControlledServeStopClock()
+		s.stopClock = clock
+		ctx := s.prepareInboundStop()
+		defer s.inboundStopCancel()
+		select {
+		case budget := <-clock.started:
+			if ctx != budget.ctx || ctx.Err() != nil {
+				t.Fatal("stop did not reserve the live controlled budget")
+			}
+			budget.finish(context.DeadlineExceeded)
+		default:
+			t.Fatal("stop reservation bypassed its clock")
+		}
+		stop := s.beginInboundStop(nil)
+		if err := s.runtimeContexts.CloseInboundRequests(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		if result := stop.Finish(); !errors.Is(result, context.DeadlineExceeded) || ctx.Err() != context.DeadlineExceeded || s.prepareInboundStop() != ctx {
+			t.Fatalf("original expiry was lost or renewed: %v", result)
+		}
+	})
 	for _, expired := range []bool{false, true} {
 		name, grace := "live", 5*time.Second
 		if expired {
@@ -232,6 +258,55 @@ func TestInboundStopRetainsOriginalDeadlineThroughOuterFinalization(t *testing.T
 				t.Fatal("later stop phase renewed or replaced the original deadline")
 			}
 		})
+	}
+}
+
+type controlledServeBudget struct {
+	ctx    context.Context
+	finish func(error)
+}
+
+type controlledServeStopClock struct{ started chan controlledServeBudget }
+
+func newControlledServeStopClock() controlledServeStopClock {
+	return controlledServeStopClock{make(chan controlledServeBudget, 1)}
+}
+
+func (c controlledServeStopClock) StartGrace(grace time.Duration) (context.Context, context.CancelFunc) {
+	ctx, finish := testutil.StopDeadline(time.Now().Add(grace))
+	c.started <- controlledServeBudget{ctx, finish}
+	return ctx, func() { finish(context.Canceled) }
+}
+
+func testStopDeadlineKeepsOwningLifetime(t *testing.T) {
+	type key struct{}
+	local, cause := context.WithCancelCause(context.WithValue(context.Background(), key{}, "owner"))
+	defer cause(nil)
+	early := time.Now().Add(time.Hour)
+	owner, cancelOwner := context.WithDeadline(local, early)
+	defer cancelOwner()
+	budget, expire := testutil.StopDeadline(early.Add(time.Hour))
+	budget = context.WithValue(budget, key{}, "stop")
+	ctx, cancel := worklifetime.WithStopDeadline(owner, budget)
+	defer cancel()
+	if deadline, ok := ctx.Deadline(); !ok || deadline != early || ctx.Value(key{}) != "owner" {
+		t.Fatal("stop bound lost the earlier deadline or replaced request values")
+	}
+	ended := errors.New("independent owner cancellation")
+	cause(ended)
+	select {
+	case <-ctx.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("bounded context missed owner cancellation")
+	}
+	if ctx.Err() != context.Canceled || context.Cause(ctx) != ended || budget.Err() != nil {
+		t.Fatalf("owner cancellation replaced: err=%v cause=%v", ctx.Err(), context.Cause(ctx))
+	}
+	expire(context.DeadlineExceeded)
+	closed, closeBound := worklifetime.WithStopDeadline(context.Background(), budget)
+	defer closeBound()
+	if closed.Err() != context.DeadlineExceeded || context.Cause(closed) != context.DeadlineExceeded {
+		t.Fatal("already-expired stop admitted a live bound")
 	}
 }
 
