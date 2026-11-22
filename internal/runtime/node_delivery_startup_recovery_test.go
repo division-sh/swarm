@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -27,6 +29,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedeliverycontinuation "github.com/division-sh/swarm/internal/runtime/deliverycontinuation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -153,6 +156,17 @@ func (startupRecoveryOrderLLM) ProviderContract() llm.ProviderContract {
 }
 
 func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity(t *testing.T) {
+	proveRuntimeStartupDeliveryOrder(t, "")
+}
+
+func TestRuntimeManagedClaimWaitsForTopologyCompletionBothStores(t *testing.T) {
+	for _, outcome := range []string{"success", "failure", "cancelled"} {
+		t.Run(outcome, func(t *testing.T) { proveRuntimeStartupDeliveryOrder(t, outcome) })
+	}
+}
+
+func proveRuntimeStartupDeliveryOrder(t *testing.T, outcome string) {
+	t.Helper()
 	const agentID = "startup-order-agent"
 	base := loadEntitylessStartupRecoveryBundle(t)
 	files := make(map[string]string)
@@ -305,6 +319,31 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 			if err != nil {
 				t.Fatalf("load startup agent authority: %v", err)
 			}
+			if outcome != "" {
+				processOwner := worklifetime.NewProcess()
+				claims := &startupCutClaimStore{
+					Store: selected, eventID: agentEventID, tokens: make(chan effects.LifecycleToken, 1),
+				}
+				successor := newRuntime(processOwner, claims)
+				capability, grant := installExternalRuntimeTestGeneration(t, ctx, selected, successor, preparedSuccessor)
+				t.Cleanup(func() {
+					if err := closeExternalRuntimeTestGeneration(successor, processOwner, capability); err != nil {
+						t.Error(err)
+						return
+					}
+					if outcome != "success" {
+						snapshot, err := selected.Snapshot(ctx, agentProof.DeliveryID())
+						if err != nil || snapshot.ClaimVersion != 0 || !snapshot.StartedAt.IsZero() || claims.acquired.Load() != 0 {
+							t.Errorf("claim after aborted completion and joined cleanup: %+v, %v", snapshot, err)
+						}
+					}
+				})
+				if agentSnapshot.Status != runtimedelivery.StatusPending || agentSnapshot.ClaimVersion != 0 {
+					t.Fatalf("pre-cut delivery is not waiting: %+v", agentSnapshot)
+				}
+				probeStartupClaimBeforeCompletion(t, ctx, successor, grant, claims, agentEvent, agentRoute, agentProof.DeliveryID(), outcome)
+				return
+			}
 			predecessorAuthority, err := runtimedelivery.NewNormalExecutionAuthority(
 				agentSnapshot.Authority.SourceArtifact(), "startup-predecessor-"+backend.name, 41,
 			)
@@ -347,6 +386,156 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 				t.Fatal("startup order proof delivered the workflow node before persisted agent hydration")
 			}
 		})
+	}
+}
+
+type startupCutClaimStore struct {
+	runtimedelivery.Store
+	eventID  string
+	tokens   chan effects.LifecycleToken
+	acquired atomic.Int64
+}
+
+func (s *startupCutClaimStore) ClaimDelivery(ctx context.Context, authority runtimedelivery.ExecutionAuthority, event events.Event, route events.DeliveryRoute) (runtimedelivery.ClaimResult, error) {
+	result, err := s.Store.ClaimDelivery(ctx, authority, event, route)
+	if event.ID() == s.eventID && result.Disposition == runtimedelivery.ClaimAcquired && result.Acknowledged {
+		s.acquired.Add(1)
+		token, _ := effects.LifecycleTokenFromContext(ctx)
+		select {
+		case s.tokens <- token:
+		default:
+		}
+	}
+	return result, err
+}
+
+type startupCutReturnOwner struct {
+	runtimebus.DeliveryContinuationOwner
+	deliveryID string
+	returned   chan bool
+}
+
+func (o startupCutReturnOwner) Acquire(id string) (worklifetime.DeliveryAcquisition, error) {
+	result, err := o.DeliveryContinuationOwner.Acquire(id)
+	if continuation, ok := result.Acquired(); ok && id == o.deliveryID && err == nil {
+		return worklifetime.AcquiredDelivery(startupCutReturn{continuation, o.returned}), nil
+	}
+	return result, err
+}
+
+type startupCutReturn struct {
+	worklifetime.DeliveryContinuation
+	returned chan bool
+}
+
+func (c startupCutReturn) Resolve(ctx context.Context, intent worklifetime.DeliveryContinuationIntent) (worklifetime.DeliveryContinuationResolution, error) {
+	result, err := c.DeliveryContinuation.Resolve(ctx, intent)
+	if err == nil && intent == worklifetime.DeliveryContinuationReturn && result == worklifetime.DeliveryContinuationReturned {
+		// A buffered route retire calls EventDelivery.Complete directly;
+		// the live receiver completes through its carrier guard.
+		var pcs [16]uintptr
+		frames := runtime.CallersFrames(pcs[:runtime.Callers(2, pcs[:])])
+		live := false
+		for {
+			frame, more := frames.Next()
+			if strings.HasSuffix(frame.Function, "/worklifetime.(*DeliveryCarrierGuard).Complete") {
+				live = true
+				break
+			}
+			if !more {
+				break
+			}
+		}
+		select {
+		case c.returned <- live:
+		default:
+		}
+	}
+	return result, err
+}
+
+func probeStartupClaimBeforeCompletion(t *testing.T, ctx context.Context, rt *swarmruntime.Runtime,
+	grant startupownership.LiveGenerationGrant, store *startupCutClaimStore, event events.Event, route events.DeliveryRoute, deliveryID, outcome string) {
+	t.Helper()
+	startCtx, cancelStart := context.WithCancel(ctx)
+	defer cancelStart()
+	release, err := rt.PrepareStart(startCtx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	activationCtx := externalRuntimeGenerationContext(t, testLiveExecutionContext(worklifetime.WithOccurrence(ctx, rt.WorkOccurrence())), grant)
+	source := rt.Options.WorkflowModule.SemanticSource()
+	created, finish, err := rt.Manager.PrepareStandingFlowInstance(activationCtx, runtimepipeline.FlowInstanceActivationRequest{
+		ContractBundle: source,
+		Instance:       runtimeflowidentity.Stored(source, ".", event.RunID(), event.RunID(), event.RunID(), ""),
+		OccurredAt:     time.Now().UTC(),
+	})
+	if err != nil || created || finish == nil {
+		t.Fatalf("fixture did not prepare the exact existing standing topology: created=%t finish=%t err=%v", created, finish != nil, err)
+	}
+	completionErr := errors.New("standing completion failed")
+	var wantErr error
+	err = release.Start(func() error {
+		running := rt.Manager.IsRunning()
+		recipients := rt.Bus.ResolveSubscribedRecipients(string(event.Type()))
+		if !running || !slices.Contains(recipients, route.Recipient.ID()) {
+			return fmt.Errorf("exact managed route was not started by startup: running=%t recipients=%v want=%s", running, recipients, route.Recipient.ID())
+		}
+		cutCtx, cancel := context.WithTimeout(externalRuntimeGenerationContext(t,
+			testLiveExecutionContext(worklifetime.WithOccurrence(ctx, rt.WorkOccurrence())), grant), 2*time.Second)
+		defer cancel()
+		proof, err := store.ProveHandoff(cutCtx, event.ID(), route)
+		if err != nil || proof.DeliveryID() != deliveryID {
+			return fmt.Errorf("read exact committed delivery handoff: %w", err)
+		}
+		if err := rt.Bus.AcceptCommittedDeliveryHandoffs([]runtimedelivery.DurableHandoffProof{proof}); err != nil {
+			return fmt.Errorf("transfer exact native handoff: %w", err)
+		}
+		returned := make(chan bool, 1)
+		if err := rt.Bus.SetDeliveryContinuationOwner(startupCutReturnOwner{rt.Bus.DeliveryContinuationOwner(), deliveryID, returned}); err != nil {
+			return err
+		}
+		result := rt.Bus.DispatchDeliveryContinuation(cutCtx, event, route)
+		if result.Disposition() != runtimedeliverycontinuation.DispatchTransferred {
+			return fmt.Errorf("cut did not dispatch exact waiting delivery: %v (%v)", result.Disposition(), result.Failure())
+		}
+		select {
+		case claimed := <-store.tokens:
+			snapshot, err := store.Snapshot(cutCtx, deliveryID)
+			if err != nil || !claimed.Valid() || claimed.Identity != route.AgentIdentity || snapshot.ClaimVersion == 0 || snapshot.StartedAt.IsZero() {
+				return fmt.Errorf("invalid early claim evidence: %+v, %+v, %v", claimed, snapshot, err)
+			}
+			return fmt.Errorf("managed loop acknowledged native claim %s before topology completion (generation %d)", deliveryID, claimed.Generation)
+		case live := <-returned:
+			if !live || cutCtx.Err() != nil || startCtx.Err() != nil || !rt.Manager.IsRunning() {
+				return fmt.Errorf("delivery returned outside the live held receiver")
+			}
+		case <-cutCtx.Done():
+			return fmt.Errorf("no exact queued carrier return at cut: %w", cutCtx.Err())
+		}
+		snapshot, err := store.Snapshot(cutCtx, deliveryID)
+		if err != nil || snapshot.Status != runtimedelivery.StatusPending || snapshot.ClaimVersion != 0 || !snapshot.StartedAt.IsZero() {
+			return fmt.Errorf("returned delivery was not pending and unstarted: %+v, %v", snapshot, err)
+		}
+		switch outcome {
+		case "failure":
+			wantErr = completionErr
+		case "cancelled":
+			cancelStart()
+			wantErr = context.Canceled
+		default:
+			return finish()
+		}
+		return wantErr
+	})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("startup result %v, want %v", err, wantErr)
+	}
+	if wantErr == nil {
+		waitForRecoveredNodeDelivery(t, ctx, store, event.ID(), route, 1)
+		if got := store.acquired.Load(); got != 1 {
+			t.Fatalf("acknowledged native claims = %d, want 1", got)
+		}
 	}
 }
 
