@@ -43,7 +43,7 @@ func (s *inputPromptAuthorizationCut) Snapshot(ctx context.Context, key string) 
 	return s.FileStore.Snapshot(ctx, key)
 }
 
-func proveObsoleteInputPromptAtOrdinaryStop(t *testing.T, backend servedparity.Backend) {
+func proveObsoleteInputPromptAtOrdinaryStop(t *testing.T, backend servedparity.Backend, stopRun bool) {
 	t.Helper()
 	h := prepareChannelAnchorPublicJourney(t, backend, "draft-stop-token", false, 0, nil)
 	cut := &inputPromptAuthorizationCut{entered: make(chan effects.Authority, 1), release: make(chan struct{})}
@@ -118,12 +118,21 @@ func proveObsoleteInputPromptAtOrdinaryStop(t *testing.T, backend servedparity.B
 		t.Fatalf("held prompt was not current before decision: %t %v", current, err)
 	}
 	_, providerSends := h.provider.Counts()
-	requireServedOKJSONRPC(t, h.rpcEndpoint(), "mailbox.decide", lifecycleDecisionParamsFromEndpoint(t, h.rpcEndpoint(), cardID, "approve"))
+	if stopRun {
+		requireServedOKJSONRPC(t, h.rpcEndpoint(), "run.pause", map[string]any{
+			"run_id": seed.RunID, "idempotency_key": "held-draft-run-pause",
+		})
+		requireServedOKJSONRPC(t, h.rpcEndpoint(), "run.stop", map[string]any{
+			"run_id": seed.RunID, "idempotency_key": "held-draft-run-stop",
+		})
+	} else {
+		requireServedOKJSONRPC(t, h.rpcEndpoint(), "mailbox.decide", lifecycleDecisionParamsFromEndpoint(t, h.rpcEndpoint(), cardID, "approve"))
+	}
 	if cancelled := requireDraftChange(t, ctx, cards, cardID, decisioncard.ChangeDraftCancelled); cancelled != draft {
-		t.Fatal("decision did not cancel the exact held draft")
+		t.Fatal("terminal transition did not cancel the exact held draft")
 	}
 	if current, err := selected.Effects().IsExternalEffectAuthorityCurrent(ctx, authority); err != nil || current {
-		t.Fatalf("decision did not obsolete the held prompt: %t %v", current, err)
+		t.Fatalf("terminal transition did not obsolete the held prompt: %t %v", current, err)
 	}
 	if _, active := mark(); !active {
 		t.Fatal("ordinary source retired before test requested stop")

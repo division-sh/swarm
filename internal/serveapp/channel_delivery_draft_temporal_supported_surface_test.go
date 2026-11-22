@@ -116,7 +116,10 @@ func TestChannelDraftTerminalRestartPublicJourney(t *testing.T) {
 			})
 		}
 		t.Run(string(backend)+"/obsolete_prompt_at_stop", func(t *testing.T) {
-			proveObsoleteInputPromptAtOrdinaryStop(t, backend)
+			proveObsoleteInputPromptAtOrdinaryStop(t, backend, false)
+		})
+		t.Run(string(backend)+"/obsolete_run_stopped_prompt_at_stop", func(t *testing.T) {
+			proveObsoleteInputPromptAtOrdinaryStop(t, backend, true)
 		})
 	}
 }
