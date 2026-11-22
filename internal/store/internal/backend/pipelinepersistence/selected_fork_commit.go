@@ -29,10 +29,14 @@ func (s *PipelinePostgresOwner) CommitSelectedForkEvent(ctx context.Context, req
 		return s.selectedFork.CommitSelectedForkTx(txctx, attempt, request)
 	})
 	result, acknowledged := outcome.Value()
+	return finishSelectedForkPostgresCommit(result, acknowledged, outcome.Err())
+}
+
+func finishSelectedForkPostgresCommit(result runtimebus.CommittedSelectedForkEvent, acknowledged bool, err error) (runtimebus.CommittedSelectedForkEvent, error) {
 	if !acknowledged {
-		return runtimebus.CommittedSelectedForkEvent{}, outcome.Err()
+		return runtimebus.CommittedSelectedForkEvent{}, err
 	}
-	return result, outcome.Err()
+	return result, err
 }
 
 func (s *PipelineSQLiteOwner) CommitSelectedForkEvent(ctx context.Context, request runtimebus.CommitSelectedForkEventRequest) (runtimebus.CommittedSelectedForkEvent, error) {

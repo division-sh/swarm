@@ -279,6 +279,17 @@ const runForkCommitUnconfirmedMessage = "The fork may or may not have been writt
 
 type RunForkUnconfirmedCause string
 
+// RunForkPublicationConflict preserves a native conflict without claiming that
+// any earlier work of the fork was rolled back.
+type RunForkPublicationConflict struct{ cause error }
+
+func (e *RunForkPublicationConflict) Error() string { return e.cause.Error() }
+func (e *RunForkPublicationConflict) Unwrap() error { return e.cause }
+
+func MarkRunForkPublicationConflict(cause error) error {
+	return &RunForkPublicationConflict{cause: cause}
+}
+
 const (
 	RunForkWriterConflict        RunForkUnconfirmedCause = "writer_conflict"
 	RunForkPredecessorRetirement RunForkUnconfirmedCause = "predecessor_retirement"

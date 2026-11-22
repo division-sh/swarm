@@ -29,6 +29,7 @@ var runForkTestBundleHash = runForkTestArtifact.BundleHash()
 
 func TestRunForkErrorKeepsCleanConflictSeparateFromJoinedAndUnconfirmedOutcomes(t *testing.T) {
 	clean := runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict, "run_fork_write_conflict", "run-fork", "write", nil, errors.New("sealed native rollback"))
+	publication := runtimefailures.MarkRunForkPublicationConflict(errors.New("sealed selected publication rollback"))
 	for _, tc := range []struct {
 		name      string
 		err       error
@@ -39,6 +40,8 @@ func TestRunForkErrorKeepsCleanConflictSeparateFromJoinedAndUnconfirmedOutcomes(
 	}{
 		{"clean_rollback", clean, runtimefailures.ClassLifecycleConflict, "run_fork_write_conflict", true, []string{"write was rolled back", "same request"}},
 		{"retirement_joined", errors.Join(clean, errors.New("dynamic flow runtime readiness retains predecessor retirement")), runtimefailures.ClassOutcomeUncertain, "run_fork_commit_unconfirmed", false, []string{"another writer changed the run", "previous runtime could not be safely retired"}},
+		{"publication_retirement_joined", errors.Join(publication, errors.New("dynamic flow runtime readiness retains predecessor retirement")), runtimefailures.ClassOutcomeUncertain, "run_fork_commit_unconfirmed", false, []string{"another writer changed the run", "previous runtime could not be safely retired"}},
+		{"publication_only", publication, runtimefailures.ClassInternalFailure, "unclassified_runtime_error", false, nil},
 		{"readback_joined", &runForkOutcomeReadbackFailure{execution: clean, readback: errors.New("read unavailable")}, runtimefailures.ClassOutcomeUncertain, "run_fork_commit_unconfirmed", false, []string{"another writer changed the run", "durable fork outcome could not be read"}},
 		{"unknown_readback", &runForkOutcomeReadbackFailure{readback: errors.New("read unavailable")}, runtimefailures.ClassOutcomeUncertain, "run_fork_commit_unconfirmed", false, []string{"may or may not have been written", "check the fork operation"}},
 	} {
