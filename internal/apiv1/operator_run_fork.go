@@ -550,6 +550,7 @@ func runForkAvailabilityDetails(availability runbundle.Availability) map[string]
 }
 
 func runForkError(sourceRunID, forkEventID string, err error) error {
+	const retirementMessage = "dynamic flow runtime readiness retains predecessor retirement"
 	if err == nil {
 		return nil
 	}
@@ -568,10 +569,21 @@ func runForkError(sourceRunID, forkEventID string, err error) error {
 		if onlyRunForkWriteConflict(err) {
 			return err
 		}
-		if strings.Contains(err.Error(), "dynamic flow runtime readiness retains predecessor retirement") {
+		if strings.Contains(err.Error(), retirementMessage) {
 			return runtimefailures.WrapRunForkUnconfirmed(runtimefailures.RunForkWriterConflict, runtimefailures.RunForkPredecessorRetirement, err)
 		}
 		return runtimefailures.Wrap(runtimefailures.ClassOutcomeUncertain, "run_fork_commit_unconfirmed", "run-fork", "confirm", nil, err)
+	}
+	var publicationConflict *runtimefailures.RunForkPublicationConflict
+	if errors.As(err, &publicationConflict) {
+		var retired bool
+		runtimefailures.OnlyBranches(err, func(branch error) bool {
+			retired = branch.Error() == retirementMessage
+			return !retired
+		})
+		if retired {
+			return runtimefailures.WrapRunForkUnconfirmed(runtimefailures.RunForkWriterConflict, runtimefailures.RunForkPredecessorRetirement, err)
+		}
 	}
 	var applicationErr *ApplicationError
 	if errors.As(err, &applicationErr) {
