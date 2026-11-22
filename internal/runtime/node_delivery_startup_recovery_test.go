@@ -186,33 +186,16 @@ func proveRuntimeStartupDeliveryOrder(t *testing.T, outcome string) {
 	}
 	for _, backend := range []struct {
 		name  string
-		setup func(*testing.T) (context.Context, *sql.DB, *sql.DB, startupRecoveryOrderStore)
+		setup func(*testing.T) startupRecoveryOrderStore
 	}{
-		{
-			name: "postgres",
-			setup: func(t *testing.T) (context.Context, *sql.DB, *sql.DB, startupRecoveryOrderStore) {
-				_, db, cleanup := testutil.StartPostgres(t)
-				t.Cleanup(cleanup)
-				selected := storetest.AdmitPostgresRuntimeStore(t, db)
-				ctx := startupRecoverySourceContext(persistedSource, templateInstanceDeliveryRunID)
-				ctx = runtimecorrelation.WithSourceArtifactFact(ctx, persistedSource)
-				ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
-				return ctx, db, db, selected
-			},
-		},
-		{
-			name: "sqlite",
-			setup: func(t *testing.T) (context.Context, *sql.DB, *sql.DB, startupRecoveryOrderStore) {
-				selected := storetest.StartSQLiteRuntimeStore(t)
-				ctx := startupRecoverySourceContext(persistedSource, templateInstanceDeliveryRunID)
-				ctx = runtimecorrelation.WithSourceArtifactFact(ctx, persistedSource)
-				ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
-				return ctx, nil, storetest.Database(selected), selected
-			},
-		},
+		{"postgres", func(t *testing.T) startupRecoveryOrderStore { return storetest.StartPostgresRuntimeStore(t) }},
+		{"sqlite", func(t *testing.T) startupRecoveryOrderStore { return storetest.StartSQLiteRuntimeStore(t) }},
 	} {
 		t.Run(backend.name, func(t *testing.T) {
-			ctx, _, _, selected := backend.setup(t)
+			selected := backend.setup(t)
+			ctx := startupRecoverySourceContext(persistedSource, templateInstanceDeliveryRunID)
+			ctx = runtimecorrelation.WithSourceArtifactFact(ctx, persistedSource)
+			ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 			prepared := prepareExternalRuntimeFixtureProcess(t, ctx, selected)
 			preparedCtx := externalRuntimeProcessContext(t, ctx, prepared)
 			ensureStartupRecoverySourceArtifact(t, preparedCtx, selected, bundle.SourceArtifact)
