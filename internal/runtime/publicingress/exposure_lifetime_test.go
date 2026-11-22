@@ -59,9 +59,7 @@ func TestExposureReportsListenerLossAndRefusesStaleProbe(t *testing.T) {
 			}
 			opts.HTTPClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 				if probes.Add(1) == 2 {
-					close(probing)
-					<-release
-					return testHTTPResponse(http.StatusNoContent, ""), nil
+					defer func() { close(probing); <-release }()
 				}
 				if mode == ModeExternalOrigin {
 					req = req.Clone(req.Context())

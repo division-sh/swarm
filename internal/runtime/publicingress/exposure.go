@@ -3,7 +3,9 @@ package publicingress
 import (
 	"cmp"
 	"context"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
@@ -32,6 +34,9 @@ const (
 	ModeManagedQuickTunnel = "managed_quick_tunnel"
 	ModeExternalOrigin     = "external_origin"
 	ModeNativeTLS          = "native_tls"
+	probeChallengeHeader   = "Swarm-Probe-Challenge"
+	probeProofHeader       = "Swarm-Probe-Proof"
+	probeChallengeBytes    = 24
 )
 
 var cloudflaredVersionPattern = regexp.MustCompile(`(?i)cloudflared version\s+([0-9]+)\.([0-9]+)\.([0-9]+)`) // exact CLI contract
@@ -85,6 +90,8 @@ type Controller struct {
 	delegateID    uint64
 	delegateDone  chan struct{}
 	process       Process
+	quickCommit   chan struct{}
+	quickLost     bool
 	cancel        context.CancelFunc
 	transportCtx  context.Context
 	stopTransport context.CancelFunc
@@ -93,6 +100,7 @@ type Controller struct {
 	done          chan struct{}
 	supervising   bool
 	nonce         string
+	probeKey      [32]byte
 	waitRetry     func(context.Context, time.Duration) error
 	updateCtx     context.Context
 	updateSeal    chan struct{}
@@ -153,6 +161,12 @@ func NewController(opts Options) (*Controller, error) {
 		return nil, fmt.Errorf("native public ingress requires its own TLS configuration")
 	}
 	controller := &Controller{opts: opts, done: make(chan struct{}), updateSeal: make(chan struct{}), waitRetry: waitPublicRouteRetry}
+	if _, err := rand.Read(controller.probeKey[:]); err != nil {
+		return nil, err
+	}
+	if opts.Mode == ModeManagedQuickTunnel {
+		controller.quickCommit = make(chan struct{}, 1)
+	}
 	if opts.Listener != nil {
 		controller.listener = opts.Listener
 	}
@@ -271,6 +285,12 @@ func (c *Controller) establish(ctx context.Context) (err error) {
 	publicOrigin := strings.TrimRight(strings.TrimSpace(c.opts.PublicOrigin), "/")
 	var process Process
 	succeeded, published := false, false
+	var releaseCommit func()
+	defer func() {
+		if releaseCommit != nil {
+			releaseCommit()
+		}
+	}()
 	defer func() {
 		if succeeded || process == nil {
 			return
@@ -287,9 +307,7 @@ func (c *Controller) establish(ctx context.Context) (err error) {
 		}
 		_ = process.Stop()
 		<-process.Done()
-		if c.opts.Readiness != nil {
-			c.opts.Readiness.RevokeExposure("public exposure generation did not converge")
-		}
+		c.revokeQuickExposure("public exposure generation did not converge")
 	}()
 	if c.opts.Mode == ModeManagedQuickTunnel {
 		launcher := c.opts.Launcher
@@ -317,8 +335,12 @@ func (c *Controller) establish(ctx context.Context) (err error) {
 	if err := c.probePublicRouteWithRetry(ctx, publicOrigin); err != nil {
 		return err
 	}
+	releaseCommit, err = c.beginQuickCommit(ctx)
+	if err != nil {
+		return err
+	}
 	generation := Generation{ID: uuid.NewString(), Mode: c.opts.Mode, PublicOrigin: publicOrigin, ListenAddress: c.listener.Addr().String(), CreatedAt: c.opts.Now().UTC()}
-	if err := c.publishListenerExposure(generation, generation.CreatedAt, true); err != nil {
+	if _, err := c.applyListenerProbe(generation, generation.CreatedAt, true, nil); err != nil {
 		return err
 	}
 	published = true
@@ -361,10 +383,8 @@ func (c *Controller) supervise(ctx context.Context) {
 			if ctx.Err() != nil {
 				return
 			}
+			c.revokeQuickExposure("managed tunnel stopped: " + errorText(cause))
 			log.Printf("public ingress degraded: managed tunnel stopped: %s; attempting replacement", errorText(cause))
-			if c.opts.Readiness != nil {
-				c.opts.Readiness.RevokeExposure("managed tunnel stopped: " + errorText(cause))
-			}
 			if !c.replaceManagedTunnel(ctx) {
 				return
 			}
@@ -402,18 +422,54 @@ func (c *Controller) replaceManagedTunnel(ctx context.Context) bool {
 	return true
 }
 
-func (c *Controller) renew(ctx context.Context) error {
+func (c *Controller) revokeQuickExposure(cause string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.quickLost = true
+	if c.opts.Readiness != nil {
+		c.opts.Readiness.RevokeExposure(cause)
+	}
+}
+
+// Only application and its selected callback join here; a blocked probe does not.
+func (c *Controller) beginQuickCommit(ctx context.Context) (func(), error) {
+	if c.quickCommit == nil {
+		return func() {}, nil
+	}
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case c.quickCommit <- struct{}{}:
+	}
+	if err := ctx.Err(); err != nil {
+		<-c.quickCommit
+		return nil, err
+	}
+	return func() { <-c.quickCommit }, nil
+}
+
+func (c *Controller) renew(ctx context.Context, register bool) (reachability, registration error) {
 	generation := c.Generation()
 	if generation.ID == "" {
-		return fmt.Errorf("public exposure generation is unavailable")
+		return fmt.Errorf("public exposure generation is unavailable"), nil
 	}
-	if err := c.probePublicRoute(ctx, generation.PublicOrigin); err != nil {
-		if c.opts.Readiness != nil {
-			c.opts.Readiness.RevokeExposure(err.Error())
-		}
-		return err
+	probeErr := c.probePublicRoute(ctx, generation.PublicOrigin)
+	release, err := c.beginQuickCommit(ctx)
+	if err != nil {
+		return err, nil
 	}
-	return c.publishListenerExposure(generation, c.opts.Now().UTC(), false)
+	defer release()
+	current, err := c.applyListenerProbe(generation, c.opts.Now().UTC(), false, probeErr)
+	if err != nil {
+		return err, nil
+	}
+	if !current {
+		return ctx.Err(), nil
+	}
+	if register && c.opts.OnGeneration != nil {
+		return nil, c.opts.OnGeneration(ctx, generation)
+	}
+	return nil, nil
 }
 
 func (c *Controller) Renew(ctx context.Context) error {
@@ -431,10 +487,7 @@ func (c *Controller) renewPass(ctx context.Context, register bool) (selected boo
 		return false, err, nil
 	}
 	defer func() { finish(cmp.Or(reachability, registration)) }()
-	reachability = c.renew(ctx)
-	if reachability == nil && register && c.opts.OnGeneration != nil {
-		registration = c.opts.OnGeneration(ctx, c.Generation())
-	}
+	reachability, registration = c.renew(ctx, register)
 	return true, reachability, registration
 }
 
@@ -567,7 +620,18 @@ func (c *Controller) serveProbe(w http.ResponseWriter, request *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/plain")
+	w.Header().Set("Cache-Control", "no-store")
+	challenge := request.Header.Get(probeChallengeHeader)
+	if len(challenge) == base64.RawURLEncoding.EncodedLen(probeChallengeBytes) {
+		w.Header().Set(probeProofHeader, c.probeProof(challenge))
+	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (c *Controller) probeProof(challenge string) string {
+	mac := hmac.New(sha256.New, c.probeKey[:])
+	_, _ = io.WriteString(mac, challenge)
+	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
 
 func (c *Controller) probePublicRoute(ctx context.Context, origin string) error {
@@ -577,6 +641,12 @@ func (c *Controller) probePublicRoute(ctx context.Context, origin string) error 
 	if err != nil {
 		return err
 	}
+	challenge, err := randomToken(probeChallengeBytes)
+	if err != nil {
+		return err
+	}
+	request.Header.Set(probeChallengeHeader, challenge)
+	request.Header.Set("Cache-Control", "no-cache")
 	var mu sync.Mutex
 	var addresses []string
 	outcomes := make(map[string]string)
@@ -601,14 +671,15 @@ func (c *Controller) probePublicRoute(ctx context.Context, origin string) error 
 		},
 	}
 	request = request.WithContext(httptrace.WithClientTrace(request.Context(), trace))
-	client := c.httpClient()
+	client := *c.httpClient()
+	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	if c.opts.Mode == ModeNativeTLS {
-		fresh, err := freshTLSProbeClient(client)
+		fresh, err := freshTLSProbeClient(&client)
 		if err != nil {
 			return err
 		}
 		defer fresh.CloseIdleConnections()
-		client = fresh
+		client = *fresh
 	}
 	response, err := client.Do(request)
 	if err != nil {
@@ -626,6 +697,9 @@ func (c *Controller) probePublicRoute(ctx context.Context, origin string) error 
 	_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 4096))
 	if response.StatusCode != http.StatusNoContent {
 		return fmt.Errorf("prove public webhook route: got HTTP %d, want 204", response.StatusCode)
+	}
+	if !hmac.Equal([]byte(response.Header.Get(probeProofHeader)), []byte(c.probeProof(challenge))) {
+		return errors.New("prove public webhook route")
 	}
 	return nil
 }
