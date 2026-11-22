@@ -456,6 +456,15 @@ func (c *Controller) renew(ctx context.Context, register bool) (reachability, re
 	probeErr := c.probePublicRoute(ctx, generation.PublicOrigin)
 	release, err := c.beginQuickCommit(ctx)
 	if err != nil {
+		c.mu.RLock()
+		obsolete := c.obsoleteQuickProbeLocked(generation)
+		c.mu.RUnlock()
+		if probeErr != nil && !obsolete {
+			if !errors.Is(probeErr, err) {
+				probeErr = errors.Join(err, probeErr)
+			}
+			return probeErr, nil
+		}
 		return err, nil
 	}
 	defer release()

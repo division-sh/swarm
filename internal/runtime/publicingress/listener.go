@@ -44,6 +44,10 @@ func (c *Controller) ListenerFailure() error {
 	return c.serveErr
 }
 
+func (c *Controller) obsoleteQuickProbeLocked(generation Generation) bool {
+	return c.quickCommit != nil && (c.quickLost || generation.ID != c.generation.ID)
+}
+
 func (c *Controller) applyListenerProbe(generation Generation, at time.Time, install bool, probeErr error) (bool, error) {
 	var authority string
 	if probeErr == nil && c.opts.Readiness != nil {
@@ -51,7 +55,7 @@ func (c *Controller) applyListenerProbe(generation Generation, at time.Time, ins
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if !install && c.quickCommit != nil && (c.quickLost || generation.ID != c.generation.ID) {
+	if !install && c.obsoleteQuickProbeLocked(generation) {
 		return false, c.serveErr
 	}
 	if probeErr != nil {
