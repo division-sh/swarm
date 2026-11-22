@@ -18,9 +18,9 @@ import (
 	"github.com/lib/pq"
 )
 
-func TestSelectedForkPublicationReturnPreservesNativeOrderingConflict(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+func VerifySelectedForkPublicationReturnPreservesNativeOrderingConflictForTest(t *testing.T, prepare StatementProcessFixtureForTest) {
+	location, db, _ := testutil.StartEmptyPostgres(t)
+	ctx, cancel := context.WithTimeout(prepare(t, location, true, statementRunSchemaRequest(t, false)), 10*time.Second)
 	defer cancel()
 	backend, err := postgresbackend.New(db)
 	if err != nil {
@@ -45,18 +45,18 @@ func TestSelectedForkPublicationReturnPreservesNativeOrderingConflict(t *testing
 		t.Fatal(err)
 	}
 	defer restore()
-	ack, nativeErr := postgresbackend.RunAuthorityTransactionOutcomeWithOptions(ctx, lease.Session(), &sql.TxOptions{Isolation: sql.LevelSerializable}, func(ctx context.Context, tx *sql.Tx) error {
-		story, err := authoractivity.Begin(ctx, tx, authoractivity.DialectPostgres)
+	ack, nativeErr := postgresbackend.RunAuthorityTransactionOutcomeWithOptions(ctx, lease.Session(), &sql.TxOptions{Isolation: sql.LevelSerializable}, func(txctx context.Context, tx *sql.Tx) error {
+		story, err := authoractivity.Begin(txctx, tx, authoractivity.DialectPostgres)
 		if err != nil {
 			return err
 		}
-		if _, _, err := story.PersistedOccurredAt(ctx, "selected-fork-ordering-proof"); err != nil {
+		if _, _, err := story.PersistedOccurredAt(txctx, "selected-fork-ordering-proof"); err != nil {
 			return err
 		}
 		if err := backend.RunTransaction(ctx, commitCompetingAuthorStory); err != nil {
 			return err
 		}
-		return story.Finalize(ctx)
+		return story.Finalize(txctx)
 	})
 	stats := probe.Snapshot().Retained
 	var conflict *pq.Error
