@@ -332,6 +332,7 @@ typed-process-local	interface-method	typed	internal/runtime/core/worklifetime/ev
 typed-process-local	interface-method	typed	internal/runtime/core/worklifetime/event_delivery.go	Occurrence	method:Wait	func(context.Context) error
 typed-process-local	interface-method	typed	internal/runtime/core/worklifetime/event_delivery.go	Occurrence	method:WaitForQuiescence	func(context.Context) error
 typed-process-local	interface-method	typed	internal/runtime/core/worklifetime/event_delivery.go	Occurrence	method:workOccurrence	func()
+typed-process-local	callback-type	typed	internal/runtime/core/worklifetime/stop_deadline.go	WithStopDeadline	result:#2	context.CancelFunc
 typed-process-local	callback-type	typed	internal/runtime/core/worklifetime/worklifetime.go	(*github.com/division-sh/swarm/internal/runtime/core/worklifetime.RuntimeOccurrence).BeginRunTransition	result:#1	func()
 typed-process-local	callback-type	typed	internal/runtime/core/worklifetime/worklifetime.go	(*github.com/division-sh/swarm/internal/runtime/core/worklifetime.gate).beginRunTransition	result:#1	func()
 typed-process-local	callback-type	typed	internal/runtime/core/worklifetime/worklifetime.go	Lease	field:cancel	context.CancelCauseFunc
