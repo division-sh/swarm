@@ -1,18 +1,23 @@
 package runtime
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"testing"
+	"testing/synctest"
+	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/tests/support/testutil"
 )
 
 func TestRegistrationHolderDiscoveryFailsClosedOnlyDuringRetainedStop(t *testing.T) {
+	t.Run("shared_expiry", testRetainedHolderJoinsAtControlledExpiry)
 	source, err := correlation.NewSourceArtifactFact(runtimeContextTestHashA)
 	if err != nil {
 		t.Fatal(err)
@@ -33,6 +38,77 @@ func TestRegistrationHolderDiscoveryFailsClosedOnlyDuringRetainedStop(t *testing
 	if rows, err := manager.activationAccountHolders(t.Context(), candidate, ref, true); len(rows) != 0 || !errors.Is(err, channelonboarding.ErrRevisionConflict) {
 		t.Fatalf("retained currentness skipped an unchecked live contender: rows=%v err=%v", rows, err)
 	}
+}
+
+func testRetainedHolderJoinsAtControlledExpiry(t *testing.T) {
+	def := capturedOrdinaryRuntimeContext(t, "holder.requested")
+	grant, err := def.Runtime.CurrentStartupGrant()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := grant.MarkProbesSettled(t.Context(), nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := grant.AdmitExecution(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	m, err := NewRuntimeContextManager(fakeRunBundleAvailability{rows: map[string]runbundle.Availability{"run": {
+		RunID: "run", BundleHash: def.BundleHash(), RootReference: def.RootAdmission.Reference(),
+		SourceArtifactPresent: true, RootAdmissionPresent: true,
+	}}}, def)
+	if err != nil {
+		t.Fatal(err)
+	}
+	synctest.Test(t, func(t *testing.T) {
+		ctx, expire := testutil.StopDeadline(time.Now().Add(time.Hour))
+		stop := m.PrepareInboundRuntimeStop(ctx, time.Hour)
+		entered, release := make(chan struct{}), make(chan struct{})
+		seen, read, cutoff := make(chan error, 1), make(chan error, 1), make(chan error, 1)
+		go func() {
+			_, _, _, err := m.acquireRun(context.Background(), "run", true, func(ctx context.Context, _ *Runtime, _ *BundleContext, _ runbundle.Availability) error {
+				close(entered)
+				select {
+				case <-ctx.Done():
+					seen <- ctx.Err()
+					<-release
+				case <-release:
+				}
+				return ctx.Err()
+			})
+			read <- err
+		}()
+		select {
+		case <-entered:
+		case err := <-read:
+			_ = m.CloseInboundRequests(context.Background())
+			_ = stop.Finish()
+			t.Fatalf("retained holder did not reach its rooted read: %v", err)
+		}
+		expire(context.DeadlineExceeded)
+		go func() { cutoff <- m.CloseInboundRequests(ctx) }()
+		synctest.Wait()
+		select {
+		case err := <-seen:
+			if err != context.DeadlineExceeded {
+				t.Errorf("held read observed %v, want stop expiry", err)
+			}
+		default:
+			t.Error("retained holder read did not observe the shared stop expiry")
+		}
+		select {
+		case err := <-cutoff:
+			t.Errorf("cutoff returned before held read released: %v", err)
+		default:
+		}
+		close(release)
+		if err := <-read; !errors.Is(err, context.DeadlineExceeded) {
+			t.Errorf("holder result did not retain expiry: %v", err)
+		}
+		if err := <-cutoff; !errors.Is(err, context.DeadlineExceeded) {
+			t.Errorf("cutoff did not join held read after expiry: %v", err)
+		}
+		_ = stop.Finish() // The reserved runtime must finish even on the RED control.
+	})
 }
 
 func TestStoredInboundCompletedCutoffRequiresPreparationAndJoin(t *testing.T) {
