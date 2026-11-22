@@ -254,6 +254,7 @@ func TestChannelWorkerDoesNotCreditFailedPass(t *testing.T) {
 func testChannelWorkerSupersededRenderDuringStop(t *testing.T) {
 	stale := failures.New(failures.ClassSupersededGeneration, "external_effect_authority_stale", "external-effects", "check_authority", nil)
 	refused := &effects.ChannelDeliveryRenderSuperseded{Cause: stale}
+	obsoleted := &effects.ChannelDeliveryInputPromptObsoleted{Cause: stale}
 	launchRefused := &registration.SettledChannelDeliveryLaunchRefusal{Cause: stale}
 	credentialNotCurrent := runtime.ChannelPublicationCredentialNotCurrent{}
 	credentialRefused := &ordinaryChannelCredentialRefusal{credentialNotCurrent}
@@ -265,6 +266,9 @@ func testChannelWorkerSupersededRenderDuringStop(t *testing.T) {
 	}{
 		{"exact_pre_authorize_refusal", refused, nil, false},
 		{"generic_stale", stale, stale, false},
+		{"exact_obsolete_prompt", obsoleted, nil, false},
+		{"final_obsolete_prompt", obsoleted, obsoleted, true},
+		{"compound_obsolete_prompt", errors.Join(obsoleted, storageErr), storageErr, false},
 		{"compound_failure", errors.Join(refused, storageErr), storageErr, false},
 		{"settled_launch_refusal", launchRefused, nil, false},
 		{"final_launch_refusal", launchRefused, launchRefused, true},
