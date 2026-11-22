@@ -9,6 +9,12 @@ type ChannelDeliveryRenderSuperseded struct{ Cause error }
 func (e *ChannelDeliveryRenderSuperseded) Error() string { return e.Cause.Error() }
 func (e *ChannelDeliveryRenderSuperseded) Unwrap() error { return e.Cause }
 
+// ChannelDeliveryInputPromptObsoleted marks an exact decided card and cancelled draft at authorization.
+type ChannelDeliveryInputPromptObsoleted struct{ Cause error }
+
+func (e *ChannelDeliveryInputPromptObsoleted) Error() string { return e.Cause.Error() }
+func (e *ChannelDeliveryInputPromptObsoleted) Unwrap() error { return e.Cause }
+
 // ChannelDeliveryLaunchRenderSuperseded is a recomputed hash mismatch at native launch.
 type ChannelDeliveryLaunchRenderSuperseded struct{ Cause error }
 

@@ -27,6 +27,7 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	runtimepublicingress "github.com/division-sh/swarm/internal/runtime/publicingress"
@@ -147,7 +148,7 @@ func observeGoldenCrashCut(ctx context.Context, raw string, out io.Writer) (retE
 
 // The test caller owns source selection and explicit execution posture. Retained
 // live-node recovery must not relabel existing work as mock-only execution.
-func runOwnedLifecycle(ctx context.Context, root, retainedRoot string, opts cliapp.ServeOptions, auth apiv1.AuthTokenResolution, posture executionposture.Posture, storedHash string) (int, error) {
+func runOwnedLifecycle(ctx context.Context, root, retainedRoot string, opts cliapp.ServeOptions, auth apiv1.AuthTokenResolution, posture executionposture.Posture, storedHash string, providerStore ...func(runtimecredentials.Store) runtimecredentials.Store) (int, error) {
 	if storedHash != "" && (opts.SourceRoot != "" || opts.Dev) {
 		return 1, errors.New("retained artifact proof requires one exact stored hash, no directory or dev scratch")
 	}
@@ -194,6 +195,12 @@ func runOwnedLifecycle(ctx context.Context, root, retainedRoot string, opts clia
 		return 1, err
 	}
 	swarmDir := cliapp.CLISwarmDirResolution{Path: filepath.Join(retainedRoot, ".swarm"), Source: "internal-retained-lifecycle"}
+	if len(providerStore) == 1 {
+		swarmDir, err = cliapp.ResolveServeContextRegistrationSwarmDir(invocationRootForTest(root), opts)
+		if err != nil {
+			return 1, err
+		}
+	}
 	local, err := cliapp.ResolveLocalRuntimeState(cliapp.LocalRuntimeStateOptions{
 		RepoRoot: root, ResolvedPaths: paths, SwarmDir: swarmDir, Config: cfg,
 		StoreMode: opts.StoreMode, StoreModeSet: opts.StoreModeSet, CreateDefaultDataSource: true, EnforceLegacySQLite: true,
@@ -212,6 +219,9 @@ func runOwnedLifecycle(ctx context.Context, root, retainedRoot string, opts clia
 	providerCredentials, err := cliapp.BuildProviderCredentialStore()
 	if err != nil {
 		return 1, err
+	}
+	if len(providerStore) == 1 {
+		providerCredentials = providerStore[0](providerCredentials)
 	}
 	managedCredentials, err := cliapp.BuildManagedCredentialStore()
 	if err != nil {
