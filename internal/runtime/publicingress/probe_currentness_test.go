@@ -204,3 +204,78 @@ func TestQuickTunnelRenewalCannotCrossReplacement(t *testing.T) {
 		})
 	}
 }
+
+func TestQuickTunnelCanceledCommitKeepsCurrentProbeError(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		independent := errors.New("current tunnel probe transport failure")
+		entered, release := make(chan struct{}), make(chan struct{})
+		resume := sync.OnceFunc(func() { close(release) })
+		defer resume()
+		ready := NewReadinessOwner(true)
+		var c *Controller
+		var calls atomic.Int32
+		var failed atomic.Bool
+		client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			switch r.URL.Path {
+			case "/ready":
+				return testHTTPResponse(http.StatusOK, ""), nil
+			case "/quicktunnel":
+				return testHTTPResponse(http.StatusOK, `{"hostname":"unit.trycloudflare.com"}`), nil
+			}
+			if calls.Load() != 0 {
+				failed.Store(true)
+				return nil, independent
+			}
+			w := httptest.NewRecorder()
+			c.servePublicRoute(w, r)
+			return w.Result(), nil
+		})}
+		var err error
+		c, err = NewController(Options{Mode: ModeManagedQuickTunnel, Handler: http.NotFoundHandler(),
+			Readiness: ready, HTTPClient: client, Launcher: &fakeManagedLauncher{},
+			OnGeneration: func(context.Context, Generation) error {
+				if calls.Add(1) == 1 {
+					close(entered)
+					<-release
+				}
+				return nil
+			}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		c.listener, c.nonce = reserveTestListener(t), "probe"
+		c.updateCtx, c.cancel = context.WithCancel(t.Context())
+		established, renewed, stopped := make(chan error, 1), make(chan error, 1), make(chan error, 1)
+		go func() { established <- c.establish(c.updateCtx) }()
+		<-entered
+		generation, before := ready.registration.captureExposure()
+		go func() {
+			selected, probeErr, regErr := c.RenewRegistrations(t.Context())
+			if !selected || regErr != nil {
+				t.Errorf("renewal did not remain a selected probe: %t, %v", selected, regErr)
+			}
+			renewed <- probeErr
+		}()
+		synctest.Wait()
+		if !failed.Load() || len(renewed) != 0 || generation == nil {
+			t.Fatal("failed current probe did not wait behind the admitted callback")
+		}
+		stopCtx, cancel := context.WithCancel(t.Context())
+		go func() { stopped <- c.Stop(stopCtx) }()
+		<-c.UpdateAdmissionClosed()
+		cancel()
+		if err := <-renewed; !errors.Is(err, context.Canceled) || !errors.Is(err, independent) {
+			t.Errorf("canceled renewal lost one of its failures: %v", err)
+		}
+		if !ready.registration.currentExposureRevision(before) || calls.Load() != 1 || len(stopped) != 0 {
+			t.Error("canceled renewal changed exposure, reconciled, or bypassed the selected callback join")
+		}
+		resume()
+		if err := <-established; err != nil {
+			t.Fatal(err)
+		}
+		if err := <-stopped; !errors.Is(err, context.Canceled) || !errors.Is(err, independent) {
+			t.Errorf("stop lost one of the renewal failures: %v", err)
+		}
+	})
+}
