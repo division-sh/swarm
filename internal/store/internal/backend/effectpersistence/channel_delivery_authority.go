@@ -56,7 +56,10 @@ func requireChannelDeliveryAuthorityTx(ctx context.Context, tx *sql.Tx, authorit
 	}
 	// Freeze locks the canonical source before eligibility is evaluated. A
 	// terminal status need not change the render bytes (for example a notice).
-	current, err := channelDeliveryAuthorityCurrent(ctx, tx, authority, postgres, true)
+	current, err := channelDeliveryAuthorityCurrent(ctx, tx, authority, postgres, true, authorize)
+	if err == channeldelivery.ErrInputPromptObsoleted {
+		return &runtimeeffects.ChannelDeliveryInputPromptObsoleted{Cause: invalidExternalAuthority(authority, "stale")}
+	}
 	if err != nil {
 		return err
 	}
@@ -66,13 +69,13 @@ func requireChannelDeliveryAuthorityTx(ctx context.Context, tx *sql.Tx, authorit
 	return nil
 }
 
-func channelDeliveryAuthorityCurrent(ctx context.Context, q schemaQueryer, authority runtimeeffects.Authority, postgres, lock bool) (bool, error) {
+func channelDeliveryAuthorityCurrent(ctx context.Context, q schemaQueryer, authority runtimeeffects.Authority, postgres, lock, authorize bool) (bool, error) {
 	if !authority.Valid() || authority.Kind != runtimeeffects.AuthorityChannelDelivery {
 		return false, nil
 	}
 	d := authority.ChannelDelivery
 	if d.Parent.Kind == channelnative.TransportDeploymentRegistration {
-		return deploymentChannelDeliveryCurrent(ctx, q, authority, postgres, lock)
+		return deploymentChannelDeliveryCurrent(ctx, q, authority, postgres, lock, authorize)
 	}
 	plan, found, err := channeldelivery.LoadPlan(ctx, q, d.DeliveryID, postgres)
 	if err != nil {
@@ -280,7 +283,7 @@ func channelResponseAuthorityCurrent(ctx context.Context, q schemaQueryer, autho
 	if err != nil {
 		return false, err
 	}
-	return channeldelivery.ResponseSourceCurrent(ctx, q, frozen, postgres, lock)
+	return channeldelivery.ResponseSourceCurrent(ctx, q, frozen, postgres, lock, false)
 }
 
 // Both source queries bind the same eighteen authority coordinates. Receipt

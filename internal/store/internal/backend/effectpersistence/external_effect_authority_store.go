@@ -60,7 +60,7 @@ func externalEffectAuthorityCurrentPostgres(ctx context.Context, q schemaQueryer
 		}
 		return channelConfirmationAuthorityCurrentPostgres(ctx, q, authority)
 	case runtimeeffects.AuthorityChannelDelivery:
-		return channelDeliveryAuthorityCurrent(ctx, q, authority, true, false)
+		return channelDeliveryAuthorityCurrent(ctx, q, authority, true, false, false)
 	case runtimeeffects.AuthorityChannelActionAck:
 		return channelActionAckAuthorityCurrent(ctx, q, authority, true, false)
 	case runtimeeffects.AuthorityChannelNativeSetting:
@@ -119,7 +119,7 @@ func externalEffectAuthorityCurrentSQLite(ctx context.Context, q schemaQueryer, 
 		}
 		return channelConfirmationAuthorityCurrentSQLite(ctx, q, authority)
 	case runtimeeffects.AuthorityChannelDelivery:
-		return channelDeliveryAuthorityCurrent(ctx, q, authority, false, false)
+		return channelDeliveryAuthorityCurrent(ctx, q, authority, false, false, false)
 	case runtimeeffects.AuthorityChannelActionAck:
 		return channelActionAckAuthorityCurrent(ctx, q, authority, false, false)
 	case runtimeeffects.AuthorityChannelNativeSetting:
