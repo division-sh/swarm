@@ -64,6 +64,10 @@ func TestQ10DataClockWriteTriggersBothStores(t *testing.T) {
 	pipelinepersistence.VerifyQ10DataClockWriteTriggersForTest(t, prepareStatementProcess)
 }
 
+func TestSelectedForkPublicationReturnPreservesNativeOrderingConflict(t *testing.T) {
+	pipelinepersistence.VerifySelectedForkPublicationReturnPreservesNativeOrderingConflictForTest(t, prepareStatementProcess)
+}
+
 func TestSQLiteEntityStateDiffRequiresExistingCanonicalRunBeforeMutation(t *testing.T) {
 	pipelinepersistence.VerifyMissingMutationRunForTest(t, false, prepareStatementProcess)
 }
