@@ -9,7 +9,9 @@ import (
 
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
+	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 )
 
 func (s *PipelinePostgresOwner) CommitSelectedForkEvent(ctx context.Context, request runtimebus.CommitSelectedForkEventRequest) (runtimebus.CommittedSelectedForkEvent, error) {
@@ -34,6 +36,9 @@ func (s *PipelinePostgresOwner) CommitSelectedForkEvent(ctx context.Context, req
 
 func finishSelectedForkPostgresCommit(result runtimebus.CommittedSelectedForkEvent, acknowledged bool, err error) (runtimebus.CommittedSelectedForkEvent, error) {
 	if !acknowledged {
+		if postgresbackend.IsRolledBackSerializationConflict(err) {
+			err = runtimefailures.MarkRunForkPublicationConflict(err)
+		}
 		return runtimebus.CommittedSelectedForkEvent{}, err
 	}
 	return result, err
