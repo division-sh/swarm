@@ -169,6 +169,14 @@ func (rt *Runtime) admitManagedExecution(ctx context.Context, authority runtimes
 	return result, nil
 }
 
+func (rt *Runtime) releaseManagerStartupClaims(ctx context.Context, source *StartupSource, claims runtimemanager.StartupClaimRelease) {
+	rt.lifecycleMu.Lock()
+	defer rt.lifecycleMu.Unlock()
+	if rt.startupGrant == source.grant && ctx.Err() == nil && !rt.shutdownAdmissionClosed() {
+		claims.Open()
+	}
+}
+
 func (rt *Runtime) recoverManagedExecution(ctx context.Context, replay bool) managedExecutionActivation {
 	result := managedExecutionActivation{}
 	if !replay {
