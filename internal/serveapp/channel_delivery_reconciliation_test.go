@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/division-sh/swarm/internal/apiv1"
@@ -17,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/registration"
+	"github.com/division-sh/swarm/tests/support/testutil"
 )
 
 type channelWorkerControlStore struct {
@@ -79,6 +81,7 @@ func channelWorkerControlDispatcher(store *channelWorkerControlStore) *serveChan
 }
 
 func TestChannelWorkerFinalOutputUsesOriginalDeadline(t *testing.T) {
+	t.Run("shared_expiry", testFinalOutputJoinsAtControlledExpiry)
 	process := worklifetime.NewProcess()
 	work, stop := context.WithCancel(t.Context())
 	defer stop()
@@ -108,6 +111,55 @@ func TestChannelWorkerFinalOutputUsesOriginalDeadline(t *testing.T) {
 	if err := w.finishOutput(ctx, true); !errors.Is(err, failure) || passes != 1 || process.ActiveCount() != 0 || work.Err() == nil {
 		t.Fatalf("final output did not join once: passes=%d active=%d work=%v error=%v", passes, process.ActiveCount(), work.Err(), err)
 	}
+}
+
+func testFinalOutputJoinsAtControlledExpiry(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		budget, expire := testutil.StopDeadline(time.Now().Add(time.Hour))
+		work, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		process := worklifetime.NewProcess()
+		ready, entered, release := make(chan struct{}), make(chan struct{}), make(chan struct{})
+		close(ready)
+		seen := make(chan error, 1)
+		failure := errors.New("independent final output failure")
+		w := &serveChannelDeliveryWorker{owner: process, workCtx: work, cancel: cancel, ready: ready}
+		w.dispatcher = channelWorkerControlDispatcher(&channelWorkerControlStore{delivery: func(selection context.Context) error {
+			lease, err := w.beginSend(selection)
+			if err != nil {
+				close(entered)
+				return err
+			}
+			close(entered)
+			select {
+			case <-lease.Context().Done():
+				seen <- lease.Context().Err()
+				<-release
+			case <-release:
+			}
+			return w.finishSend(selection, lease, failure, true)
+		}})
+		finished := make(chan error, 1)
+		go func() { finished <- w.finishOutput(budget, true) }()
+		<-entered
+		expire(context.DeadlineExceeded)
+		synctest.Wait()
+		select {
+		case err := <-seen:
+			if err != context.DeadlineExceeded {
+				t.Errorf("held send observed %v, want stop expiry", err)
+			}
+		default:
+			t.Error("held final send did not observe the shared stop expiry")
+		}
+		if process.ActiveCount() != 2 {
+			t.Error("final pass or send joined before settlement")
+		}
+		close(release)
+		if err := <-finished; !errors.Is(err, failure) || !errors.Is(err, context.DeadlineExceeded) || process.ActiveCount() != 0 {
+			t.Errorf("final pass lost expiry, independent failure or join: %v", err)
+		}
+	})
 }
 
 func TestChannelWorkerKeepsInPassHintAndJoinsExactProcess(t *testing.T) {
