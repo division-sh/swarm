@@ -33,11 +33,22 @@ func reserveTestListener(t *testing.T) *net.TCPListener {
 func TestPublicIngressListenerProvesNonceAndExposesOnlyWebhookRoutes(t *testing.T) {
 	listener := reserveTestListener(t)
 	var controller *Controller
+	var captured http.Header
+	replay := false
 	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		if replay {
+			response := testHTTPResponse(http.StatusNoContent, "")
+			response.Header = captured.Clone()
+			return response, nil
+		}
 		clone := request.Clone(request.Context())
 		clone.URL.Scheme = "http"
 		clone.URL.Host = controller.listener.Addr().String()
-		return http.DefaultTransport.RoundTrip(clone)
+		response, err := http.DefaultTransport.RoundTrip(clone)
+		if captured == nil && err == nil {
+			captured = response.Header.Clone()
+		}
+		return response, err
 	})}
 	var admitted atomic.Int64
 	var err error
@@ -94,6 +105,10 @@ func TestPublicIngressListenerProvesNonceAndExposesOnlyWebhookRoutes(t *testing.
 	response.Body.Close()
 	if response.StatusCode != http.StatusAccepted || admitted.Load() != 1 {
 		t.Fatalf("webhook status=%d admitted=%d, want 202/1", response.StatusCode, admitted.Load())
+	}
+	replay = true
+	if err := controller.Renew(ctx); err == nil {
+		t.Fatal("renewal accepted the previous probe response without reaching the listener")
 	}
 }
 
