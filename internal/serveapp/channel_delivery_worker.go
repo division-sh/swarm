@@ -592,7 +592,8 @@ func (w *serveChannelDeliveryWorker) finishSend(selectionCtx context.Context, le
 	_, renderSuperseded := result.(*effects.ChannelDeliveryRenderSuperseded)
 	_, credentialRefused := result.(*ordinaryChannelCredentialRefusal)
 	_, launchRefused := result.(*registration.SettledChannelDeliveryLaunchRefusal)
-	selectionRefused := result == errDeploymentReceiverNotCurrent || renderSuperseded || credentialRefused || !final && launchRefused
+	_, promptObsoleted := result.(*effects.ChannelDeliveryInputPromptObsoleted)
+	selectionRefused := result == errDeploymentReceiverNotCurrent || renderSuperseded || credentialRefused || !final && (launchRefused || promptObsoleted)
 	if selectionEnded && selectionRefused {
 		// These refusals occurred before provider I/O; return them to reconciliation.
 		logChannelDeliveryReconciliation(lease.Context(), result)

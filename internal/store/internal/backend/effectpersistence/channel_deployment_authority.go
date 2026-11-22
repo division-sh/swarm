@@ -14,7 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/channeldelivery"
 )
 
-func deploymentChannelDeliveryCurrent(ctx context.Context, q schemaQueryer, authority runtimeeffects.Authority, postgres, lock bool) (bool, error) {
+func deploymentChannelDeliveryCurrent(ctx context.Context, q schemaQueryer, authority runtimeeffects.Authority, postgres, lock, authorize bool) (bool, error) {
 	d := authority.ChannelDelivery
 	current, err := channeldelivery.DeploymentTransportCurrent(ctx, q, d.Parent, d.PrincipalID, d.InterfaceKey,
 		d.BindingRevision, d.ExternalAccountRef, d.ConversationRef, d.PlanGeneration.Diagnostic(), postgres)
@@ -97,7 +97,7 @@ func deploymentChannelDeliveryCurrent(ctx context.Context, q schemaQueryer, auth
 		if err != nil {
 			return false, err
 		}
-		return channeldelivery.ResponseSourceCurrent(ctx, q, frozen, postgres, lock)
+		return channeldelivery.ResponseSourceCurrent(ctx, q, frozen, postgres, lock, authorize && d.PreviousReceiptOperationID == "")
 	}
 	_, err = canonicaljson.Decode(raw)
 	return err == nil, err
