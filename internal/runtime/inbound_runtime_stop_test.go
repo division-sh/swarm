@@ -85,7 +85,6 @@ func testRetainedHolderJoinsAtControlledExpiry(t *testing.T) {
 			t.Fatalf("retained holder did not reach its rooted read: %v", err)
 		}
 		expire(context.DeadlineExceeded)
-		go func() { cutoff <- m.CloseInboundRequests(ctx) }()
 		synctest.Wait()
 		select {
 		case err := <-seen:
@@ -95,6 +94,8 @@ func testRetainedHolderJoinsAtControlledExpiry(t *testing.T) {
 		default:
 			t.Error("retained holder read did not observe the shared stop expiry")
 		}
+		go func() { cutoff <- m.CloseInboundRequests(ctx) }()
+		synctest.Wait()
 		select {
 		case err := <-cutoff:
 			t.Errorf("cutoff returned before held read released: %v", err)

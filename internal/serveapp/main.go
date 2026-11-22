@@ -976,6 +976,7 @@ type runtimeCompositionRequest struct {
 	Presenter            *serveLifecyclePresenter
 	NoticePresentation   *serveNoticePresentationSink
 	Cancel               context.CancelFunc
+	StopClock            serveStopClock
 	BootStartedAt        time.Time
 	RuntimeInstanceID    string
 	OnReady              func(context.Context, string, apiv1.EventPublicationOptions, *runtime.Runtime) error
@@ -1265,6 +1266,7 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 	supervisor.resetStartup = true
 	supervisor.resetContainerRuntime = workspace.NewDockerManager()
 	supervisor.shutdownOptions = runtime.ShutdownOptions{Grace: opts.ShutdownGrace}
+	supervisor.stopClock = req.StopClock
 	if coordinator := buildSelectedResetCoordinator(stores, processCapability, supervisor, runtimerunforkexecution.SourceArtifactSelectedContractSourceLoader{
 		RepoRoot: repo, Store: stores.SourceArtifactStore(), PlatformPackBases: platformPackBases,
 	}); coordinator != nil {

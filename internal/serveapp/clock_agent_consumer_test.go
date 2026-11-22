@@ -11,6 +11,7 @@ import (
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/agentframe"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 )
@@ -36,7 +37,8 @@ func TestOwnedMockClockLocalAgentConsumerBothStores(t *testing.T) {
 			}
 			configureHostWorkspaceProofLifecycle(t)
 			opts.WorkspaceBackend, opts.WorkspaceBackendSet = workspace.BackendHost, true
-			process := startOwnedMockLifecycleTestProcess(t, repoRootForTest(), ownedMockLifecycleRoot(t), *opts)
+			clock := newControlledServeStopClock()
+			process := startOwnedLifecycleWithStopClock(t, repoRootForTest(), ownedMockLifecycleRoot(t), *opts, executionposture.MockOnly, clock)
 			process.waitForReadyLine()
 			endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc"
 			runtime := servedTestProcessRuntime(t, process)
@@ -107,6 +109,22 @@ func TestOwnedMockClockLocalAgentConsumerBothStores(t *testing.T) {
 					t.Fatalf("clock agent has no exact execution output: observations=%+v diagnosis=%+v frame=%+v logs=%+v\n%s", observations, diagnosis, frame, logs, process.outputString())
 				}
 				time.Sleep(10 * time.Millisecond)
+			}
+			accepted, err := runtime.WorkOccurrence().Begin(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			process.cancel()
+			select {
+			case budget := <-clock.started:
+				if budget.ctx.Err() != nil || accepted.Context().Err() != nil {
+					t.Error("fresh-work closure canceled the accepted lease before grace ended")
+				}
+			case <-time.After(serveRuntimeStopTimeout):
+				t.Error("served stop did not reserve the controlled budget")
+			}
+			if err := accepted.Done(); err != nil {
+				t.Error(err)
 			}
 			if code := process.stop(); code != 0 {
 				t.Fatalf("local agent clock shutdown=%d\n%s", code, process.outputString())

@@ -188,8 +188,7 @@ func (s *processLifecycleSupervisor) serveMCP(w http.ResponseWriter, r *http.Req
 	use, _, err := s.runtimeContexts.AcquireBundleHash(r.Context(), s.currentSourceArtifactFact.BundleHash())
 	if owner := s.currentRT.WorkOccurrence(); owner != nil && s.stopping && errors.Is(err, worklifetime.ErrAdmissionFenced) {
 		if s.inboundStopCtx != nil {
-			deadline, _ := s.inboundStopCtx.Deadline()
-			ctx, cancel := context.WithDeadline(r.Context(), deadline)
+			ctx, cancel := worklifetime.WithStopDeadline(r.Context(), s.inboundStopCtx)
 			defer cancel()
 			r = r.WithContext(ctx)
 		}

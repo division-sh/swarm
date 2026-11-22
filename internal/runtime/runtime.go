@@ -2390,10 +2390,10 @@ func (rt *Runtime) stopWithGraceLocked(grace time.Duration) error {
 	}
 	drainCtx, cancelDrain := context.WithTimeout(context.Background(), grace)
 	defer cancelDrain()
-	return rt.finishStopLocked(drainCtx, rt.drainStopLocked(drainCtx, grace))
+	return rt.finishStopLocked(drainCtx, rt.drainStopLocked(drainCtx, grace, false))
 }
 
-func (rt *Runtime) drainStopLocked(drainCtx context.Context, grace time.Duration) error {
+func (rt *Runtime) drainStopLocked(drainCtx context.Context, grace time.Duration, reserved bool) error {
 	rt.shutdownGate.Close()
 	if rt.workOccurrence != nil {
 		_ = rt.workOccurrence.Fence()
@@ -2408,12 +2408,17 @@ func (rt *Runtime) drainStopLocked(drainCtx context.Context, grace time.Duration
 	shutdownErr = errors.Join(shutdownErr, drainErr)
 	var dependencyErr error
 	if rt.Manager != nil {
-		deadline, _ := drainCtx.Deadline()
+		deadline, bounded := drainCtx.Deadline()
 		remaining := time.Until(deadline)
 		if remaining <= 0 {
 			remaining = time.Nanosecond
 		}
-		dependencyErr = rt.Manager.ShutdownWithOptions(runtimemanager.ShutdownOptions{Grace: remaining})
+		if reserved && bounded {
+			// Remaining is a diagnostic here; the hosted stop owns the expiry.
+			dependencyErr = rt.Manager.ShutdownWithDrainContext(drainCtx, remaining)
+		} else {
+			dependencyErr = rt.Manager.ShutdownWithOptions(runtimemanager.ShutdownOptions{Grace: remaining})
+		}
 		if dependencyErr != nil {
 			shutdownErr = errors.Join(shutdownErr, fmt.Errorf("agent manager shutdown: %w", dependencyErr))
 		}

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/division-sh/swarm/internal/apiv1"
@@ -27,8 +28,10 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest"
+	"github.com/division-sh/swarm/internal/runtime/mcp"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/tests/support/runtime/effects/effecttest"
+	"github.com/division-sh/swarm/tests/support/testutil"
 	"github.com/google/uuid"
 )
 
@@ -496,10 +499,58 @@ func assertAcceptedMCPTransportDuringDrain(t *testing.T, ctx context.Context, su
 	if response := request(""); response.Code != http.StatusServiceUnavailable {
 		t.Fatalf("fresh unregistered request escaped outer admission: %d", response.Code)
 	}
+	assertAcceptedMCPSharedExpiry(t, supervisor, rt, auth, token)
 	rt.MCPTurns.UnregisterTurnContext(token)
 	if response := request(token); response.Code != http.StatusServiceUnavailable {
 		t.Fatalf("retired token escaped outer admission: %d", response.Code)
 	}
+}
+
+func assertAcceptedMCPSharedExpiry(t *testing.T, s *processLifecycleSupervisor, rt *runtime.Runtime, auth, token string) {
+	t.Helper()
+	synctest.Test(t, func(t *testing.T) {
+		budget, expire := testutil.StopDeadline(time.Now().Add(time.Hour))
+		entered, release, done := make(chan context.Context, 1), make(chan struct{}), make(chan struct{})
+		gateway := mcp.NewGateway(nil, auth, mcp.GatewayHooks{
+			ResolveTurnContext: rt.MCPTurns.ResolveTurnContext,
+			WithActor: func(ctx context.Context, _ actors.AgentConfig) context.Context {
+				entered <- ctx
+				<-release
+				return ctx
+			},
+		})
+		s.mu.Lock()
+		priorGateway, priorBudget := rt.ToolGateway, s.inboundStopCtx
+		rt.ToolGateway, s.inboundStopCtx = gateway, budget
+		s.mu.Unlock()
+		defer func() {
+			s.mu.Lock()
+			rt.ToolGateway, s.inboundStopCtx = priorGateway, priorBudget
+			s.mu.Unlock()
+		}()
+		active := rt.WorkOccurrence().ActiveCount()
+		r := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`))
+		r.Header.Set("Authorization", "Bearer "+auth)
+		r.Header.Set("X-SWARM-Context-Token", token)
+		response := httptest.NewRecorder()
+		go func() { s.serveMCP(response, r); close(done) }()
+		var owned context.Context
+		select {
+		case owned = <-entered:
+		case <-done:
+			t.Fatalf("registered MCP request did not reach the owned handler: %d", response.Code)
+		}
+		expire(context.DeadlineExceeded)
+		synctest.Wait()
+		if owned.Err() == nil || rt.WorkOccurrence().ActiveCount() != active+1 {
+			t.Errorf("stop expiry did not cancel the held accepted request without settling it: %v", owned.Err())
+		}
+		close(release)
+		<-done
+		if rt.WorkOccurrence().ActiveCount() != active {
+			t.Error("accepted MCP transport did not settle its retained lease")
+		}
+	})
 }
 
 func assertRegisteredStartupAbort(t *testing.T, ctx context.Context, cancel context.CancelFunc, release func() error, candidates []serveRuntimeBundleContext, manager *runtime.RuntimeContextManager, active bool) {

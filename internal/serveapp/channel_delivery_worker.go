@@ -645,11 +645,11 @@ func (w *serveChannelDeliveryWorker) finishOutput(ctx context.Context, outputSaf
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	deadline, bounded := ctx.Deadline()
+	_, bounded := ctx.Deadline()
 	if !bounded {
 		return fmt.Errorf("final channel output pass requires the original shutdown deadline")
 	}
-	outputCtx, cancel := context.WithDeadline(w.workCtx, deadline)
+	outputCtx, cancel := worklifetime.WithStopDeadline(w.workCtx, ctx)
 	defer cancel()
 	w.workCtx = outputCtx
 	lease, err := w.owner.Begin(outputCtx)

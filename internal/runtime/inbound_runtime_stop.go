@@ -117,7 +117,7 @@ func (s *InboundRuntimeStop) Drain() bool {
 		s.outputSafe = s.result == nil && s.intakeVeto == nil
 		for _, held := range s.entries {
 			if !held.completed && held.admissionErr == nil {
-				held.result = held.runtime.drainStopLocked(s.ctx, s.grace)
+				held.result = held.runtime.drainStopLocked(s.ctx, s.grace, true)
 			}
 			s.outputSafe = s.outputSafe && held.admissionErr == nil && held.result == nil
 		}

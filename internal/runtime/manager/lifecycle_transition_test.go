@@ -8,12 +8,14 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/tests/support/testutil"
 )
 
 func TestLifecycleConfigRevisionUsesCanonicalConfigFacts(t *testing.T) {
@@ -53,6 +55,65 @@ type lifecycleTransitionTrackingBus struct {
 	shutdownErr   error
 	resetStarted  chan struct{}
 	resetRelease  <-chan struct{}
+}
+
+type controlledShutdownJoin struct {
+	entered chan<- context.Context
+	release <-chan struct{}
+}
+
+func (j controlledShutdownJoin) JoinManagerShutdownDependencies(ctx context.Context) error {
+	j.entered <- ctx
+	<-j.release
+	return ctx.Err()
+}
+
+func TestLifecycleShutdownUsesStopReservation(t *testing.T) {
+	for _, existing := range []bool{false, true} {
+		t.Run(map[bool]string{false: "elected_transition", true: "caller_only"}[existing], func(t *testing.T) {
+			entered, release := make(chan context.Context, 1), make(chan struct{})
+			bus := newLifecycleTransitionEventBus(t)
+			am := newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{ShutdownDependencies: controlledShutdownJoin{entered, release}})
+			synctest.Test(t, func(t *testing.T) {
+				if _, started, err := am.lifecycle.beginRun(context.Background(), AgentRunModeStandard, am.workOwner); err != nil || !started {
+					t.Fatalf("reserve exact manager run: started=%t err=%v", started, err)
+				}
+				am.lifecycle.watcherExpected = false // Exercise the existing unwatched executor.
+				budget, expire := testutil.StopDeadline(time.Now().Add(time.Hour))
+				var original *runtimeLifecycleTransition
+				if existing {
+					original = am.lifecycle.prepareShutdownTransitionWithGrace(true, time.Hour)
+				}
+				result := make(chan error, 1)
+				go func() { result <- am.ShutdownWithDrainContext(budget, time.Hour) }()
+				var dependency context.Context
+				select {
+				case dependency = <-entered:
+				case err := <-result:
+					t.Fatalf("manager did not reach its real dependency join: %v", err)
+				}
+				expire(context.DeadlineExceeded)
+				synctest.Wait()
+				if existing {
+					if original.drainCtx != dependency || dependency.Err() != nil {
+						t.Error("hosted reporting expiry replaced or expired the existing transition")
+					}
+				} else if dependency.Err() != context.DeadlineExceeded {
+					t.Errorf("elected transition did not observe shared expiry: %v", dependency.Err())
+				}
+				select {
+				case err := <-result:
+					t.Errorf("shutdown returned before dependency join: %v", err)
+				default:
+				}
+				close(release)
+				err := <-result
+				if err == nil || !strings.Contains(err.Error(), "shutdown drain timed out") || errors.Is(err, context.DeadlineExceeded) == existing {
+					t.Errorf("hosted caller lost reporting expiry or shared result: existing=%t err=%v", existing, err)
+				}
+			})
+		})
+	}
 }
 
 func (b *lifecycleTransitionTrackingBus) JoinManagerShutdownDependencies(context.Context) error {
