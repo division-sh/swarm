@@ -380,6 +380,7 @@ type agentLifecycleCoordinator struct {
 	phase               runtimeLifecyclePhase
 	runMode             AgentRunMode
 	runCtx              context.Context
+	startupClaimsHeld   bool
 	baseContext         context.Context
 	cancelRun           context.CancelFunc
 	runParentContext    context.Context
@@ -1132,6 +1133,10 @@ func (c *agentLifecycleCoordinator) registrationWithinShutdownGrace(ctx context.
 }
 
 func (c *agentLifecycleCoordinator) beginRun(parent context.Context, mode AgentRunMode, owner worklifetime.Occurrence) (context.Context, bool, error) {
+	return c.beginRunWithClaimHold(parent, mode, owner, false)
+}
+
+func (c *agentLifecycleCoordinator) beginRunWithClaimHold(parent context.Context, mode AgentRunMode, owner worklifetime.Occurrence, holdClaims bool) (context.Context, bool, error) {
 	c.sourceSetPublishMu.RLock()
 	defer c.sourceSetPublishMu.RUnlock()
 	c.executionPublishMu.Lock()
@@ -1153,6 +1158,7 @@ func (c *agentLifecycleCoordinator) beginRun(parent context.Context, mode AgentR
 	root := runtimebus.WithRuntimeEpoch(parent, runtimebus.CurrentRuntimeEpoch())
 	runCtx, cancelRun := context.WithCancel(root)
 	c.runCtx, c.cancelRun = runCtx, cancelRun
+	c.startupClaimsHeld = holdClaims
 	c.phase = runtimeLifecycleRunning
 	c.runMode = mode
 	c.transition = nil
@@ -1162,6 +1168,20 @@ func (c *agentLifecycleCoordinator) beginRun(parent context.Context, mode AgentR
 	c.shutdownRequested = make(chan struct{})
 	c.shutdownRequestSent = false
 	return c.runCtx, true, nil
+}
+
+func (c *agentLifecycleCoordinator) releaseStartupClaims(runCtx context.Context) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.runCtx == runCtx && c.phase == runtimeLifecycleRunning && runCtx.Err() == nil {
+		c.startupClaimsHeld = false
+	}
+}
+
+func (c *agentLifecycleCoordinator) holdsStartupClaims() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.startupClaimsHeld
 }
 
 func (c *agentLifecycleCoordinator) shutdownRequestSignal() <-chan struct{} {

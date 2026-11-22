@@ -930,38 +930,65 @@ func (am *AgentManager) resolveAgentDirectiveRunTarget(ctx context.Context, iden
 }
 
 func (am *AgentManager) Run(ctx context.Context) error {
+	_, err := am.run(ctx, false)
+	return err
+}
+
+// StartupClaimRelease releases claims only for the manager run it started.
+type StartupClaimRelease struct {
+	lifecycle *agentLifecycleCoordinator
+	runCtx    context.Context
+}
+
+func (r StartupClaimRelease) Open() {
+	if r.lifecycle != nil {
+		r.lifecycle.releaseStartupClaims(r.runCtx)
+	}
+}
+
+// RunHoldingStartupClaims publishes the managed loops needed to complete the
+// prepared topology, without letting them claim deliveries yet.
+func (am *AgentManager) RunHoldingStartupClaims(ctx context.Context) (StartupClaimRelease, error) {
+	runCtx, err := am.run(ctx, true)
+	if err != nil {
+		return StartupClaimRelease{}, err
+	}
+	return StartupClaimRelease{lifecycle: am.lifecycle, runCtx: runCtx}, nil
+}
+
+func (am *AgentManager) run(ctx context.Context, holdStartupClaims bool) (context.Context, error) {
 	if _, err := managedexecution.Require(ctx); err != nil {
-		return runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict, "managed_execution_admission_missing", "agent-manager", "start_loops", nil, err)
+		return nil, runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict, "managed_execution_admission_missing", "agent-manager", "start_loops", nil, err)
 	}
 	if am.shutdownAdmissionClosedLocked() {
-		return errRuntimeShuttingDown
+		return nil, errRuntimeShuttingDown
 	}
 	if am.workOwner == nil {
-		return errors.New("agent manager requires a runtime work occurrence")
+		return nil, errors.New("agent manager requires a runtime work occurrence")
 	}
-	runCtx, started, err := am.lifecycle.beginRun(ctx, AgentRunModeStandard, am.workOwner)
+	runCtx, started, err := am.lifecycle.beginRunWithClaimHold(ctx, AgentRunModeStandard, am.workOwner, holdStartupClaims)
 	if err != nil {
-		return fmt.Errorf("admit manager run occurrence: %w", err)
+		return nil, fmt.Errorf("admit manager run occurrence: %w", err)
 	}
 	if !started {
-		return fmt.Errorf("agent manager is already running")
+		return nil, fmt.Errorf("agent manager is already running")
 	}
 	am.runMu.Lock()
 	am.authBreakerTripped = false
 	am.runMu.Unlock()
 	if err := am.startShutdownWatcher(runCtx, "manager shutdown watcher"); err != nil {
-		return errors.Join(err, am.lifecycle.abortRunStart(err))
+		return nil, errors.Join(err, am.lifecycle.abortRunStart(err))
 	}
 
 	for _, identity := range am.lifecycle.executionIdentities() {
 		if _, err := am.replaceExecutionIdentityConfigWithTopology(runCtx, identity, "start", "", nil, am.semanticSource, nil, nil); err != nil {
 			transition := am.lifecycle.requestShutdownTransition()
 			grace, _ := ResolveShutdownGrace(DefaultShutdownOptions().Grace)
-			return errors.Join(err, waitForRuntimeLifecycleTransition(transition, grace, "failed agent start shutdown drain"))
+			return nil, errors.Join(err, waitForRuntimeLifecycleTransition(transition, grace, "failed agent start shutdown drain"))
 		}
 	}
 
-	return am.startReadinessReconciliation(runCtx)
+	return runCtx, am.startReadinessReconciliation(runCtx)
 }
 
 func (am *AgentManager) startReadinessReconciliation(runCtx context.Context) error {
@@ -1896,6 +1923,9 @@ func (am *AgentManager) launchExecutionLoop(parent context.Context, execution *a
 							}()
 							if am.shutdownAdmissionClosed() {
 								return true
+							}
+							if am.lifecycle.holdsStartupClaims() {
+								return false // The deferred completion returns the unclaimed carrier.
 							}
 							eventWork, err := am.lifecycle.beginDeliveryWork(executionLease.Context, eventWorkOwner)
 							if err != nil {

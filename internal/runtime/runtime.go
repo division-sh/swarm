@@ -2030,7 +2030,8 @@ func (rt *Runtime) prepareStartLocked(ctx context.Context, checked *StartupSourc
 				rt.emitBootProgress(16, "manager_event_loop_start", "FAILED", err.Error())
 				return fmt.Errorf("admit prepared dynamic flow agents before manager run: %w", err)
 			}
-			if err := rt.Manager.Run(startCtx); err != nil {
+			claims, err := rt.Manager.RunHoldingStartupClaims(startCtx)
+			if err != nil {
 				rt.emitBootProgress(16, "manager_event_loop_start", "FAILED", err.Error())
 				return fmt.Errorf("start managed execution loops: %w", err)
 			}
@@ -2045,6 +2046,7 @@ func (rt *Runtime) prepareStartLocked(ctx context.Context, checked *StartupSourc
 				rt.emitBootProgress(16, "manager_event_loop_start", "FAILED", err.Error())
 				return fmt.Errorf("complete source-scoped dynamic topology: %w", err)
 			}
+			rt.releaseManagerStartupClaims(startCtx, checked, claims)
 			if replayAllowed {
 				startupRecoveryDecision.ManagerRecoveryAttempted = true
 				if _, err := rt.Manager.HydrateForStartup(startCtx); err != nil {
