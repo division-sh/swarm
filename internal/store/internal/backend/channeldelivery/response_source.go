@@ -12,7 +12,7 @@ import (
 	"github.com/google/uuid"
 )
 
-var ErrInputPromptObsoleted = errors.New("exact input prompt was obsoleted by its card decision")
+var ErrInputPromptObsoleted = errors.New("exact input prompt was obsoleted by its terminal card")
 
 // ResponseSourceCurrent admits a response from one settled responsibility.
 // A reply transfer retains text evidence, not a second response authority.
@@ -101,7 +101,12 @@ func requireObsoleteInputPromptEvidence(ctx context.Context, q intentQueryer, fr
 		JOIN channel_delivery_plans parent ON parent.delivery_id=receipt.delivery_id
 		WHERE draft.input_draft_id=$1 AND draft.card_id=$2 AND draft.principal_id=$3
 		AND card.card_content_hash=$4 AND draft.delivery_receipt_id=$5
-		AND draft.status='cancelled' AND card.status='decided' AND receipt.state='sent'
+	AND draft.status='cancelled' AND receipt.state='sent'
+	AND (card.status='decided' OR (
+		card.status='superseded' AND card.superseded_reason='run_cancelled' AND run.status='cancelled'
+		AND EXISTS (SELECT 1 FROM run_control_state control
+			WHERE control.run_id=run.run_id AND control.control_status='stopped' AND control.stopped_at IS NOT NULL)
+	))
 		AND parent.source_kind='card' AND parent.source_id=card.card_id
 		AND CAST(parent.principal_id AS TEXT)=draft.principal_id AND parent.interface_key=$6
 		AND parent.delivery_epoch=$7 AND parent.external_account=$8 AND parent.conversation_reference=$9
