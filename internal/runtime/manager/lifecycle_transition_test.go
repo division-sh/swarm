@@ -71,10 +71,11 @@ func (j controlledShutdownJoin) JoinManagerShutdownDependencies(ctx context.Cont
 func TestLifecycleShutdownUsesStopReservation(t *testing.T) {
 	for _, existing := range []bool{false, true} {
 		t.Run(map[bool]string{false: "elected_transition", true: "caller_only"}[existing], func(t *testing.T) {
-			entered, release := make(chan context.Context, 1), make(chan struct{})
 			bus := newLifecycleTransitionEventBus(t)
-			am := newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{ShutdownDependencies: controlledShutdownJoin{entered, release}})
+			am := newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{})
 			synctest.Test(t, func(t *testing.T) {
+				entered, release := make(chan context.Context, 1), make(chan struct{})
+				am.lifecycle.shutdownJoin = controlledShutdownJoin{entered, release}
 				if _, started, err := am.lifecycle.beginRun(context.Background(), AgentRunModeStandard, am.workOwner); err != nil || !started {
 					t.Fatalf("reserve exact manager run: started=%t err=%v", started, err)
 				}
