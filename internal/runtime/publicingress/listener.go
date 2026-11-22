@@ -44,18 +44,28 @@ func (c *Controller) ListenerFailure() error {
 	return c.serveErr
 }
 
-func (c *Controller) publishListenerExposure(generation Generation, at time.Time, install bool) error {
+func (c *Controller) applyListenerProbe(generation Generation, at time.Time, install bool, probeErr error) (bool, error) {
 	var authority string
-	if c.opts.Readiness != nil {
+	if probeErr == nil && c.opts.Readiness != nil {
 		authority = c.startupAuthority()
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if !install && c.quickCommit != nil && (c.quickLost || generation.ID != c.generation.ID) {
+		return false, c.serveErr
+	}
+	if probeErr != nil {
+		if c.opts.Readiness != nil {
+			c.opts.Readiness.RevokeExposure(probeErr.Error())
+		}
+		return false, probeErr
+	}
 	if c.serveErr != nil {
-		return c.serveErr
+		return false, c.serveErr
 	}
 	if install {
 		c.generation = generation
+		c.quickLost = false
 	}
 	if c.opts.Readiness != nil {
 		c.opts.Readiness.SetExposure(ExposureEvidence{
@@ -63,7 +73,7 @@ func (c *Controller) publishListenerExposure(generation Generation, at time.Time
 			ListenAddress: generation.ListenAddress, StartupAuthorityID: authority, ObservedAt: at, ExpiresAt: at.Add(EvidenceTTL),
 		})
 	}
-	return nil
+	return true, nil
 }
 
 func (c *Controller) admitDelegate(parent context.Context) (context.Context, func()) {

@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"net/http/httptrace"
 	"strings"
 	"sync"
@@ -256,6 +257,8 @@ func TestManagedQuickTunnelRetriesPublicRouteWhileHostnamePropagates(t *testing.
 		t.Run(mode, func(t *testing.T) {
 			launcher := &fakeManagedLauncher{}
 			var routeAttempts atomic.Int64
+			var controller *Controller
+			var err error
 			client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
 				switch request.URL.Path {
 				case "/ready":
@@ -266,14 +269,16 @@ func TestManagedQuickTunnelRetriesPublicRouteWhileHostnamePropagates(t *testing.
 					if routeAttempts.Add(1) < 3 {
 						return nil, &net.DNSError{Err: "no such host", Name: "unit.trycloudflare.com", IsNotFound: true}
 					}
-					return testHTTPResponse(http.StatusNoContent, ""), nil
+					response := httptest.NewRecorder()
+					controller.servePublicRoute(response, request)
+					return response.Result(), nil
 				}
 			})}
 			opts := Options{Mode: mode, Handler: http.NotFoundHandler(), HTTPClient: client, Launcher: launcher}
 			if mode == ModeExternalOrigin {
 				opts.PublicOrigin, opts.ListenAddress = "https://hooks.example.test", "127.0.0.1:8443"
 			}
-			controller, err := NewController(opts)
+			controller, err = NewController(opts)
 			if err != nil {
 				t.Fatal(err)
 			}
