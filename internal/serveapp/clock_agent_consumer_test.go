@@ -8,6 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/operatorread"
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/agentframe"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/workspace"
@@ -30,6 +31,9 @@ func TestOwnedMockClockLocalAgentConsumerBothStores(t *testing.T) {
 				writeWorkflowValidationFixtureFile(t, filepath.Join(root, path), body)
 			}
 			opts, _ := clockDeploymentHarness(t, backend, root)
+			if backend == "postgres" {
+				opts.ShutdownGrace = runtimepkg.DefaultShutdownGrace
+			}
 			configureHostWorkspaceProofLifecycle(t)
 			opts.WorkspaceBackend, opts.WorkspaceBackendSet = workspace.BackendHost, true
 			process := startOwnedMockLifecycleTestProcess(t, repoRootForTest(), ownedMockLifecycleRoot(t), *opts)
