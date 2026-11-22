@@ -1093,6 +1093,7 @@ typed-process-local	interface-method	typed	internal/runtime/pipelineobligation/p
 typed-process-local	interface-method	typed	internal/runtime/pipelineobligation/publication_group.go	PublicationGroup	method:ValidateCommitted	func(context.Context, []github.com/division-sh/swarm/internal/runtime/pipelineobligation.Claim) error
 typed-process-local	interface-method	typed	internal/runtime/pipelineobligation/publication_group.go	PublicationGroup	method:ValidateCommittedMembership	func([]github.com/division-sh/swarm/internal/runtime/pipelineobligation.Claim) error
 typed-process-local	interface-method	typed	internal/runtime/pipelineobligation/publication_group.go	PublicationPreparation	method:ValidatePreparedFanOutEvent	func(original github.com/division-sh/swarm/internal/events.Event) error
+typed-process-local	callback-type	typed	internal/runtime/publicingress/exposure.go	(*github.com/division-sh/swarm/internal/runtime/publicingress.Controller).beginQuickCommit	result:#1	func()
 typed-process-local	callback-type	typed	internal/runtime/publicingress/exposure.go	(*github.com/division-sh/swarm/internal/runtime/publicingress.Controller).beginUpdate	result:#2	func(error)
 typed-process-local	callback-type	typed	internal/runtime/publicingress/exposure.go	Controller	field:cancel	context.CancelFunc
 typed-process-local	callback-type	typed	internal/runtime/publicingress/exposure.go	Controller	field:stopTransport	context.CancelFunc
