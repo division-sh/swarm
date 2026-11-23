@@ -157,6 +157,7 @@ func (l *fakeManagedLauncher) process(index int) *fakeManagedProcess {
 func TestManagedTunnelFailureRevokesThenMintsFreshGeneration(t *testing.T) {
 	launcher := &fakeManagedLauncher{}
 	readiness := NewReadinessOwner(true)
+	observed := make(chan Snapshot, 2)
 	var controller *Controller
 	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		switch request.URL.Path {
@@ -175,6 +176,7 @@ func TestManagedTunnelFailureRevokesThenMintsFreshGeneration(t *testing.T) {
 	controller, err = NewController(Options{
 		Mode: ModeManagedQuickTunnel, Handler: http.NotFoundHandler(), HTTPClient: client,
 		Launcher: launcher, Readiness: readiness, StartupAuthority: func() string { return "startup-current" },
+		OnRouteObservation: func(snapshot Snapshot) { observed <- snapshot },
 	})
 	if err != nil {
 		t.Fatalf("NewController: %v", err)
@@ -203,6 +205,12 @@ func TestManagedTunnelFailureRevokesThenMintsFreshGeneration(t *testing.T) {
 			snapshot := readiness.Snapshot(time.Now().UTC())
 			if snapshot.Exposure == nil || snapshot.Exposure.GenerationID != generation.ID {
 				t.Fatalf("readiness generation = %#v, want %s", snapshot.Exposure, generation.ID)
+			}
+			lost, restored := awaitExposure(t, observed), awaitExposure(t, observed)
+			if lost.Display.RouteProved || lost.Display.RouteReason != "route lost" || lost.Exposure != nil ||
+				!restored.Display.RouteProved || restored.Exposure == nil || restored.Exposure.GenerationID != generation.ID ||
+				lost.Display.Revision >= restored.Display.Revision {
+				t.Fatalf("replacement did not observe loss before restoration: lost=%+v restored=%+v", lost.Display, restored.Display)
 			}
 			return
 		}
@@ -319,7 +327,7 @@ func TestPublicRouteProbeRetainsDualStackFailuresWithinRetryBound(t *testing.T) 
 		waits = append(waits, delay)
 		return nil
 	}
-	err := controller.probePublicRouteWithRetry(context.Background(), "https://hooks.example.test")
+	err := controller.probePublicRouteWithRetry(context.Background(), "https://hooks.example.test", nil)
 	if err == nil || !errors.Is(err, ipv6Err) || attempts != 4 || len(waits) != 3 || waits[0] != time.Second || waits[1] != 2*time.Second || waits[2] != 4*time.Second {
 		t.Fatalf("bounded retries: attempts=%d waits=%v error=%v", attempts, waits, err)
 	}
@@ -333,7 +341,7 @@ func TestPublicRouteProbeRetainsDualStackFailuresWithinRetryBound(t *testing.T) 
 	}
 	controller.waitRetry = func(context.Context, time.Duration) error { return context.Canceled }
 	attempts = 0
-	if err := controller.probePublicRouteWithRetry(context.Background(), "https://hooks.example.test"); !errors.Is(err, context.Canceled) || attempts != 1 {
+	if err := controller.probePublicRouteWithRetry(context.Background(), "https://hooks.example.test", nil); !errors.Is(err, context.Canceled) || attempts != 1 {
 		t.Fatalf("cancellation did not stop retries: attempts=%d error=%v", attempts, err)
 	}
 }

@@ -117,9 +117,28 @@ func runPublicRawWebhookProof(t *testing.T, withdrawAfterAcquisition, nativeTLS 
 			opts.TestRuntimeReadyHook = func(rt *runtimepkg.Runtime) { runtimes <- rt }
 			opts.TestRuntimeContextsReadyHook = func(manager *runtimepkg.RuntimeContextManager) { managers <- manager }
 			process, served := start()
+			statusMode := "reverse proxy"
+			if nativeTLS {
+				statusMode = "direct TLS"
+			}
+			statusLine := "public webhook: " + statusMode + " | " + publicOrigin
+			provedLine := statusLine + " | route proved | no managed registrations"
+			if nativeTLS {
+				provedLine += " | certificate: supplied, expires " + origin.Certificate().NotAfter.UTC().Format("2006-01-02")
+			}
 			t.Cleanup(func() {
 				if code := process.stop(); code != 0 {
 					t.Errorf("serve cleanup=%d\n%s", code, process.outputString())
+				}
+				if !withdrawAfterAcquisition {
+					closed := statusLine + " | route not proved | no managed registrations"
+					if nativeTLS {
+						closed += " | certificate: supplied"
+					}
+					output := process.outputString()
+					if strings.Count(output, provedLine) != 1 || strings.Count(output, closed+" | reason: listener closed") != 1 {
+						t.Errorf("want one proved boot line and one joined cutoff line:\n%s", output)
+					}
 				}
 				if nativeTLS {
 					listener, err := net.Listen("tcp", publicAddress)
@@ -130,6 +149,9 @@ func runPublicRawWebhookProof(t *testing.T, withdrawAfterAcquisition, nativeTLS 
 					}
 				}
 			})
+			if !withdrawAfterAcquisition {
+				waitForInboundAdmissionServeOutput(t, process, provedLine)
+			}
 			const route = "/webhooks/keyed-shop/partner"
 			foundReady := false
 			lines := strings.Split(process.outputString(), "\n")

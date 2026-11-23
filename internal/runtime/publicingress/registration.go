@@ -410,7 +410,7 @@ func (c *ProviderRegistrationController) Reconcile(ctx context.Context, exposure
 	if err := c.preserveUnsettledSelection(admitted); err != nil {
 		return err
 	}
-	c.snapshot.replaceSelected(admitted)
+	c.snapshot.replaceSelected(admitted, exposure.ID)
 	for _, pair := range admitted {
 		if err := c.reconcilePair(ctx, exposure, startup, pair); err != nil {
 			return err

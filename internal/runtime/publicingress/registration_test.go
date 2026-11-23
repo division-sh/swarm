@@ -465,7 +465,7 @@ func TestProviderRegistrationHandoffKeepsAuthoritiesDistinctUntilPromotion(t *te
 				t.Fatalf("same-slot candidate replaced predecessor: %#v", selected)
 			}
 			owner := newRegistrationSnapshotOwner()
-			owner.replaceSelected(selected)
+			owner.replaceSelected(selected, "")
 			if got := len(owner.capture().registrations); got != test.want {
 				t.Fatalf("selected registration snapshot states = %d, want %d", got, test.want)
 			}

@@ -1148,6 +1148,13 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 	var storyFollower *serveAuthorActivityFollower
 	var channelWorker *serveChannelDeliveryWorker
 	ready := runtimepublicingress.NewReadinessOwner(publicIngressEnabled)
+	webhook := serveWebhookOutput{owner: ready, mode: publicIngressMode, origin: opts.PublicWebhookBaseURL}
+	if tlsSettings != nil {
+		webhook.certificate = "automatic"
+		if tlsSettings.CertificateFile != nil {
+			webhook.certificate = "supplied"
+		}
+	}
 	var closeChannels func() error
 	unregisterContext := func() {}
 	defer func() {
@@ -1215,6 +1222,11 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 		}
 		cancelOwnershipWatch()
 		finalErr := selectedLifecycle.Finalize(shutdownCtx, shutdownErr)
+		if publicExposure.ListenerFailure() != nil {
+			presenter.publicWebhookStatus(webhook, ready.Snapshot(time.Now()), "listener stopped")
+		} else if publicExposure.Generation().ID != "" {
+			presenter.publicWebhookStatus(webhook, ready.Snapshot(time.Now()), "listener closed")
+		}
 		presenter.shutdown(finalErr)
 		if finalErr != nil || publicExposure.ListenerFailure() != nil {
 			exitCode = max(exitCode, 1)
@@ -1859,6 +1871,9 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 				presenter.runtimeFailure("public_ingress", exposureErr)
 				cancelServe()
 			},
+			OnRouteObservation: func(snapshot runtimepublicingress.Snapshot) {
+				presenter.publicWebhookStatus(webhook, snapshot, "")
+			},
 		})
 		if controllerErr != nil {
 			presenter.fail(20, "public_ingress", controllerErr)
@@ -2018,6 +2033,7 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 		}
 		if err := publicExposure.Start(runtimeCtx); err != nil {
 			// The host defer owns the same bounded cutoff even on startup failure.
+			presenter.publicWebhookStatus(webhook, ready.Snapshot(time.Now()), "")
 			presenter.fail(22, "public_ingress", err)
 			return 1
 		}
@@ -2066,7 +2082,8 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 	if !publicIngressEnabled && requiresPublicIngressPresentation(standing) {
 		presenter.recordPublicIngressDisabledHint()
 	}
-	standing = publicIngressPresentation(standing, ready.Snapshot(time.Now().UTC()))
+	publicSnapshot := ready.Snapshot(time.Now())
+	standing = publicIngressPresentation(standing, publicSnapshot)
 	registeredOperations, err := stores.DeploymentChannels().ListChannelOnboardingOperations(ctx)
 	if err != nil {
 		presenter.fail(22, "channel_registration", err)
@@ -2185,6 +2202,7 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 	}, publicExposure) {
 		return 1
 	}
+	presenter.publicWebhookStatus(webhook, publicSnapshot, "")
 	if feedEnabled {
 		if err := presenter.writeFeedReady(); err != nil {
 			presenter.storyWarning(err)

@@ -291,6 +291,9 @@ func TestNativeTLSProbeUsesFreshVerifiedHandshakeAndRevokesExpiry(t *testing.T) 
 	if handshakes.Load() != 3 || readiness.Snapshot(time.Now()).Exposure == nil {
 		t.Fatalf("three probes need three TLS handshakes and exposure evidence, got %d", handshakes.Load())
 	}
+	if got := readiness.Snapshot(time.Now()).Exposure.CertificateExpiry; !got.Equal(leaf.NotAfter) {
+		t.Fatalf("probe certificate expiry=%v, want verified leaf expiry %v", got, leaf.NotAfter)
+	}
 	probing.Store(false)
 	response, plainErr := http.Get("http://" + listener.Addr().String() + "/webhooks/support/telegram")
 	if plainErr == nil {

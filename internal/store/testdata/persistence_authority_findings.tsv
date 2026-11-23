@@ -1101,6 +1101,7 @@ typed-process-local	callback-type	typed	internal/runtime/publicingress/exposure.
 typed-process-local	callback-type	typed	internal/runtime/publicingress/exposure.go	Options	field:Now	func() time.Time
 typed-process-local	callback-type	typed	internal/runtime/publicingress/exposure.go	Options	field:OnFatal	func(error)
 typed-process-local	callback-type	typed	internal/runtime/publicingress/exposure.go	Options	field:OnGeneration	func(context.Context, github.com/division-sh/swarm/internal/runtime/publicingress.Generation) error
+typed-process-local	callback-type	typed	internal/runtime/publicingress/exposure.go	Options	field:OnRouteObservation	func(github.com/division-sh/swarm/internal/runtime/publicingress.Snapshot)
 typed-process-local	callback-type	typed	internal/runtime/publicingress/exposure.go	Options	field:StartupAuthority	func() string
 typed-process-local	interface-method	typed	internal/runtime/publicingress/exposure.go	ManagedLauncher	method:Launch	func(context.Context, string, string, string) (github.com/division-sh/swarm/internal/runtime/publicingress.Process, error)
 typed-process-local	interface-method	typed	internal/runtime/publicingress/exposure.go	Process	method:Done	func() <-chan error

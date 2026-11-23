@@ -87,7 +87,8 @@ func TestPublicRouteProbeRejectsWrongListener(t *testing.T) {
 				if wrong.Load() == 0 {
 					t.Fatalf("probe never reached the wrong responder: %v", startErr)
 				}
-				if startErr == nil || calls != 0 || ready.Snapshot(time.Now()).Exposure != nil {
+				snapshot := ready.Snapshot(time.Now())
+				if startErr == nil || calls != 0 || snapshot.Exposure != nil || snapshot.Display.RouteProved {
 					t.Errorf("wrong route admitted: Start=%v registration calls=%d", startErr, calls)
 				}
 				if target.Load() != 0 {

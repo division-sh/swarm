@@ -255,7 +255,12 @@ development serve and plain retained serve; only the managed quick tunnel is
 development-only. The public listener exposes `/webhooks/*` only and never
 exposes API, MCP, health, or other control-plane routes.
 
-For serve-owned HTTPS instead, opt in through the deployment's `swarm.yaml`:
+### Serve-owned HTTPS on a static address
+
+Point a DNS name you control at the public static address with an A record for
+IPv4 and an AAAA record only if the deployment is reachable over IPv6. Allow
+inbound TCP on the selected webhook port and configure the DNS name, not the IP
+literal, in the deployment's `swarm.yaml`:
 
 ```yaml
 serve:
@@ -288,6 +293,41 @@ fresh verified handshake, so expiry or a bad renewal revokes exposure at the nex
 completed probe, not instantaneously. No certificate is uploaded to Telegram.
 The config block conflicts with `--expose` and `--public-webhook-*`; omitting it
 preserves the existing reverse-proxy and dev quick-tunnel modes.
+
+Start serve with `swarm serve --config swarm.yaml`. Use the same public HTTPS
+origin for the deployment's webhook senders. The reachability probe checks that
+this listener handled the probe; it does not check provider delivery.
+
+### Operator-run Cloudflare Tunnel
+
+The Swarm side was tested with a local HTTPS proxy on SQLite and PostgreSQL.
+Cloudflare was not run. Run `cloudflared` beside serve and configure
+the [published application route](https://developers.cloudflare.com/tunnel/get-started/#publish-an-application)
+from `https://hooks.example.com` to `http://127.0.0.1:8188`. Preserve the webhook
+path, query, headers, and body, including the reachability probe headers in both
+directions. Do not redirect the probe or point the route at the API or MCP port.
+
+Start your connector separately, for example with a remotely managed tunnel's
+private token file and a version supporting
+[`--token-file`](https://developers.cloudflare.com/tunnel/reference/run-parameters/#token-file):
+
+```sh
+cloudflared tunnel run --token-file secrets/cloudflared.token
+```
+
+In a separate process, omit `serve.public_webhook` from the deployment config and
+start serve with the existing paired flags:
+
+```sh
+swarm serve --config swarm.yaml \
+  --public-webhook-base-url https://hooks.example.com \
+  --public-webhook-listen 127.0.0.1:8188
+```
+
+Serve checks the public route, not the state of the connector. You manage the
+connector separately. This does not use `--dev` or `--expose`.
+
+### Credentialless scenarios
 
 For credentialless scenarios, use `swarm test` and give each agent one
 contracts-root-relative Python performance. The command owns a fresh private
