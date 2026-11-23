@@ -2,7 +2,7 @@ package runtime
 
 import (
 	"context"
-
+	"errors"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/bootverify"
@@ -17,6 +17,9 @@ func TestWorkflowAdmissionEarlyRefusalNamesUnperformedTail(t *testing.T) {
 	if err == nil {
 		t.Fatal("invalid connector declaration accepted")
 	}
+	if IsSoleWorkflowAdmissionReportRefusal(err) {
+		t.Fatal("independent source refusal was marked as a report summary")
+	}
 	if result.BootReport.Observations[0].Status != bootverify.AdmissionFailed {
 		t.Fatal("source refusal was not recorded")
 	}
@@ -28,6 +31,14 @@ func TestWorkflowAdmissionEarlyRefusalNamesUnperformedTail(t *testing.T) {
 	if result.BootReport.AdmissionDecision(bootverify.AdmissionFindingPolicy{}).Complete {
 		t.Fatal("early refusal produced complete admission")
 	}
+	t.Run("owned_report_summary", func(t *testing.T) {
+		cause := errors.New("owned report text")
+		var result WorkflowContractValidationResult
+		err := result.settleWorkflowAdmission(t.Context(), cause, "", true, true, "report-blocker")
+		if !IsSoleWorkflowAdmissionReportRefusal(err) || errors.Unwrap(err) != cause || err.Error() != cause.Error() {
+			t.Fatalf("report settlement changed the summary or its cause: %v", err)
+		}
+	})
 }
 
 func invalidWorkflowAdmissionConnectorSource(t *testing.T) semanticview.Source {

@@ -143,7 +143,9 @@ func postgresEnvironmentAuthorityViolations(root string) ([]string, error) {
 // not the test environment. Exact sites/counts leave unknown callers forbidden.
 var postgresProductionConnectorSites = map[string]int{
 	"internal/store/construction/open.go\x00OpenPostgres\x00NewConfig":                                                1,
-	"internal/store/construction/open.go\x00OpenPostgres\x00NewConnectorConfig":                                       1,
+	"internal/store/construction/open.go\x00openPostgresConfig\x00NewConnectorConfig":                                 1,
+	"internal/store/construction/open.go\x00OpenPostgresRuntime\x00NewConfig":                                         1,
+	"internal/store/construction/open.go\x00PostgresCheckTarget\x00NewConfig":                                         1,
 	"internal/store/construction/open.go\x00OpenPostgresReadOnly\x00NewConfig":                                        1,
 	"internal/store/internal/backend/postgres/inspection_io.go\x00OpenForInspection\x00NewConnectorConfig":            1,
 	"internal/store/internal/backend/postgres/possession_observation.go\x00observeAdvisoryLock\x00NewConnectorConfig": 1,
@@ -198,7 +200,10 @@ func TestPostgresGuardClassifiesExactProductionConnectorsWithoutTestAuthority(t 
 	const relative = "internal/store/construction/open.go"
 	const admitted = `package construction
 import native "github.com/lib/pq"
-func OpenPostgres() { native.NewConfig(); native.NewConnectorConfig() }
+func OpenPostgres() { native.NewConfig(); }
+func openPostgresConfig() { native.NewConnectorConfig() }
+func OpenPostgresRuntime() { native.NewConfig() }
+func PostgresCheckTarget() { native.NewConfig() }
 func OpenPostgresReadOnly() { native.NewConfig() }
 `
 	for _, tc := range []struct {

@@ -89,10 +89,7 @@ func verifyDeploymentBoundedObservation(ctx context.Context, budget time.Duratio
 }
 
 func verifyDeploymentObservation(ctx context.Context, result *runtime.WorkflowContractValidationResult, id, owner, subject string, failureClass failures.Class, inspect func(context.Context) error) bool {
-	observation := bootverify.AdmissionObservation{
-		CheckID: id, Owner: owner, Subject: subject, Class: bootverify.AdmissionDeploymentObservation,
-		StartedAt: time.Now().UTC(),
-	}
+	started := time.Now().UTC()
 	err := ctx.Err()
 	if err == nil {
 		err = inspect(ctx)
@@ -100,8 +97,14 @@ func verifyDeploymentObservation(ctx context.Context, result *runtime.WorkflowCo
 	if ctx.Err() != nil {
 		err = errors.Join(ctx.Err(), err)
 	}
-	observation.FinishedAt = time.Now().UTC()
-	observation.Cause = err
+	return recordDeploymentObservation(ctx, result, id, owner, subject, failureClass, started, err)
+}
+
+func recordDeploymentObservation(ctx context.Context, result *runtime.WorkflowContractValidationResult, id, owner, subject string, failureClass failures.Class, started time.Time, err error) bool {
+	observation := bootverify.AdmissionObservation{
+		CheckID: id, Owner: owner, Subject: subject, Class: bootverify.AdmissionDeploymentObservation,
+		StartedAt: started, FinishedAt: time.Now().UTC(), Cause: err,
+	}
 	if err == nil {
 		observation.Status = bootverify.AdmissionPassed
 		result.BootReport.Observations = append(result.BootReport.Observations, observation)

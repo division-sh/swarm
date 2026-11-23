@@ -11,6 +11,23 @@ import (
 
 const workflowAdmissionOwner = "internal/runtime.ValidateWorkflowContractSurface"
 
+// A report refusal summarizes findings already owned by the report. It is not
+// a typed platform failure that could classify an independent error in a join.
+type workflowAdmissionReportRefusal struct{ error }
+
+func (e workflowAdmissionReportRefusal) Unwrap() error { return e.error }
+
+// IsSoleWorkflowAdmissionReportRefusal recognizes the owned summary, never a join.
+func IsSoleWorkflowAdmissionReportRefusal(err error) bool {
+	for err != nil {
+		if _, ok := err.(workflowAdmissionReportRefusal); ok {
+			return true
+		}
+		err = errors.Unwrap(err) // Does not descend into joins, even single-child joins.
+	}
+	return false
+}
+
 func (result *WorkflowContractValidationResult) settleWorkflowAdmission(ctx context.Context, err error, phase string, reportBlocks, registryExecuted bool, blockingPrerequisite string) error {
 	result.bindAdmissionSourceSubject()
 	if ctx.Err() != nil {
@@ -26,6 +43,7 @@ func (result *WorkflowContractValidationResult) settleWorkflowAdmission(ctx cont
 		dependency := phase
 		if reportBlocks {
 			dependency = blockingPrerequisite
+			err = workflowAdmissionReportRefusal{err}
 		}
 		result.blockAdmissionTail(dependency, registryExecuted)
 	}
