@@ -139,7 +139,8 @@ func activateRunForkForSelectedContractExecution(ctx context.Context, req runfor
 			planRequest.AtStart = lineage.ForkPoint.Kind == runfork.RunForkPointRunStart
 		}
 		if lineage.ForkPoint.Kind == runfork.RunForkPointStateRevision && req.ForkOperation != nil && req.ForkOperation.PublicationID != "" {
-			operation, err := resolvedForkOperationForActivationTx(txctx, tx, *req.ForkOperation, lineage, port.postgres)
+			// Read the immutable selector without moving the completion lock.
+			operation, err := resolvedForkOperationForActivationTx(txctx, tx, *req.ForkOperation, lineage, false)
 			if err != nil {
 				return err
 			}

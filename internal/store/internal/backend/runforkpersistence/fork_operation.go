@@ -373,12 +373,12 @@ func bindForkOperationTx(ctx context.Context, tx *sql.Tx, request runfork.ForkOp
 
 // Activation consumes the exact resolved request committed at materialization;
 // the API request copy can predate revision resolution.
-func resolvedForkOperationForActivationTx(ctx context.Context, tx *sql.Tx, caller runfork.ForkOperationRequest, lineage runForkActivationLineage, postgres bool) (runfork.ForkOperationRequest, error) {
+func resolvedForkOperationForActivationTx(ctx context.Context, tx *sql.Tx, caller runfork.ForkOperationRequest, lineage runForkActivationLineage, lock bool) (runfork.ForkOperationRequest, error) {
 	canonical, semanticHash, err := caller.Canonical()
 	if err != nil {
 		return runfork.ForkOperationRequest{}, err
 	}
-	record, found, err := loadForkOperationByIDTx(ctx, tx, canonical.OperationID, postgres)
+	record, found, err := loadForkOperationByIDTx(ctx, tx, canonical.OperationID, lock)
 	if err != nil {
 		return runfork.ForkOperationRequest{}, err
 	}
