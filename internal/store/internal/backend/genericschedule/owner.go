@@ -238,6 +238,14 @@ func (o *SQLiteOwner) AdmitTx(ctx context.Context, attempt *mutationprotocol.Att
 	return admitAttempt(ctx, attempt, false, command, o.now, o.execution)
 }
 
+func (o *PostgresOwner) AdmitFanOutBarrierTx(ctx context.Context, attempt *mutationprotocol.Attempt, command runtimegenericschedule.AdmissionCommand) (runtimegenericschedule.AdmissionResult, error) {
+	return admitAttempt(ctx, attempt, true, command, o.now, fanOutBarrierRunExecution{o.execution})
+}
+
+func (o *SQLiteOwner) AdmitFanOutBarrierTx(ctx context.Context, attempt *mutationprotocol.Attempt, command runtimegenericschedule.AdmissionCommand) (runtimegenericschedule.AdmissionResult, error) {
+	return o.AdmitTx(ctx, attempt, command)
+}
+
 func (o *PostgresOwner) ReadAdmissionTx(ctx context.Context, attempt *mutationprotocol.Attempt, command runtimegenericschedule.AdmissionCommand) (runtimegenericschedule.Activation, error) {
 	return readAdmissionTx(ctx, attempt, true, command)
 }
@@ -773,6 +781,14 @@ func (o *PostgresOwner) CancelActivationTx(ctx context.Context, attempt *mutatio
 
 func (o *SQLiteOwner) CancelActivationTx(ctx context.Context, attempt *mutationprotocol.Attempt, command runtimegenericschedule.CancelCommand) (runtimegenericschedule.CancelResult, error) {
 	return cancelAttempt(ctx, attempt, false, command, o.execution)
+}
+
+func (o *PostgresOwner) CancelFanOutBarrierActivationTx(ctx context.Context, attempt *mutationprotocol.Attempt, command runtimegenericschedule.CancelCommand) (runtimegenericschedule.CancelResult, error) {
+	return cancelAttempt(ctx, attempt, true, command, fanOutBarrierRunExecution{o.execution})
+}
+
+func (o *SQLiteOwner) CancelFanOutBarrierActivationTx(ctx context.Context, attempt *mutationprotocol.Attempt, command runtimegenericschedule.CancelCommand) (runtimegenericschedule.CancelResult, error) {
+	return o.CancelActivationTx(ctx, attempt, command)
 }
 
 // CancelAdmissionTx cancels the exact immutable activation selected by the

@@ -559,7 +559,7 @@ func advanceFanOutDeliveryBarriersTx(
 		if err != nil {
 			return nil, err
 		}
-		admitted, err := genericSchedules.AdmitTx(ctx, attempt, command)
+		admitted, err := genericSchedules.AdmitFanOutBarrierTx(ctx, attempt, command)
 		if err != nil {
 			return nil, fmt.Errorf("admit fan-out barrier completion: %w", err)
 		}
@@ -708,7 +708,7 @@ func cancelSupersededFanOutBarrierScheduleTx(
 	if err := runtimegenericschedule.ValidateFanOutBarrierScheduleRelation(barrier, activation); err != nil {
 		return err
 	}
-	cancelled, err := genericSchedules.CancelActivationTx(ctx, attempt, runtimegenericschedule.CancelCommand{
+	cancelled, err := genericSchedules.CancelFanOutBarrierActivationTx(ctx, attempt, runtimegenericschedule.CancelCommand{
 		ActivationID: activation.ID,
 		Cause:        "fan_out_generation_superseded",
 		CancelledAt:  at,

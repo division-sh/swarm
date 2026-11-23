@@ -85,10 +85,11 @@ func (s *PipelineSQLiteOwner) resourceSourceOwner() *storedurabledata.Owner   { 
 
 type GenericScheduleTxOwner interface {
 	AdmitTx(context.Context, *mutationprotocol.Attempt, runtimegenericschedule.AdmissionCommand) (runtimegenericschedule.AdmissionResult, error)
+	AdmitFanOutBarrierTx(context.Context, *mutationprotocol.Attempt, runtimegenericschedule.AdmissionCommand) (runtimegenericschedule.AdmissionResult, error)
 	ReadAdmissionTx(context.Context, *mutationprotocol.Attempt, runtimegenericschedule.AdmissionCommand) (runtimegenericschedule.Activation, error)
 	CancelAdmissionTx(context.Context, *mutationprotocol.Attempt, runtimegenericschedule.AdmissionCommand, string, time.Time) (runtimegenericschedule.CancelResult, error)
 	LoadActivationTx(context.Context, *mutationprotocol.Attempt, string) (runtimegenericschedule.Activation, bool, error)
-	CancelActivationTx(context.Context, *mutationprotocol.Attempt, runtimegenericschedule.CancelCommand) (runtimegenericschedule.CancelResult, error)
+	CancelFanOutBarrierActivationTx(context.Context, *mutationprotocol.Attempt, runtimegenericschedule.CancelCommand) (runtimegenericschedule.CancelResult, error)
 }
 
 type activeRunSourceOwnerFunc func(context.Context, string) (runtimecorrelation.SourceArtifactFact, error)
