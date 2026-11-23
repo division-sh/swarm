@@ -397,15 +397,16 @@ func fixedCutEagerChildEdge(source semanticview.Source, cut runfork.RunForkPlan,
 	selected := make(fixedCutConnectSelection)
 	for _, edge := range plans {
 		flowID := edge.ReceiverEndpoint().Readback().FlowID
-		staticTarget := !edge.RequiresRuntimeResolution() && flowID == target.FlowID
-		if !staticTarget && (edge.InstanceKey() == nil || !strings.HasPrefix(target.FlowID, flowID+"/")) {
+		// This exact child may be reached by a static edge or by selection of its keyed ancestor.
+		exactTarget := flowID == target.FlowID && (!edge.RequiresRuntimeResolution() || edge.SelectionFlowID() != flowID)
+		if !exactTarget && (edge.InstanceKey() == nil || !strings.HasPrefix(target.FlowID, flowID+"/")) {
 			continue
 		}
 		targets, matched, err := contractFrontierPlanTargets(source, cut, constructors, selected, selector.ID(), selector.RoutingSource(), edge, nil)
 		if err != nil {
 			return nil, err
 		}
-		if !staticTarget || !matched || len(targets) != 1 || targets[0] != target {
+		if !exactTarget || !matched || len(targets) != 1 || targets[0] != target {
 			continue
 		}
 		id, err := pinrouting.ConnectPlanIdentity(edge)
