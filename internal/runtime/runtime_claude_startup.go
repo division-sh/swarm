@@ -559,10 +559,8 @@ func validateManagedProviderPreflightWithChecks(ctx context.Context, cfg *config
 }
 
 func validateManagedProviderPreflightConfigs(ctx context.Context, cfg *config.Config, gatewayBinding toolgateway.Binding, runtimes *llm.AgentRuntimeSet, turnStore llm.MCPTurnContextStore, tools claudeStartupToolSource, preflightConfigs []managedProviderPreflightAgent, authority ManagedProviderPreflightAuthority, checks *ManagedProviderBootChecks, credentials llm.ProviderCredentialResolver) ([]string, error) {
-	if checks != nil {
-		if err := checks.validateTargets(ctx, cfg, credentials, preflightConfigs); err != nil {
-			return nil, err
-		}
+	if err := checks.validateTargets(ctx, cfg, credentials, preflightConfigs); err != nil {
+		return nil, err
 	}
 	if len(preflightConfigs) == 0 {
 		return nil, nil
@@ -659,20 +657,9 @@ func validateManagedProviderPreflightConfigs(ctx context.Context, cfg *config.Co
 			agentCtx := runtimeactors.WithActor(ctx, agentCfg)
 			sessionTools, capabilities := target.catalog.tools, target.catalog.capabilities
 			probeID := uuid.NewString()
-			var checkedResponse *llm.Response
-			if checks != nil && agentCfg.ExecutionMode == runtimeeffects.ExecutionModeLive {
-				contract, ok := llm.ProviderContractForRuntime(modelRuntime)
-				if !ok {
-					return fmt.Errorf("managed capability surface requires provider contract")
-				}
-				planned, err := llm.CompileManagedCapabilityAdmission(agentCfg, contract, sessionTools, capabilities)
-				if err != nil {
-					return err
-				}
-				checkedResponse, err = checks.startupResponse(ctx, cfg, credentials, ManagedProviderCheckTarget{Actor: agentCfg, Plan: target.plan}, target.prompt, planned)
-				if err != nil {
-					return err
-				}
+			checkedResponse, err := checks.startupResponse(ctx, cfg, credentials, ManagedProviderCheckTarget{Actor: agentCfg, Plan: target.plan}, modelRuntime, target.prompt, sessionTools, capabilities)
+			if err != nil {
+				return err
 			}
 			capabilityAuthority, effectAuthority, err := authority.probeAuthority(agentCtx, probeID, managedProviderPreflightAgent{config: agentCfg, plan: target.plan})
 			if err != nil {
@@ -688,18 +675,7 @@ func validateManagedProviderPreflightConfigs(ctx context.Context, cfg *config.Co
 			agentCtx = managedcapabilities.WithContext(agentCtx, surface)
 			agentCtx = runtimeeffects.WithAuthority(agentCtx, effectAuthority)
 			agentCtx = runtimeeffects.WithController(agentCtx, authority.EffectController)
-			var probeResp *llm.Response
-			if checkedResponse != nil {
-				observed, observeErr := llm.ObserveCLIResponseCapabilitySurface(surface, checkedResponse)
-				err = observeErr
-				if err == nil {
-					err = llm.ValidateCLIProviderCapabilitySurface(observed, checkedResponse)
-				}
-				probeResp = checkedResponse
-				probeResp.CapabilitySurface = &observed
-			} else {
-				probeResp, err = startupProbe.ProbeStartupVisibleToolSurface(agentCtx, agentCfg, target.prompt, sessionTools)
-			}
+			probeResp, err := observeManagedStartupSurface(agentCtx, startupProbe, agentCfg, target.prompt, sessionTools, surface, checkedResponse)
 			if err != nil {
 				return fmt.Errorf("claude cli startup probe failed for agent %s: %w", agentID, err)
 			}
@@ -783,6 +759,18 @@ func validateManagedProviderPreflightConfigs(ctx context.Context, cfg *config.Co
 	}
 	sort.Strings(surfaceIDs)
 	return surfaceIDs, nil
+}
+
+func observeManagedStartupSurface(ctx context.Context, probe llm.StartupVisibleToolSurfaceProber, actor runtimeactors.AgentConfig, prompt string, tools []llm.ToolDefinition, surface managedcapabilities.Surface, checked *llm.Response) (*llm.Response, error) {
+	if checked == nil {
+		return probe.ProbeStartupVisibleToolSurface(ctx, actor, prompt, tools)
+	}
+	observed, err := llm.ObserveCLIResponseCapabilitySurface(surface, checked)
+	if err == nil {
+		err = llm.ValidateCLIProviderCapabilitySurface(observed, checked)
+	}
+	checked.CapabilitySurface = &observed
+	return checked, err
 }
 
 func isClaudeCLIBackend(cfg *config.Config) (bool, error) {
