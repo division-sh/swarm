@@ -20,6 +20,10 @@ type runAuthorityOwner interface {
 	RequireCurrentExternalEffectAuthorityTx(context.Context, *sql.Tx, runtimeeffects.Authority) error
 }
 
+type selectedFanOutBarrierAuthorityOwner interface {
+	RequireSelectedFanOutBarrierAuthorityTx(context.Context, *sql.Tx, runtimeeffects.Authority) error
+}
+
 func (s *RunLifecyclePostgresOwner) BindExecutionAuthority(owner runAuthorityOwner) error {
 	if s == nil || owner == nil || s.runAuthority != nil {
 		return errors.New("run lifecycle PostgreSQL execution authority must be bound exactly once")
@@ -130,6 +134,16 @@ func observeSelectedRunExecution(ctx context.Context, q sourceadmission.Executio
 
 // Mutable admission locks the canonical run before the selected execution fence.
 func (s *RunLifecyclePostgresOwner) RequireRunExecutionTx(ctx context.Context, tx *sql.Tx, runID string) error {
+	return s.requireRunExecutionTx(ctx, tx, runID, false)
+}
+
+// Barrier closure already holds SHARE on the selected executor. It writes the
+// completion and its schedule, not the executor or its termination evidence.
+func (s *RunLifecyclePostgresOwner) RequireFanOutBarrierRunExecutionTx(ctx context.Context, tx *sql.Tx, runID string) error {
+	return s.requireRunExecutionTx(ctx, tx, runID, true)
+}
+
+func (s *RunLifecyclePostgresOwner) requireRunExecutionTx(ctx context.Context, tx *sql.Tx, runID string, fanOutBarrier bool) error {
 	if s == nil || ctx == nil || tx == nil {
 		return errors.New("run execution mutation requires lifecycle owner, context and transaction")
 	}
@@ -137,7 +151,7 @@ func (s *RunLifecyclePostgresOwner) RequireRunExecutionTx(ctx context.Context, t
 		return requireRunlessExecution(ctx)
 	}
 	fact, sourceErr := s.RequireActiveSourceTx(ctx, tx, runID)
-	return requireRunExecutionTx(ctx, tx, true, runID, fact, sourceErr, s.runAuthority)
+	return requireRunExecutionTx(ctx, tx, true, runID, fact, sourceErr, s.runAuthority, fanOutBarrier)
 }
 
 func (s *RunLifecycleSQLiteOwner) RequireRunExecutionTx(ctx context.Context, tx *sql.Tx, runID string) error {
@@ -148,10 +162,10 @@ func (s *RunLifecycleSQLiteOwner) RequireRunExecutionTx(ctx context.Context, tx 
 		return requireRunlessExecution(ctx)
 	}
 	fact, sourceErr := s.RequireActiveSourceTx(ctx, tx, runID)
-	return requireRunExecutionTx(ctx, tx, false, runID, fact, sourceErr, s.runAuthority)
+	return requireRunExecutionTx(ctx, tx, false, runID, fact, sourceErr, s.runAuthority, false)
 }
 
-func requireRunExecutionTx(ctx context.Context, tx *sql.Tx, postgres bool, runID string, fact runtimecorrelation.SourceArtifactFact, sourceErr error, owner runAuthorityOwner) error {
+func requireRunExecutionTx(ctx context.Context, tx *sql.Tx, postgres bool, runID string, fact runtimecorrelation.SourceArtifactFact, sourceErr error, owner runAuthorityOwner, fanOutBarrier bool) error {
 	if sourceErr != nil && !errors.Is(sourceErr, runtimerunlifecycle.ErrRunNotActive) && !errors.Is(sourceErr, runtimerunlifecycle.ErrRunNotFound) {
 		return sourceErr
 	}
@@ -193,7 +207,7 @@ func requireRunExecutionTx(ctx context.Context, tx *sql.Tx, postgres bool, runID
 			return fmt.Errorf("%w: selected run %s is %s", runtimerunlifecycle.ErrRunExecutionAuthority, runID, state)
 		}
 	}
-	return requireSelectedRunAuthorityTx(ctx, tx, runID, fact.BundleHash(), owner)
+	return requireSelectedRunAuthorityModeTx(ctx, tx, runID, fact.BundleHash(), owner, fanOutBarrier)
 }
 
 func requireLiveHandoffGrantTx(ctx context.Context, tx *sql.Tx, postgres bool, fact runtimecorrelation.SourceArtifactFact) error {
@@ -248,12 +262,23 @@ func selectedRunAuthority(ctx context.Context, runID, bundleHash string) (runtim
 }
 
 func requireSelectedRunAuthorityTx(ctx context.Context, tx *sql.Tx, runID, bundleHash string, owner runAuthorityOwner) error {
+	return requireSelectedRunAuthorityModeTx(ctx, tx, runID, bundleHash, owner, false)
+}
+
+func requireSelectedRunAuthorityModeTx(ctx context.Context, tx *sql.Tx, runID, bundleHash string, owner runAuthorityOwner, fanOutBarrier bool) error {
 	authority, err := selectedRunAuthority(ctx, runID, bundleHash)
 	if err != nil {
 		return err
 	}
 	if owner == nil {
 		return fmt.Errorf("%w: selected execution authority owner is required", runtimerunlifecycle.ErrRunExecutionAuthority)
+	}
+	if fanOutBarrier {
+		barrier, ok := owner.(selectedFanOutBarrierAuthorityOwner)
+		if !ok {
+			return fmt.Errorf("%w: selected fan-out barrier authority owner is required", runtimerunlifecycle.ErrRunExecutionAuthority)
+		}
+		return barrier.RequireSelectedFanOutBarrierAuthorityTx(ctx, tx, authority)
 	}
 	return owner.RequireCurrentExternalEffectAuthorityTx(ctx, tx, authority)
 }

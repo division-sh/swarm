@@ -354,7 +354,7 @@ func requireSelectedContractForkAuthorityPostgres(ctx context.Context, tx *sql.T
 	selected := authority.SelectedFork
 	lock := " FOR UPDATE"
 	if shared {
-		// Provider-turn ownership already holds a shared origin fence in this transaction.
+		// These callers only fence execution; they do not update the executor.
 		lock = " FOR SHARE"
 	}
 	var matched int
@@ -378,6 +378,13 @@ func requireSelectedContractForkAuthorityPostgres(ctx context.Context, tx *sql.T
 
 func (s *EffectPostgresOwner) RequireCurrentExternalEffectAuthorityTx(ctx context.Context, tx *sql.Tx, authority runtimeeffects.Authority) error {
 	return requireCurrentExternalEffectAuthorityPostgres(ctx, tx, authority)
+}
+
+func (s *EffectPostgresOwner) RequireSelectedFanOutBarrierAuthorityTx(ctx context.Context, tx *sql.Tx, authority runtimeeffects.Authority) error {
+	if !authority.Valid() || authority.Kind != runtimeeffects.AuthoritySelectedContractFork {
+		return invalidExternalAuthority(authority, "invalid")
+	}
+	return requireSelectedContractForkAuthorityPostgres(ctx, tx, authority, true)
 }
 
 func (s *EffectPostgresOwner) ObserveCurrentExternalEffectAuthority(ctx context.Context, q sourceadmission.ExecutionQuery, authority runtimeeffects.Authority) (bool, error) {
