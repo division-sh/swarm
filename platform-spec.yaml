@@ -31396,8 +31396,9 @@ cli_specification:
         Default fork and pin selection follow the source run, not health. Missing target source refuses before freeze
         or mutation and teaches serving the directory first. `--bundle-hash` and draft `--bundle` are retired.
         With no selector, the fork uses the latest committed state_revision and re-applies no input.
-        --publication currently accepts an event ID; --at-event retains its exact event-point selection.
-        Feed-ID publication policy remains held for the user's ruling and is not implemented by this arm.
+        --publication accepts an event ID, a rows-publication batch ID, or an exact deployment feed ID.
+        A feed ID selects its first committed revision and leaves the other pending feeds at that cut with the source;
+        the fork does not replay their pending work. Event, batch, and --at-event selection are unchanged.
         Fork selects the child as the live run and pauses whichever sibling is currently live for the exact flow,
         including when the source is an older paused sibling. Several forks at one point are allowed.
         No source-freeze confirmation or flag is accepted.

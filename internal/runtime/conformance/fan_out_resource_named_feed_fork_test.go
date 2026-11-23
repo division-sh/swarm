@@ -3,7 +3,6 @@ package conformance
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -23,15 +22,15 @@ import (
 
 func TestDeploymentSourceSelectedForkParksOtherFeedBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
-		for _, legacy := range []bool{false, true} {
-			t.Run(fmt.Sprintf("%s/legacy=%t", backend, legacy), func(t *testing.T) {
-				proveSelectedNamedFeedFork(t, backend, legacy)
+		for _, variant := range []string{"same_batch", "prior_batch", "legacy_recovery"} {
+			t.Run(backend+"/"+variant, func(t *testing.T) {
+				proveSelectedNamedFeedFork(t, backend, variant)
 			})
 		}
 	}
 }
 
-func proveSelectedNamedFeedFork(t *testing.T, backend string, legacy bool) {
+func proveSelectedNamedFeedFork(t *testing.T, backend, variant string) {
 	t.Helper()
 	repo := conformanceRepoRoot(t)
 	bundle, err := contracts.LoadWorkflowContractBundleWithOverrides(repo, canonicalrouting.CopyPublicCompletionFeedOnly(t), contracts.DefaultPlatformSpecFile(repo))
@@ -43,7 +42,7 @@ func proveSelectedNamedFeedFork(t *testing.T, backend string, legacy bool) {
 	names := []string{"scan.requested", "score.observed"}
 	input := [][]byte{[]byte("{\"topic\":\"named\"}\n"), []byte("{\"label\":\"other\"}\n")}
 	var sourceID, batchID string
-	if legacy {
+	if variant == "legacy_recovery" {
 		var data durabledata.RunCreationDataEnvelope
 		for i, name := range names {
 			ref, err := durabledata.ParseDeclarationRef(".", name)
@@ -60,24 +59,20 @@ func proveSelectedNamedFeedFork(t *testing.T, backend string, legacy bool) {
 		sourceID = uuid.NewString()
 		prepareDeploymentRowsFixtureRun(t, f, sourceID, ".")
 		server := f.operatorServer(t)
-		args := []string{"run", "start", "--connect", server.URL, "--run-id", sourceID, "--idempotency-key", sourceID, "--no-follow"}
 		dir := t.TempDir()
+		var data []string
 		for i, name := range names {
 			path := filepath.Join(dir, name+".jsonl")
 			if err := os.WriteFile(path, input[i], 0600); err != nil {
 				t.Fatal(err)
 			}
-			args = append(args, "--data", name+"="+path)
+			data = append(data, name+"="+path)
 		}
-		var stdout, stderr bytes.Buffer
-		if code := cliapp.Execute(f.ctx, args, &stdout, &stderr, nil, nil); code != 0 {
-			t.Fatalf("commit source feed batch: exit=%d stderr=%s", code, stderr.String())
+		if variant == "prior_batch" {
+			publishNamedFeedBatch(t, f.ctx, server.URL, sourceID, data[1:])
+			data = data[:1]
 		}
-		_, receipt, ok := strings.Cut(stdout.String(), "rows published: publication_id=")
-		batchID, _, _ = strings.Cut(receipt, "\n")
-		if _, err := uuid.Parse(batchID); !ok || err != nil {
-			t.Fatalf("source batch receipt: %s err=%v", stdout.String(), err)
-		}
+		batchID = publishNamedFeedBatch(t, f.ctx, server.URL, sourceID, data)
 	}
 	planner := f.selected.(interface {
 		PlanRunFork(context.Context, runfork.RunForkPlanRequest) (runfork.RunForkPlan, error)
@@ -108,7 +103,7 @@ func proveSelectedNamedFeedFork(t *testing.T, backend string, legacy bool) {
 	}
 	var owner runforkexecution.SelectedContractExecutionOwner
 	var recoveredID string
-	if legacy {
+	if variant == "legacy_recovery" {
 		owner, recoveredID = restartNamedFeedForkAtActivation(t, f, params)
 	} else {
 		var recovered []runfork.SelectedForkRecoveryResult
@@ -163,6 +158,24 @@ func proveSelectedNamedFeedFork(t *testing.T, backend string, legacy bool) {
 		AND d.status='delivered' AND d.claim_version=1`, result.ForkRunID, childMemberID).Scan(&delivered); err != nil || delivered != 1 {
 		t.Fatalf("named ordinal did not settle exactly once: delivered=%d err=%v", delivered, err)
 	}
+}
+
+func publishNamedFeedBatch(t *testing.T, ctx context.Context, endpoint, runID string, data []string) string {
+	t.Helper()
+	args := []string{"run", "start", "--connect", endpoint, "--run-id", runID, "--idempotency-key", uuid.NewString(), "--no-follow"}
+	for _, input := range data {
+		args = append(args, "--data", input)
+	}
+	var stdout, stderr bytes.Buffer
+	if code := cliapp.Execute(ctx, args, &stdout, &stderr, nil, nil); code != 0 {
+		t.Fatalf("commit source feed batch: exit=%d stderr=%s", code, stderr.String())
+	}
+	_, receipt, ok := strings.Cut(stdout.String(), "rows published: publication_id=")
+	batchID, _, _ := strings.Cut(receipt, "\n")
+	if _, err := uuid.Parse(batchID); !ok || err != nil {
+		t.Fatalf("source batch receipt: %s err=%v", stdout.String(), err)
+	}
+	return batchID
 }
 
 func restartNamedFeedForkAtActivation(t *testing.T, f *deploymentResourceFixture, params map[string]any) (runforkexecution.SelectedContractExecutionOwner, string) {
