@@ -91,23 +91,7 @@ func inspectVerifySelectedStore(ctx context.Context, repo string, paths CLISourc
 		accountVerifyStoreAccessFailure(result, subject)
 		return nil
 	}
-	if len(serve) != 0 && serve[0].construction != nil {
-		result.BootReport.Observations = append(result.BootReport.Observations, bootverify.AdmissionObservation{
-			CheckID: "startup_process_possession", Owner: "internal/store/construction", Subject: subject,
-			Class: bootverify.AdmissionDeploymentObservation, Status: bootverify.AdmissionNotApplicable,
-			Reason: "the native constructor retains physical exclusion; no separate availability probe is performed and no process generation has been admitted",
-		})
-	} else if len(serve) != 0 && serve[0].dryRun {
-		result.BootReport.Observations = append(result.BootReport.Observations, bootverify.AdmissionObservation{
-			CheckID: "startup_process_possession", Owner: "internal/store/selected.AdmissionInspection.ProbePossession", Subject: subject,
-			Class: bootverify.AdmissionDeploymentObservation, Status: bootverify.AdmissionNotApplicable,
-			Reason: "boot must independently acquire and retain possession and record its authority; verification leaves no capability or lock",
-		})
-		result.BootReport.ExecutionObligations = append(result.BootReport.ExecutionObligations, bootverify.AdmissionExecutionObligation{
-			ID: "startup_process_acquisition", Owner: "internal/runtime/startupownership.Store.AcquireProcessCapability", Subject: subject,
-			Reason: "boot must independently acquire and retain possession and record its authority; verification leaves no capability or lock",
-		})
-	} else if verifyDeploymentBoundedObservation(ctx, storeBudget, result, "startup_process_possession", "internal/store/selected.AdmissionInspection.ProbePossession", subject, failures.ClassDependencyUnavailable, func(ctx context.Context) error {
+	if !accountVerifyServePossession(result, subject, serve) && verifyDeploymentBoundedObservation(ctx, storeBudget, result, "startup_process_possession", "internal/store/selected.AdmissionInspection.ProbePossession", subject, failures.ClassDependencyUnavailable, func(ctx context.Context) error {
 		possession, err := selected.ProbePossession(ctx)
 		if err != nil {
 			var acquisition *startupownership.AcquisitionError
@@ -150,6 +134,26 @@ func inspectVerifySelectedStore(ctx context.Context, repo string, paths CLISourc
 		inspectVerifyRetainedDependencies(ctx, retained, schemaOK, cfg, source, opts, workspaces, workspaceOK, result)
 	}
 	return retained
+}
+
+func accountVerifyServePossession(result *runtime.WorkflowContractValidationResult, subject string, serve []serveStoreInspection) bool {
+	if len(serve) == 0 || (serve[0].construction == nil && !serve[0].dryRun) {
+		return false
+	}
+	owner, reason := "internal/store/selected.AdmissionInspection.ProbePossession", "boot must independently acquire and retain possession and record its authority; verification leaves no capability or lock"
+	if serve[0].construction != nil {
+		owner, reason = "internal/store/construction", "the native constructor retains physical exclusion; no separate availability probe is performed and no process generation has been admitted"
+	}
+	result.BootReport.Observations = append(result.BootReport.Observations, bootverify.AdmissionObservation{
+		CheckID: "startup_process_possession", Owner: owner, Subject: subject,
+		Class: bootverify.AdmissionDeploymentObservation, Status: bootverify.AdmissionNotApplicable, Reason: reason,
+	})
+	if serve[0].construction == nil {
+		result.BootReport.ExecutionObligations = append(result.BootReport.ExecutionObligations, bootverify.AdmissionExecutionObligation{
+			ID: "startup_process_acquisition", Owner: "internal/runtime/startupownership.Store.AcquireProcessCapability", Subject: subject, Reason: reason,
+		})
+	}
+	return true
 }
 
 func captureServeAbsentInput(err error, schema store.SchemaBootstrapRequest, serve []serveStoreInspection) {
@@ -284,14 +288,7 @@ func inspectVerifyRecoverySnapshot(ctx context.Context, snapshot *storeselected.
 	inspectVerifyRetainedSources(ctx, snapshot, repo, subject, packBases, result)
 	verifyDeploymentObservation(ctx, result, "startup_recovery_admission", "internal/runtime.InspectStartupRecoveryAdmission", subject, failures.ClassDependencyUnavailable, func(ctx context.Context) error {
 		if source == nil {
-			if emptySourceErr != nil {
-				return emptySourceErr
-			}
-			timers, err := snapshot.ReadTimerObligations(ctx, timerobligation.All(), time.Now().UTC())
-			if err != nil {
-				return err
-			}
-			return runtime.InspectSurvivingTimerRecoveryAdmission(ctx, timers, cfg.Config.Runtime.RecoveryOnStartup)
+			return inspectVerifyEmptySourceTimerRecovery(ctx, snapshot, emptySourceErr, cfg)
 		}
 		fact, err := correlation.NewSourceArtifactFact(hash)
 		if err != nil {
@@ -372,6 +369,17 @@ func inspectVerifyRecoverySnapshot(ctx context.Context, snapshot *storeselected.
 		return nil
 	})
 	return retained
+}
+
+func inspectVerifyEmptySourceTimerRecovery(ctx context.Context, snapshot *storeselected.AdmissionSnapshot, emptySourceErr error, cfg RuntimeConfigLoadResult) error {
+	if emptySourceErr != nil {
+		return emptySourceErr
+	}
+	timers, err := snapshot.ReadTimerObligations(ctx, timerobligation.All(), time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	return runtime.InspectSurvivingTimerRecoveryAdmission(ctx, timers, cfg.Config.Runtime.RecoveryOnStartup)
 }
 
 func inspectVerifyRunDrift(ctx context.Context, snapshot *storeselected.AdmissionSnapshot) error {

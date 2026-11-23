@@ -76,22 +76,11 @@ func sqlitePossessionForConstruction(ctx context.Context, selectedPath string, c
 	}
 
 	coordinatePath := databasePath + sqlitePossessionSuffix
-	var observed *SQLiteInspectionInput
-	explicit := len(input) != 0 && input[0] != nil
-	if len(input) != 0 {
-		observed = input[0]
+	observed, explicit, err := observeSQLiteConstructionInput(ctx, databasePath, deferDatabase, input)
+	if err != nil {
+		return nil, err
 	}
-	if deferDatabase && observed == nil {
-		current, err := CaptureSQLiteInspectionInput(ctx, databasePath)
-		if err != nil {
-			return nil, err
-		}
-		if !current.Absent() || current.coordinate != nil {
-			observed = current
-		}
-	}
-	createCoordinate := observed == nil || observed.coordinate == nil
-	coordinate, coordinateInfo, err := lockSQLitePossessionCoordinate(ctx, coordinatePath, createCoordinate, wait)
+	coordinate, coordinateInfo, err := lockSQLitePossessionCoordinate(ctx, coordinatePath, observed == nil || observed.coordinate == nil, wait)
 	if err != nil {
 		return nil, err
 	}
@@ -142,6 +131,19 @@ func sqlitePossessionForConstruction(ctx context.Context, selectedPath string, c
 		return nil, errors.Join(err, possession.Release())
 	}
 	return possession, nil
+}
+
+func observeSQLiteConstructionInput(ctx context.Context, databasePath string, deferDatabase bool, input []*SQLiteInspectionInput) (*SQLiteInspectionInput, bool, error) {
+	if len(input) != 0 && input[0] != nil {
+		return input[0], true, nil
+	}
+	if deferDatabase {
+		current, err := CaptureSQLiteInspectionInput(ctx, databasePath)
+		if err != nil || !current.Absent() || current.coordinate != nil {
+			return current, false, err
+		}
+	}
+	return nil, false, nil
 }
 
 func captureSQLiteInspectionCoordinate(path string) (os.FileInfo, error) {
