@@ -657,7 +657,7 @@ func validateManagedProviderPreflightConfigs(ctx context.Context, cfg *config.Co
 			agentCtx := runtimeactors.WithActor(ctx, agentCfg)
 			sessionTools, capabilities := target.catalog.tools, target.catalog.capabilities
 			probeID := uuid.NewString()
-			checkedResponse, err := checks.startupResponse(ctx, cfg, credentials, ManagedProviderCheckTarget{Actor: agentCfg, Plan: target.plan}, modelRuntime, target.prompt, sessionTools, capabilities)
+			checkedResponse, err := checks.startupResponse(ctx, cfg, credentials, ManagedProviderCheckTarget{Actor: agentCfg, Plan: target.plan}, modelRuntime, target.prompt, sessionTools, capabilities, agentCfg.ExecutionMode == runtimeeffects.ExecutionModeLive)
 			if err != nil {
 				return err
 			}

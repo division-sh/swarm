@@ -17,7 +17,6 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
-	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/mcp"
@@ -281,8 +280,8 @@ func (c *ManagedProviderBootChecks) ValidateConfiguration(ctx context.Context, c
 	return ctx.Err()
 }
 
-func (c *ManagedProviderBootChecks) startupResponse(ctx context.Context, cfg *config.Config, credentials llm.ProviderCredentialResolver, target ManagedProviderCheckTarget, modelRuntime llm.Runtime, prompt string, tools []llm.ToolDefinition, capabilities toolcapabilities.Set) (*llm.Response, error) {
-	if c == nil || target.Actor.ExecutionMode != runtimeeffects.ExecutionModeLive {
+func (c *ManagedProviderBootChecks) startupResponse(ctx context.Context, cfg *config.Config, credentials llm.ProviderCredentialResolver, target ManagedProviderCheckTarget, modelRuntime llm.Runtime, prompt string, tools []llm.ToolDefinition, capabilities toolcapabilities.Set, live bool) (*llm.Response, error) {
+	if c == nil || !live {
 		return nil, nil
 	}
 	contract, ok := llm.ProviderContractForRuntime(modelRuntime)
