@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -17,8 +18,10 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/bootverify"
+	"github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/tests/support/testpostgres"
 	"github.com/division-sh/swarm/tests/support/testutil"
@@ -159,6 +162,117 @@ func TestVerifyDeploymentObservationPreservesFailureAndCancellation(t *testing.T
 			decision := result.BootReport.AdmissionDecision(bootverify.AdmissionFindingPolicy{})
 			if decision.Complete || decision.FailureClass != item.class || decision.Interrupted != item.cancel || called == item.cancel {
 				t.Fatalf("incorrect decision=%#v called=%v", decision, called)
+			}
+		})
+	}
+	t.Run("stage_completion", testVerifyStageCompletionFailure)
+}
+
+func testVerifyStageCompletionFailure(t *testing.T) {
+	repo, source := RepoRoot(), canonicalrouting.CopyExample(t, canonicalrouting.TelegramAgent)
+	_, bundle, err := NewSwarmWorkflowModule(repo, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	empty, err := credentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts := runtime.DefaultWorkflowContractValidationOptions(empty, executionposture.Live)
+	opts.CheckMCPReachable = false
+	opts.FatalBootWarnings = true
+	opts.ExcludedFatalBootWarningChecks = []string{"tool_resolution", "inbound_unsigned_webhook"}
+	validation, summary := runtime.ValidateWorkflowContractSurface(t.Context(), semanticview.Wrap(bundle), opts)
+	if !runtime.IsSoleWorkflowAdmissionReportRefusal(summary) {
+		t.Fatalf("fixture did not reach a runtime-owned report summary: %v", summary)
+	}
+	auth, schema, native, unavailable := failures.ClassAuthenticationNeeded, failures.ClassSchemaInvalid, failures.ClassOutcomeUncertain, failures.ClassDependencyUnavailable
+	t.Run("sole", func(t *testing.T) {
+		report := validation.BootReport
+		if report.HasErrors() {
+			t.Fatalf("expected fatal warnings, not a source or inspection error: %+v", report.Errors())
+		}
+		for _, key := range []string{"telegram.telegram_bot_token", "telegram.webhook_signing_secret"} {
+			if !slices.ContainsFunc(report.Warnings(), func(f bootverify.Finding) bool {
+				return f.CheckID == "credential_key_exists" && f.Location == key && f.FailureClass == auth &&
+					strings.Contains(f.Message, "credential "+key+" is missing")
+			}) {
+				t.Fatalf("missing exact authentication finding for %s: %+v", key, report.Findings)
+			}
+		}
+		out := ServeCheckStageResult{Validation: validation, Options: opts}
+		got := out.recordCompletionFailure(t.Context(), "source:"+report.SourceArtifactHash, summary)
+		for _, observation := range out.Validation.BootReport.Observations {
+			if observation.CheckID == "check_stage_completion" {
+				if observation.Status != bootverify.AdmissionFailed || observation.FailureClass != auth || observation.Cause != summary ||
+					got != summary || observation.Reason != summary.Error() || out.ExitCode() != 4 {
+					t.Fatalf("completion=%+v, cause=%v, exit=%d; want the original authentication refusal and exit 4", observation, got, out.ExitCode())
+				}
+				return
+			}
+		}
+		t.Fatal("completion observation missing from the credential report")
+	})
+	independent := errors.New("independent invalidity")
+	cleanup := failures.Wrap(native, "workspace_worker_outcome_uncertain", "workspace", "join_worker", nil, errors.New("independent cleanup"))
+	wrap := func(err error) error { return fmt.Errorf("wrapped: %w", err) }
+	for _, cell := range []struct {
+		name                  string
+		err, sibling, stopped error
+		report, recorded      failures.Class
+		includeWarning        bool
+		exit                  int
+	}{
+		{"unary", wrap(summary), nil, nil, auth, auth, false, 4},
+		{"singleton_join", errors.Join(summary), nil, nil, auth, schema, false, 2},
+		{"schema_after_summary", errors.Join(summary, independent), independent, nil, auth, schema, false, 2},
+		{"schema_before_summary", errors.Join(independent, summary), independent, nil, auth, schema, false, 2},
+		{"native_after_summary", errors.Join(summary, cleanup), cleanup, nil, auth, native, false, 4},
+		{"native_before_summary", errors.Join(cleanup, summary), cleanup, nil, auth, native, false, 4},
+		{"nested_wrapped_join", wrap(errors.Join(wrap(summary), errors.Join(wrap(cleanup)))), cleanup, nil, auth, native, false, 4},
+		{"unrelated_error", independent, nil, nil, auth, schema, false, 2},
+		{"joined_cancel", errors.Join(summary, context.Canceled), context.Canceled, nil, auth, unavailable, false, 130},
+		{"joined_deadline", errors.Join(context.DeadlineExceeded, summary), context.DeadlineExceeded, nil, auth, unavailable, false, 4},
+		{"already_canceled", summary, nil, context.Canceled, auth, unavailable, false, 130},
+		{"already_expired", errors.Join(summary, cleanup), cleanup, context.DeadlineExceeded, auth, unavailable, false, 4},
+		{"schema_report", summary, nil, nil, schema, schema, false, 2},
+		{"mixed_report", summary, nil, nil, schema, schema, true, 2},
+		{"excluded_warning", summary, nil, nil, unavailable, unavailable, true, 3},
+	} {
+		t.Run(cell.name, func(t *testing.T) {
+			ctx, cancel := t.Context(), func() {}
+			if cell.stopped == context.Canceled {
+				ctx, cancel = context.WithCancel(ctx)
+				cancel()
+			} else if cell.stopped == context.DeadlineExceeded {
+				ctx, cancel = context.WithDeadline(ctx, time.Now().Add(-time.Second))
+			}
+			defer cancel()
+			out := ServeCheckStageResult{Options: runtime.WorkflowContractValidationOptions{FatalBootWarnings: true}}
+			report := &out.Validation.BootReport
+			report.Purpose = bootverify.ExecutionValidation
+			report.Add(bootverify.Finding{CheckID: "owned", Severity: bootverify.SeverityHardInvalidity, FailureClass: cell.report, Message: "owned report refusal"})
+			if cell.includeWarning {
+				report.Add(bootverify.Finding{CheckID: "credential_key_exists", Severity: bootverify.SeveritySemanticDriftWarn, FailureClass: auth, Message: "credential missing"})
+				if cell.report == unavailable {
+					out.Options.ExcludedFatalBootWarningChecks = []string{"credential_key_exists"}
+				}
+			}
+			got := out.recordCompletionFailure(ctx, "source:test", cell.err)
+			if len(report.Observations) != 1 {
+				t.Fatalf("wanted one completion observation, got %+v", report.Observations)
+			}
+			observation := report.Observations[0]
+			if observation.CheckID != "check_stage_completion" || observation.FailureClass != cell.recorded || out.ExitCode() != cell.exit {
+				t.Fatalf("completion=%+v decision=%+v exit=%d", observation, out.Decision(), out.ExitCode())
+			}
+			for _, cause := range []error{cell.err, cell.sibling, cell.stopped} {
+				if cause != nil && (!errors.Is(got, cause) || !errors.Is(observation.Cause, cause)) {
+					t.Fatalf("lost cause %v: returned %v, observed %v", cause, got, observation.Cause)
+				}
+			}
+			if cell.stopped == nil && (got.Error() != cell.err.Error() || observation.Reason != cell.err.Error()) {
+				t.Fatalf("completion changed report text: returned %v, observed %q", got, observation.Reason)
 			}
 		})
 	}

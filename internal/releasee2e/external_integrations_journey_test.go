@@ -49,11 +49,19 @@ func runExternalMCPPublicJourneyBothStores(t *testing.T, unknownName bool) {
 			receipt := rand.Text()
 			policy, remoteCalls := externalMCPJourneyTransport(t, base, transport, receipt)
 			secrets := []string{"synthetic-mcp-secret", "synthetic-llm-secret"}
-			var rejections, inferences atomic.Int64
+			var businessSequence, rejections, inferences atomic.Int64
 			var model *llmapi.Server
 			model = llmapi.New(t, llmapi.OpenAICompatible, "/v1/chat/completions", "synthetic-llm-secret", func(request llmapi.Request) (llmapi.Reply, error) {
-				if request.Number == 1 && strings.Contains(string(request.Body), receipt) {
+				startupReply, startup := llmapi.StartupAnswer(request)
+				rawNumber := request.Number
+				if !startup {
+					request.Number = int(businessSequence.Add(1))
+				}
+				if (startup || request.Number == 1) && strings.Contains(string(request.Body), receipt) {
 					return llmapi.Reply{}, fmt.Errorf("hidden MCP receipt leaked before tool execution")
+				}
+				if startup {
+					return startupReply, nil
 				}
 				respond := externalMCPJourneyReply
 				if unknownName {
@@ -62,7 +70,7 @@ func runExternalMCPPublicJourneyBothStores(t *testing.T, unknownName bool) {
 				reply, err := respond(request)
 				if unknownName && request.Number == 3 && err != nil {
 					for _, observed := range model.Requests() {
-						if observed.Number > request.Number {
+						if observed.Number > rawNumber {
 							continue
 						}
 						body := strings.ReplaceAll(string(observed.Body), root, "[FIXTURE_ROOT]")
@@ -80,6 +88,14 @@ func runExternalMCPPublicJourneyBothStores(t *testing.T, unknownName bool) {
 				}
 				return reply, err
 			})
+			requireBusinessRequests := func() []llmapi.Request {
+				raw := model.Requests()
+				business := llmapi.ActorRequests(raw)
+				if len(raw) != 3 || len(business) != 2 || business[0].Number != 2 || business[1].Number != 3 {
+					t.Fatalf("model requests raw/business=%d/%d; want one startup followed by two business requests", len(raw), len(business))
+				}
+				return business
+			}
 			t.Cleanup(func() {
 				if rejections.Load() == 0 {
 					return
@@ -172,10 +188,10 @@ func runExternalMCPPublicJourneyBothStores(t *testing.T, unknownName bool) {
 					}
 				}
 			}
-			if calls != wantCalls || len(model.Requests()) != 2 {
-				t.Fatalf("MCP calls/model requests=%d/%d, want %d/2", calls, len(model.Requests()), wantCalls)
+			if calls != wantCalls {
+				t.Fatalf("MCP calls=%d, want %d", calls, wantCalls)
 			}
-			requireMCPJourneyWireInspection(t, ctx, process, published.RunID, model.Requests()[0].Body)
+			requireMCPJourneyWireInspection(t, ctx, process, published.RunID, requireBusinessRequests()[0].Body)
 			if !unknownName {
 				beforeReplay := remoteCalls()
 				var replay publication
@@ -185,8 +201,9 @@ func runExternalMCPPublicJourneyBothStores(t *testing.T, unknownName bool) {
 				if replayed := waitConnectorPublicResult(t, process, published.RunID, "external.completed", 1, secrets); replayed.EventID != completed.EventID {
 					t.Fatal("MCP replay replaced its public completion")
 				}
-				if count := len(model.Requests()); count != 2 || !reflect.DeepEqual(remoteCalls(), beforeReplay) {
-					t.Fatalf("MCP replay repeated model or remote work: model requests=%d", count)
+				requireBusinessRequests()
+				if !reflect.DeepEqual(remoteCalls(), beforeReplay) {
+					t.Fatal("MCP replay repeated remote work")
 				}
 			}
 			if err := process.stopAndWait(10 * time.Second); err != nil {
@@ -204,8 +221,9 @@ func runExternalMCPPublicJourneyBothStores(t *testing.T, unknownName bool) {
 					finalCalls++
 				}
 			}
-			if finalCalls != wantCalls || len(model.Requests()) != 2 {
-				t.Fatalf("joined shutdown observed late MCP/model work: calls=%d requests=%d", finalCalls, len(model.Requests()))
+			requireBusinessRequests()
+			if finalCalls != wantCalls {
+				t.Fatalf("joined shutdown observed late MCP work: calls=%d, want %d", finalCalls, wantCalls)
 			}
 			requireConnectorSecretsAbsent(t, process.output.String(), secrets)
 			t.Logf("real binary MCP discovery/agent/external-call/public-result; backend=%s transport=%s; elapsed=%s (shared build excluded)", backend, transport, time.Since(started))

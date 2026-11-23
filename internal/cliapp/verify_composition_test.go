@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
+	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/bootverify"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
@@ -448,14 +449,15 @@ func TestVerifyPublicExistingStoreReportsDeploymentPreparationBothStores(t *test
 					native, text := newVerifyCompositionBootStore(t, backend, root, complete)
 					configPath := filepath.Join(t.TempDir(), "runtime.yaml")
 					writeRuntimeConfigText(t, configPath, text+"llm: {backend: anthropic}\n")
+					runtimeID := uuid.NewString()
 					process, err := native.AcquireProcessCapability(ctx, startupownership.AcquireRequest{
-						OwnerID: "cleanup-survivors", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString(),
+						OwnerID: "cleanup-survivors", BootID: uuid.NewString(), RuntimeInstanceID: runtimeID,
 					})
 					if err != nil {
 						t.Fatal(err)
 					}
 					t.Cleanup(func() { _ = process.Release(context.Background()) })
-					original, err := startupownership.WithProcessMutationAuthority(ctx, process)
+					original, err := startupownership.WithProcessMutationAuthority(authoractivity.WithScope(ctx, authoractivity.RuntimeScope(runtimeID)), process)
 					if err != nil {
 						t.Fatal(err)
 					}
