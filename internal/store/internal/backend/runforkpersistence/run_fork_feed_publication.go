@@ -103,14 +103,8 @@ type runForkDeploymentProjection struct {
 	source *runfork.RunForkFanOutObligation
 }
 
-func projectRunForkDeploymentFeeds(ctx context.Context, tx *sql.Tx, data *storedurabledata.Owner, forkRunID, targetBundle string, plan runfork.RunForkPlan, pins []runtimedata.Pin, replay bool) ([]runForkDeploymentProjection, error) {
+func forkDeploymentSourceMembers(plan runfork.RunForkPlan) (map[string]runtimedata.DeploymentFeed, map[string]bool, error) {
 	sources := make(map[string]runtimedata.DeploymentFeed)
-	overrides := make([]runtimedata.ExplicitPin, 0)
-	for _, pin := range pins {
-		if pin.Selection == "fork_override" {
-			overrides = append(overrides, runtimedata.ExplicitPin{Declaration: pin.Declaration, VersionID: pin.VersionID})
-		}
-	}
 	all := plan.FanOutObligations
 	var parked map[string]bool
 	if selection := plan.DeploymentFeedSelection; selection != nil && len(selection.Parked) > 0 {
@@ -126,11 +120,25 @@ func projectRunForkDeploymentFeeds(ctx context.Context, tx *sql.Tx, data *stored
 			continue
 		}
 		if err := intent.Validate(); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		sources[intent.Request.Key.DeploymentFeedID] = runtimedata.DeploymentFeed{
 			RunID: plan.SourceRunID, BundleHash: intent.Request.Deployment.BundleHash, Declaration: intent.Source.Declaration,
 			VersionID: intent.Source.VersionID, SchemaDigest: intent.Request.Deployment.SchemaDigest, RowCount: uint64(intent.Request.Cardinality),
+		}
+	}
+	return sources, parked, nil
+}
+
+func projectRunForkDeploymentFeeds(ctx context.Context, tx *sql.Tx, data *storedurabledata.Owner, forkRunID, targetBundle string, plan runfork.RunForkPlan, pins []runtimedata.Pin, replay bool) ([]runForkDeploymentProjection, error) {
+	sources, parked, err := forkDeploymentSourceMembers(plan)
+	if err != nil {
+		return nil, err
+	}
+	overrides := make([]runtimedata.ExplicitPin, 0)
+	for _, pin := range pins {
+		if pin.Selection == "fork_override" {
+			overrides = append(overrides, runtimedata.ExplicitPin{Declaration: pin.Declaration, VersionID: pin.VersionID})
 		}
 	}
 	publications, err := storedurabledata.MaterializeForkFeedPublicationsTx(data, ctx, tx, plan.SourceRunID, forkRunID, targetBundle, sources, parked, overrides, replay)
