@@ -466,8 +466,14 @@ func proveSelectedCrossInstanceFork(t *testing.T, backend catalogRuntimeBackend,
 				}
 				route := childPublication.DeliveryRoutes[0]
 				localEvent, hasEvent := route.ConnectClaim.ReceiverEvent()
-				if route.Target.Route() != (events.RouteIdentity{FlowID: projected.TemplateID, FlowInstance: projected.InstancePath, EntityID: projected.EntityID}) || route.Recipient != originalRoute.Recipient || !route.ConnectClaim.Equal(originalRoute.ConnectClaim) || !hasEvent || localEvent == "" {
-					t.Fatalf("fork changed selected receiver/handler/claim: %+v", route)
+				wantTarget := events.RouteIdentity{FlowID: projected.TemplateID, FlowInstance: projected.InstancePath, EntityID: projected.EntityID}
+				targetMatches := route.Target.Route() == wantTarget
+				recipientMatches := route.Recipient == originalRoute.Recipient
+				claimMatches := route.ConnectClaim.Equal(originalRoute.ConnectClaim)
+				if !targetMatches || !recipientMatches || !claimMatches || !hasEvent || localEvent == "" {
+					t.Fatalf("fork changed selected receiver/handler/claim: target match=%t got=%+v want=%+v; recipient match=%t got=%+v want=%+v; claim match=%t got=%+v source=%+v; context got=%+v (life=%+v) source=%+v (life=%+v); receiver event=%q present=%t",
+						targetMatches, route.Target.Route(), wantTarget, recipientMatches, route.Recipient, originalRoute.Recipient,
+						claimMatches, route.ConnectClaim, originalRoute.ConnectClaim, route.Context, route.Context.Life, originalRoute.Context, originalRoute.Context.Life, localEvent, hasEvent)
 				}
 				id, err := deliverylifecycle.DeliveryID(childEvent, route)
 				if err != nil {

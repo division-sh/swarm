@@ -147,6 +147,7 @@ group.cross.requested:
 	writeClosedVariantFile(t, root, "events.yaml", groupEvents)
 	applyClosedReplacement(t, filepath.Join(root, "envelope/schema.yaml"), "inputs: [opened, root.audit, cross.requested]", "inputs: [opened, cross.requested, group.opened, group.cross.requested]\noutputs: [opened, cross.requested]")
 	applyClosedReplacement(t, filepath.Join(root, "envelope/schema.yaml"), "  - {event: root.audit, from: ., to: account, resolution: select}\n  - {event: root.audit, from: ., to: account/bridge/audit}\n", "")
+	applyClosedReplacement(t, filepath.Join(root, "envelope/events.yaml"), "root.audit:\n  account_id: text\n", "")
 	applyClosedReplacement(t, filepath.Join(root, "envelope/account/schema.yaml"), "inputs: [opened, root.audit, cross.forwarded]", "inputs: [opened, cross.forwarded]")
 	applyClosedReplacement(t, filepath.Join(root, "envelope/account/nodes.yaml"), "  root.audit: {}\n", "")
 	applyClosedReplacement(t, filepath.Join(root, "envelope/account/bridge/audit/schema.yaml"), "inputs: [ticket.done, root.audit, ticket.cross]", "inputs: [ticket.done, ticket.cross]")

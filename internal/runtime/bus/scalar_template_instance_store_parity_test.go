@@ -609,8 +609,17 @@ func proveCrossInstanceNativeBoundary(t *testing.T, backend, name string, shape 
 		if name == "nested_account_absent" && accountLookups != 2 {
 			t.Fatalf("nested path borrowed the earlier prepared account instead of native absence: lookups=%d", accountLookups)
 		}
-		if err := bus.Publish(ctx, event); err != nil {
-			t.Fatalf("publish counted nested refusal: %v", err)
+		publishErr := bus.Publish(ctx, event)
+		if name == "nested_receiver_unavailable" {
+			var terminated *runtimepipeline.TerminatedReceiverError
+			if !errors.As(publishErr, &terminated) || terminated.FlowID != accountFlow+"/bridge/audit" {
+				t.Fatalf("publish must refuse the terminated nested receiver: %v", publishErr)
+			}
+			if stored, found, err := selected.LoadPreparedPublishEvent(ctx, event.ID()); err != nil || found || len(stored.DeliveryRoutes) != 0 {
+				t.Fatalf("terminated receiver refusal committed a publication: found=%t routes=%+v error=%v", found, stored.DeliveryRoutes, err)
+			}
+		} else if publishErr != nil {
+			t.Fatalf("publish counted nested refusal: %v", publishErr)
 		}
 		if routes, err := selected.ListEventDeliveryRoutes(ctx, event.ID()); err != nil || len(routes) != 0 {
 			t.Fatalf("refused nested path committed deliveries: %+v err=%v", routes, err)

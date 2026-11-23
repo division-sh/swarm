@@ -1796,8 +1796,17 @@ func TestLowerCompositionConnectRoutePlanWithLocationFailsClosedForInvalidInputs
 		}
 		graph := CompileConnectGraph(semanticview.Wrap(bundle))
 		issues := graph.Issues()
-		if len(issues) != 1 || issues[0].Failure != ConnectFailureDeliveryTopologyInvalid || !strings.Contains(issues[0].Detail, "account/schema.yaml") {
-			t.Fatalf("another event's typed source authorized this edge: %+v", issues)
+		if len(issues) != 1 || issues[0].Failure != ConnectFailureInstanceResolutionInvalid ||
+			issues[0].Detail != "resolution source payload.source_account_id has no declared type on input event ticket.cross" ||
+			issues[0].Connect.From != "account/ticket" || issues[0].Connect.To != "account" ||
+			!strings.HasPrefix(issues[0].AuthoredLocation, "schema.yaml:") {
+			t.Fatalf("wrong refusal for the invalid own-row key: %+v", issues)
+		}
+		for _, plan := range graph.Plans() {
+			row := plan.Readback()
+			if row.Source.FlowID == "account/ticket" && row.Source.LocalEvent == "ticket.cross" && row.Receiver.FlowID == "account" {
+				t.Fatalf("another event's typed source authorized this edge: %+v", row)
+			}
 		}
 	})
 	t.Run("missing_admitted_selector_cannot_waive_height", func(t *testing.T) {
