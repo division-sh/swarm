@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
@@ -38,6 +40,7 @@ func VerifyGateReplacementKeepsEqualAndReplacesChangedBothStoresForTest(t *testi
 				if err != nil || !found {
 					t.Fatalf("read original header: %t %v", found, err)
 				}
+				mutationHistory := fixture.MutationHistory(ctx, old.RunID, before.EntityID)
 				if change == "route" {
 					equal := gateLifecycleDocuments()
 					equal["schema.yaml"] += "\n# retained equal intermediate B\n"
@@ -82,6 +85,9 @@ func VerifyGateReplacementKeepsEqualAndReplacesChangedBothStoresForTest(t *testi
 				if change == "source_only" || change == "context" {
 					if len(cards) != 1 || !reflect.DeepEqual(old, current) || !reflect.DeepEqual(before, after) {
 						t.Fatal("equal offer changed issuance or workflow state")
+					}
+					if got := fixture.MutationHistory(ctx, old.RunID, before.EntityID); !reflect.DeepEqual(got, mutationHistory) {
+						t.Fatalf("equal offer changed entity mutation history: before=%+v after=%+v", mutationHistory, got)
 					}
 					return
 				}
@@ -249,12 +255,14 @@ func VerifyGateReplacementRollbackAcrossRunsBothStoresForTest(t *testing.T, open
 				t.Fatal(err)
 			}
 			before := map[string]WorkflowInstance{}
+			mutationsBefore := map[string][]PipelineNativeMutationRowForTest{}
 			for _, run := range runs {
 				header, found, err := fixture.Persistence.LoadWorkflowInstance(contexts[run], testRunScopedWorkflowInstanceFromContext(contexts[run], run))
 				if err != nil || !found {
 					t.Fatalf("retain every original header: %t %v", found, err)
 				}
 				before[run] = header
+				mutationsBefore[run] = fixture.MutationHistory(contexts[run], run, header.EntityID)
 			}
 			changes := gateReplacementChangesForTest(t, fixture, firstCtx)
 			history := gateReplacementHistoryForTest(t, fixture, firstCtx)
@@ -279,6 +287,9 @@ func VerifyGateReplacementRollbackAcrossRunsBothStoresForTest(t *testing.T, open
 			}
 			for _, run := range runs {
 				ctx := contexts[run]
+				if got := fixture.MutationHistory(ctx, run, before[run].EntityID); !reflect.DeepEqual(got, mutationsBefore[run]) {
+					t.Fatalf("rollback leaked entity mutation history for %s: before=%+v after=%+v", run, mutationsBefore[run], got)
+				}
 				cards := gateReplacementCardsForTest(t, fixture, ctx)
 				header, found, err := fixture.Persistence.LoadWorkflowInstance(ctx, testRunScopedWorkflowInstanceFromContext(ctx, run))
 				if err != nil || !found || !reflect.DeepEqual(header, before[run]) || len(cards) != 1 || !reflect.DeepEqual(cards[0], old[run]) {
@@ -349,9 +360,36 @@ func VerifyGateReplacementRollbackAcrossRunsBothStoresForTest(t *testing.T, open
 					t.Fatalf("final retry lost candidate source in %s: %+v %v", run, available, err)
 				}
 				gateReplacementCurrentForTest(t, fixture, contexts[run], old[run], cards, available.BundleHash)
+				after, found, err := fixture.Persistence.LoadWorkflowInstance(contexts[run], testRunScopedWorkflowInstanceFromContext(contexts[run], run))
+				if err != nil || !found {
+					t.Fatalf("retry header for %s: found=%t err=%v", run, found, err)
+				}
+				requireUpgradeGateMutationForTest(t, mutationsBefore[run], fixture.MutationHistory(contexts[run], run, after.EntityID), before[run], after)
 			}
 		})
 	}
+}
+
+func requireUpgradeGateMutationForTest(t *testing.T, before, after []PipelineNativeMutationRowForTest, oldState, newState WorkflowInstance) {
+	t.Helper()
+	oldBucket, oldErr := canonicaljson.Bytes(oldState.StateBuckets[gateruntime.BucketKey])
+	newBucket, newErr := canonicaljson.Bytes(newState.StateBuckets[gateruntime.BucketKey])
+	if oldErr != nil || newErr != nil || bytes.Equal(oldBucket, newBucket) || len(after) != len(before)+1 {
+		t.Fatalf("want one changed gate-bucket mutation: before=%d after=%d old=%s new=%s err=%v/%v",
+			len(before), len(after), oldBucket, newBucket, oldErr, newErr)
+	}
+	for i, row := range after {
+		if row.Domain != "accumulator" || row.Path != gateruntime.BucketKey || row.WriterID != "workflow_engine" {
+			continue
+		}
+		oldValue, oldErr := canonicaljson.Canonicalize(row.OldValue)
+		newValue, newErr := canonicaljson.Canonicalize(row.NewValue)
+		if oldErr == nil && newErr == nil && bytes.Equal(oldValue, oldBucket) && bytes.Equal(newValue, newBucket) &&
+			reflect.DeepEqual(before, slices.Delete(slices.Clone(after), i, i+1)) {
+			return
+		}
+	}
+	t.Fatalf("missing exact old-to-new gate mutation: old=%s new=%s history=%+v", oldBucket, newBucket, after)
 }
 
 func candidateBundleHashForTest(t *testing.T, source semanticview.Source) string {
