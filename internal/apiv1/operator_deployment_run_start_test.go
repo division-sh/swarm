@@ -246,7 +246,7 @@ func TestRunForkPublicationSelectsOnePendingFeedAcrossSelectedStores(t *testing.
 		data := map[string]any{"imports": []any{
 			dataRunFusedImport(uuid.NewString(), first, durabledata.AbsentHead(), []byte("{\"topic\":\"named\"}\n")),
 			dataRunFusedImport(uuid.NewString(), second, durabledata.AbsentHead(), []byte("{\"label\":\"other\"}\n")),
-		}}
+		}, "pins": []any{}}
 		started := rpcCall(t, handler, deploymentRunStartBody(runID, uuid.NewString(), bundle, data))
 		if started.Error != nil {
 			t.Fatalf("two-feed start: %+v", started.Error)
