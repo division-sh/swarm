@@ -16,6 +16,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
+	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/mcp"
@@ -279,7 +281,18 @@ func (c *ManagedProviderBootChecks) ValidateConfiguration(ctx context.Context, c
 	return ctx.Err()
 }
 
-func (c *ManagedProviderBootChecks) startupResponse(ctx context.Context, cfg *config.Config, credentials llm.ProviderCredentialResolver, target ManagedProviderCheckTarget, prompt string, planned []managedcapabilities.PlannedTool) (*llm.Response, error) {
+func (c *ManagedProviderBootChecks) startupResponse(ctx context.Context, cfg *config.Config, credentials llm.ProviderCredentialResolver, target ManagedProviderCheckTarget, modelRuntime llm.Runtime, prompt string, tools []llm.ToolDefinition, capabilities toolcapabilities.Set) (*llm.Response, error) {
+	if c == nil || target.Actor.ExecutionMode != runtimeeffects.ExecutionModeLive {
+		return nil, nil
+	}
+	contract, ok := llm.ProviderContractForRuntime(modelRuntime)
+	if !ok {
+		return nil, fmt.Errorf("managed capability surface requires provider contract")
+	}
+	planned, err := llm.CompileManagedCapabilityAdmission(target.Actor, contract, tools, capabilities)
+	if err != nil {
+		return nil, err
+	}
 	if err := c.ValidateConfiguration(ctx, cfg, credentials); err != nil {
 		return nil, err
 	}
@@ -325,6 +338,9 @@ func providerStartupCheckKey(cfg *config.Config, credential llm.ProviderCredenti
 }
 
 func (c *ManagedProviderBootChecks) validateTargets(ctx context.Context, cfg *config.Config, credentials llm.ProviderCredentialResolver, candidates []managedProviderPreflightAgent) error {
+	if c == nil {
+		return nil
+	}
 	if err := c.ValidateConfiguration(ctx, cfg, credentials); err != nil {
 		return err
 	}
