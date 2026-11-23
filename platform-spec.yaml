@@ -15338,7 +15338,10 @@ flow_model:
             inputs:
               - deploy.completed
       parent_connect:
-        location: 'schema.yaml connect at the exact declared-path least common ancestor, except for a proper descendant addressing another instance of a keyed ancestor: that connection belongs at the keyed receiver''s immediate structural parent and selects the receiver through its existing admitted per-edge key source.'
+        location: |
+          schema.yaml connect at the exact declared-path least common ancestor.
+          A row that sends to another instance of a keyed flow is written in the schema.yaml just above that keyed flow and names the target by `key_from`. It may send from a flow inside the keyed flow to the keyed flow, from the keyed flow to another instance of it, or from a flow inside it to a flow inside the other instance. The sender stays who it is.
+          Such a row chooses one keyed flow. A target that would need it to choose a second keyed flow, such as a ticket inside another account, is refused for now.
         canonical_form: |
           `connect` is a list of event-centric structured connections. Each entry is owned by the exact FlowNode containing its schema.yaml and names one source event visible in that flow, one producer flow, one receiver flow, and optional receiver-event rename. `from` and `to` contain exact flow IDs visible from that authoring FlowNode; `.` is the sole sentinel for the authoring flow. They never contain pin identities, runtime instance paths, or guessed event spellings.
           A keyless intermediate owner does not authorize moving the row higher. A selector on another producer/event/branch is not evidence for this row. Lexically bound ancestors remain bound; their keys are not supplied again.
@@ -15349,7 +15352,9 @@ flow_model:
           to: Required exact receiver flow ID, or `.` for this row's authoring flow.
           rename: |
             Optional exact canonical receiver-visible event identity when it differs from `event`. It follows the same admission grammar as `event`; a value equal after canonical event normalization is hard-invalid redundancy rather than an accepted alternate spelling.
-          resolution: Exact scalar create, select or select-or-create for an ordinary template edge; explicit empty, null, mappings, lists, fan-in, reply and fan-out values are invalid here.
+          resolution: |
+            Exact scalar create, select or select-or-create for an ordinary template edge; explicit empty, null, mappings, lists, fan-in, reply and fan-out values are invalid here.
+            An edge to a keyless flow inside another instance of a keyed flow uses `resolution: select` to choose that existing keyed instance. The edge creates or restarts nothing. Other keyless receivers still have no authored resolution.
           key_from: Exact top-level payload.<different-field>, generated.uuid or event.id source; requires resolution, and intrinsic sources require create. Omit the same-name payload source rather than restating it.
           replies_to: Exact request event on the reverse connection, owned by this response edge.
           correlation_key: Optional field required to be scalar and non-optional in both the request and reply event schemas, with request type assignable to reply type; requires replies_to. Omission uses the original request event ID.
@@ -15392,7 +15397,9 @@ flow_model:
       receiver_route_key_present: Ordinary template edges must resolve one valid receiver instance field, required default payload source or exact connect.key_from override, and explicit connect.resolution. Static receivers that need no runtime selection may lower to a statically unique receiver.
       key_types_compatible: |
         Source and target key types must be directionally compatible before route-plan lowering. Integer sources may widen to numeric receiver fields; numeric sources MUST NOT narrow to integer receiver fields.
-      receiver_resolution_valid: Connection-owned ordinary resolution/source, receiver scalar identity, and response-edge paired reply facts must be internally valid and unambiguous. Retired fan-in/fan-out pin policy cannot repair missing or ambiguous receiver authority.
+      receiver_resolution_valid: |
+        Connection-owned ordinary resolution/source, receiver scalar identity, and response-edge paired reply facts must be internally valid and unambiguous. Retired fan-in/fan-out pin policy cannot repair missing or ambiguous receiver authority.
+        Verify errors include: keyless receiver with a resolution, except `resolution: select` on a row that chooses an existing keyed ancestor in another instance.
       inference_unambiguous: |
         Compiler resolution is allowed only when exactly one producer output and receiver input match their authoring-flow-visible event identities. There is no first-match, pin-name fallback, suffix/leaf match, dot-to-underscore guess, or global resolved-event search.
       lowered_route_plan_concrete: Accepted connections must lower to concrete route-plan inputs; no runtime path may recover by broadcasting or reinterpreting authored aliases.
