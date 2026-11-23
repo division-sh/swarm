@@ -23,7 +23,7 @@ func (c *Controller) serveListener(listener net.Listener, cancelStartup context.
 	}
 	c.serveErr = err
 	if c.opts.Readiness != nil {
-		c.opts.Readiness.RevokeExposure(err.Error())
+		c.opts.Readiness.registration.revokeExposure(err.Error(), "listener stopped")
 	}
 	started := c.supervising
 	c.mu.Unlock()
@@ -48,7 +48,7 @@ func (c *Controller) obsoleteQuickProbeLocked(generation Generation) bool {
 	return c.quickCommit != nil && (c.quickLost || generation.ID != c.generation.ID)
 }
 
-func (c *Controller) applyListenerProbe(generation Generation, at time.Time, install bool, probeErr error) (bool, error) {
+func (c *Controller) applyListenerProbe(generation Generation, at, expiry time.Time, install bool, probeErr error) (bool, error) {
 	var authority string
 	if probeErr == nil && c.opts.Readiness != nil {
 		authority = c.startupAuthority()
@@ -60,7 +60,7 @@ func (c *Controller) applyListenerProbe(generation Generation, at time.Time, ins
 	}
 	if probeErr != nil {
 		if c.opts.Readiness != nil {
-			c.opts.Readiness.RevokeExposure(probeErr.Error())
+			c.opts.Readiness.registration.revokeExposure(probeErr.Error(), "route check failed")
 		}
 		return false, probeErr
 	}
@@ -74,7 +74,7 @@ func (c *Controller) applyListenerProbe(generation Generation, at time.Time, ins
 	if c.opts.Readiness != nil {
 		c.opts.Readiness.SetExposure(ExposureEvidence{
 			GenerationID: generation.ID, Mode: generation.Mode, PublicOrigin: generation.PublicOrigin,
-			ListenAddress: generation.ListenAddress, StartupAuthorityID: authority, ObservedAt: at, ExpiresAt: at.Add(EvidenceTTL),
+			ListenAddress: generation.ListenAddress, StartupAuthorityID: authority, ObservedAt: at, ExpiresAt: at.Add(EvidenceTTL), CertificateExpiry: expiry,
 		})
 	}
 	return true, nil

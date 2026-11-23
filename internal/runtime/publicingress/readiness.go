@@ -29,6 +29,7 @@ type ExposureEvidence struct {
 	ObservedAt         time.Time `json:"observed_at"`
 	ExpiresAt          time.Time `json:"expires_at"`
 	Failure            string    `json:"failure,omitempty"`
+	CertificateExpiry  time.Time `json:"-"`
 }
 
 type RegistrationEvidence struct {
@@ -57,6 +58,14 @@ type Snapshot struct {
 	Exposure             *ExposureEvidence      `json:"exposure,omitempty"`
 	Registrations        []RegistrationEvidence `json:"registrations,omitempty"`
 	Failure              string                 `json:"failure,omitempty"`
+	Display              DisplayEvidence        `json:"-"`
+}
+
+type DisplayEvidence struct {
+	Revision                                          uint64
+	Sampled                                           time.Time
+	RouteProved, SelectionKnown, RegistrationsCurrent bool
+	RouteReason                                       string
 }
 
 type ChannelRegistrationCurrentness struct {
@@ -76,6 +85,9 @@ type registrationProcessSnapshot struct {
 	registrations    map[string]registrationState
 	routes           map[string]struct{}
 	failure          string
+	routeReason      string
+
+	selectionFor, exposureGeneration string
 }
 
 type RegistrationSnapshotOwner struct {
@@ -141,20 +153,24 @@ func (o *RegistrationSnapshotOwner) setExposure(evidence ExposureEvidence) {
 		next.exposureRevision++
 		copy := evidence
 		next.exposure = &copy
+		next.exposureGeneration = evidence.GenerationID
 		next.failure = strings.TrimSpace(evidence.Failure)
+		next.routeReason = ""
 	})
 }
 
-func (o *RegistrationSnapshotOwner) revokeExposure(cause string) {
+func (o *RegistrationSnapshotOwner) revokeExposure(cause, reason string) {
 	o.mutate(func(next *registrationProcessSnapshot) {
 		next.exposureRevision++
 		next.exposure = nil
 		next.failure = strings.TrimSpace(cause)
+		next.routeReason = reason
 	})
 }
 
-func (o *RegistrationSnapshotOwner) replaceSelected(pairs []admittedPair) {
+func (o *RegistrationSnapshotOwner) replaceSelected(pairs []admittedPair, generation string) {
 	o.mutate(func(next *registrationProcessSnapshot) {
+		next.selectionFor = generation
 		selected := make(map[string]registrationState, len(pairs))
 		routes := make(map[string]struct{}, len(pairs))
 		for _, candidate := range pairs {
@@ -273,6 +289,9 @@ func cloneRegistrationProcessSnapshot(source registrationProcessSnapshot) regist
 		registrations:    make(map[string]registrationState, len(source.registrations)),
 		routes:           make(map[string]struct{}, len(source.routes)),
 		failure:          source.failure,
+		routeReason:      source.routeReason,
+
+		selectionFor: source.selectionFor, exposureGeneration: source.exposureGeneration,
 	}
 	if source.exposure != nil {
 		copy := *source.exposure
@@ -351,7 +370,7 @@ func (o *ReadinessOwner) SetExposure(evidence ExposureEvidence) {
 
 func (o *ReadinessOwner) RevokeExposure(cause string) {
 	if o != nil {
-		o.registration.revokeExposure(cause)
+		o.registration.revokeExposure(cause, "")
 	}
 }
 
@@ -366,6 +385,7 @@ func (o *ReadinessOwner) evaluate(ctx context.Context, now time.Time) evaluatedR
 	if o == nil {
 		return evaluatedRegistrationSnapshot{}
 	}
+	sampled := now
 	now = now.UTC()
 	o.mu.RLock()
 	output := Snapshot{RuntimeReady: o.runtimeReady, PublicIngressEnabled: o.enabled}
@@ -413,7 +433,8 @@ func (o *ReadinessOwner) evaluate(ctx context.Context, now time.Time) evaluatedR
 		}
 		output.Registrations = append(output.Registrations, evidence)
 	}
-	if !o.registration.currentRevision(process.revision) {
+	coherent := o.registration.currentRevision(process.revision)
+	if !coherent {
 		exposureReady = false
 		registrationsReady = false
 		output.Failure = "public ingress registration snapshot changed during currentness evaluation"
@@ -423,6 +444,9 @@ func (o *ReadinessOwner) evaluate(ctx context.Context, now time.Time) evaluatedR
 	}
 	output.PublicIngressReady = exposureReady && registrationsReady
 	output.Ready = output.RuntimeReady && output.PublicIngressReady
+	output.Display = DisplayEvidence{Revision: process.revision, Sampled: sampled, RouteProved: exposureReady && exposure != nil,
+		SelectionKnown:       coherent && process.selectionFor != "" && process.selectionFor == process.exposureGeneration,
+		RegistrationsCurrent: registrationsReady, RouteReason: process.routeReason}
 	return evaluatedRegistrationSnapshot{snapshot: process, output: output, current: currentByKey, exposureReady: exposureReady}
 }
 
@@ -521,9 +545,17 @@ func registrationStateCurrent(
 }
 
 func (o *ReadinessOwner) Snapshot(now time.Time) Snapshot {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	return o.snapshot(context.Background(), now)
+}
+
+func (o *ReadinessOwner) snapshot(ctx context.Context, now time.Time) Snapshot {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	return o.evaluate(ctx, now).output
+}
+
+func (o *ReadinessOwner) DisplayCurrent(revision uint64) bool {
+	return o != nil && o.registration.currentRevision(revision)
 }
 
 // ChannelRegistrationCurrent resolves one exact connected-channel

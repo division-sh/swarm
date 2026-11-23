@@ -177,6 +177,9 @@ func TestPublicIngressListenerFailureStopsServing(t *testing.T) {
 			}
 			code, exited := p.waitForExit(5 * time.Second)
 			output := p.outputString()
+			if !strings.Contains(output, "route not proved") || !strings.Contains(output, "reason: listener stopped") {
+				t.Errorf("listener failure did not print the redacted terminal route status")
+			}
 			if !exited || code == 0 || strings.Contains(output, "shutdown · complete") ||
 				!strings.Contains(output, "public ingress") || strings.Count(output, "use of closed network connection") != 1 ||
 				(phase == "before_ready" && strings.Contains(output, "ready in ")) {

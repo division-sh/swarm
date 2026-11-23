@@ -73,6 +73,8 @@ type Options struct {
 	OnGeneration      func(context.Context, Generation) error
 	OnFatal           func(error)
 	Now               func() time.Time
+
+	OnRouteObservation func(Snapshot)
 }
 
 type Controller struct {
@@ -332,7 +334,8 @@ func (c *Controller) establish(ctx context.Context) (err error) {
 		}
 		publicOrigin = "https://" + hostname
 	}
-	if err := c.probePublicRouteWithRetry(ctx, publicOrigin); err != nil {
+	var expiry time.Time
+	if err := c.probePublicRouteWithRetry(ctx, publicOrigin, &expiry); err != nil {
 		return err
 	}
 	releaseCommit, err = c.beginQuickCommit(ctx)
@@ -340,7 +343,7 @@ func (c *Controller) establish(ctx context.Context) (err error) {
 		return err
 	}
 	generation := Generation{ID: uuid.NewString(), Mode: c.opts.Mode, PublicOrigin: publicOrigin, ListenAddress: c.listener.Addr().String(), CreatedAt: c.opts.Now().UTC()}
-	if _, err := c.applyListenerProbe(generation, generation.CreatedAt, true, nil); err != nil {
+	if _, err := c.applyListenerProbe(generation, generation.CreatedAt, expiry, true, nil); err != nil {
 		return err
 	}
 	published = true
@@ -385,6 +388,9 @@ func (c *Controller) supervise(ctx context.Context) {
 			}
 			c.revokeQuickExposure("managed tunnel stopped: " + errorText(cause))
 			log.Printf("public ingress degraded: managed tunnel stopped: %s; attempting replacement", errorText(cause))
+			if snapshot, ok := c.captureRouteObservation(ctx); ok {
+				c.opts.OnRouteObservation(snapshot)
+			}
 			if !c.replaceManagedTunnel(ctx) {
 				return
 			}
@@ -404,6 +410,9 @@ func (c *Controller) replaceManagedTunnel(ctx context.Context) bool {
 		last := c.establish(ctx)
 		if last == nil {
 			log.Printf("public ingress restored with generation %s", c.Generation().ID)
+			if snapshot, ok := c.captureRouteObservation(ctx); ok {
+				c.opts.OnRouteObservation(snapshot)
+			}
 			return true
 		}
 		if c.ListenerFailure() != nil {
@@ -427,7 +436,7 @@ func (c *Controller) revokeQuickExposure(cause string) {
 	defer c.mu.Unlock()
 	c.quickLost = true
 	if c.opts.Readiness != nil {
-		c.opts.Readiness.RevokeExposure(cause)
+		c.opts.Readiness.registration.revokeExposure(cause, "route lost")
 	}
 }
 
@@ -453,7 +462,8 @@ func (c *Controller) renew(ctx context.Context, register bool) (reachability, re
 	if generation.ID == "" {
 		return fmt.Errorf("public exposure generation is unavailable"), nil
 	}
-	probeErr := c.probePublicRoute(ctx, generation.PublicOrigin)
+	var expiry time.Time
+	probeErr := c.probePublicRoute(ctx, generation.PublicOrigin, &expiry)
 	release, err := c.beginQuickCommit(ctx)
 	if err != nil {
 		c.mu.RLock()
@@ -468,7 +478,7 @@ func (c *Controller) renew(ctx context.Context, register bool) (reachability, re
 		return err, nil
 	}
 	defer release()
-	current, err := c.applyListenerProbe(generation, c.opts.Now().UTC(), false, probeErr)
+	current, err := c.applyListenerProbe(generation, c.opts.Now().UTC(), expiry, false, probeErr)
 	if err != nil {
 		return err, nil
 	}
@@ -495,9 +505,30 @@ func (c *Controller) renewPass(ctx context.Context, register bool) (selected boo
 	if err != nil {
 		return false, err, nil
 	}
-	defer func() { finish(cmp.Or(reachability, registration)) }()
+	defer func() {
+		var snapshot Snapshot
+		var observed bool
+		if register {
+			snapshot, observed = c.captureRouteObservation(ctx)
+			if registration != nil {
+				snapshot.Display.SelectionKnown = false
+			}
+		}
+		finish(cmp.Or(reachability, registration))
+		if observed {
+			c.opts.OnRouteObservation(snapshot)
+		}
+	}()
 	reachability, registration = c.renew(ctx, register)
 	return true, reachability, registration
+}
+
+func (c *Controller) captureRouteObservation(ctx context.Context) (Snapshot, bool) {
+	if c.opts.OnRouteObservation == nil || c.opts.Readiness == nil || ctx.Err() != nil {
+		return Snapshot{}, false
+	}
+	snapshot := c.opts.Readiness.snapshot(ctx, time.Now())
+	return snapshot, ctx.Err() == nil
 }
 
 func (c *Controller) beginUpdate(ctx context.Context, generation bool) (context.Context, func(error), error) {
@@ -643,7 +674,7 @@ func (c *Controller) probeProof(challenge string) string {
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
 
-func (c *Controller) probePublicRoute(ctx context.Context, origin string) error {
+func (c *Controller) probePublicRoute(ctx context.Context, origin string, expiry *time.Time) error {
 	probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	request, err := http.NewRequestWithContext(probeCtx, http.MethodGet, strings.TrimRight(origin, "/")+"/webhooks/_swarm_probe/"+c.nonce, nil)
@@ -710,10 +741,13 @@ func (c *Controller) probePublicRoute(ctx context.Context, origin string) error 
 	if !hmac.Equal([]byte(response.Header.Get(probeProofHeader)), []byte(c.probeProof(challenge))) {
 		return errors.New("prove public webhook route")
 	}
+	if state := response.TLS; expiry != nil && c.opts.Mode == ModeNativeTLS && state != nil && !state.DidResume && len(state.VerifiedChains) != 0 && len(state.VerifiedChains[0]) != 0 {
+		*expiry = state.VerifiedChains[0][0].NotAfter
+	}
 	return nil
 }
 
-func (c *Controller) probePublicRouteWithRetry(ctx context.Context, origin string) error {
+func (c *Controller) probePublicRouteWithRetry(ctx context.Context, origin string, expiry *time.Time) error {
 	var failures []error
 	for attempt, backoff := range append([]time.Duration{0}, time.Second, 2*time.Second, 4*time.Second) {
 		if backoff > 0 {
@@ -725,7 +759,7 @@ func (c *Controller) probePublicRouteWithRetry(ctx context.Context, origin strin
 				return err
 			}
 		}
-		err := c.probePublicRoute(ctx, origin)
+		err := c.probePublicRoute(ctx, origin, expiry)
 		if err == nil {
 			return nil
 		}

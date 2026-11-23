@@ -52,6 +52,13 @@ func TestPublicIngressReadinessRevocationAndRegistrationReplacement(t *testing.T
 	owner := NewReadinessOwner(true)
 	owner.SetRuntimeReady(true)
 	owner.SetExposure(ExposureEvidence{GenerationID: "exposure-1", ObservedAt: now, ExpiresAt: now.Add(EvidenceTTL)})
+	if snapshot := owner.Snapshot(now); !snapshot.Display.RouteProved || snapshot.Display.SelectionKnown {
+		t.Fatalf("proved route did not distinguish unknown selection: %+v", snapshot.Display)
+	}
+	owner.registration.replaceSelected(nil, "exposure-1")
+	if snapshot := owner.Snapshot(now); !snapshot.Display.SelectionKnown || len(snapshot.Registrations) != 0 {
+		t.Fatalf("empty selection was not observed: %+v", snapshot.Display)
+	}
 	installReadinessRegistration(t, owner, RegistrationEvidence{BindingID: "old", Target: "old", Applied: true, CallbackMatched: true, ObservedAt: now, ExpiresAt: now.Add(EvidenceTTL)})
 	installReadinessRegistration(t, owner, RegistrationEvidence{BindingID: "current", Target: "current", Applied: true, CallbackMatched: true, ObservedAt: now, ExpiresAt: now.Add(EvidenceTTL)})
 	currentPair := RegistrationPair{BindingID: "current", Target: RegistrationTarget{Selector: "current"}}
@@ -59,7 +66,7 @@ func TestPublicIngressReadinessRevocationAndRegistrationReplacement(t *testing.T
 	if !ok {
 		t.Fatal("current registration state is missing")
 	}
-	owner.registration.replaceSelected([]admittedPair{{pair: current.Pair, slotID: current.SelectionSlotID}})
+	owner.registration.replaceSelected([]admittedPair{{pair: current.Pair, slotID: current.SelectionSlotID}}, "exposure-1")
 	snapshot := owner.Snapshot(now)
 	if len(snapshot.Registrations) != 1 || snapshot.Registrations[0].BindingID != "current" {
 		t.Fatalf("registrations = %#v, want current only", snapshot.Registrations)
@@ -68,6 +75,11 @@ func TestPublicIngressReadinessRevocationAndRegistrationReplacement(t *testing.T
 	snapshot = owner.Snapshot(now)
 	if snapshot.Ready || snapshot.Exposure != nil || snapshot.Failure != "tunnel unavailable" || snapshot.Registrations[0].CallbackMatched {
 		t.Fatalf("revoked snapshot = %#v", snapshot)
+	}
+	owner.SetExposure(ExposureEvidence{GenerationID: "replacement", ObservedAt: now, ExpiresAt: now.Add(EvidenceTTL)})
+	owner.registration.replaceSelected(nil, "exposure-1")
+	if snapshot := owner.Snapshot(now); !snapshot.Display.RouteProved || snapshot.Display.SelectionKnown {
+		t.Fatalf("late empty selection became evidence for replacement: %+v", snapshot.Display)
 	}
 }
 
@@ -97,16 +109,16 @@ func TestRegistrationSnapshotSelectionReplacesRoutesAndStatesAtomically(t *testi
 	left := RegistrationPair{BindingID: "left", Target: RegistrationTarget{Selector: "ingress:left:telegram", Alias: "left", Provider: "telegram"}}
 	right := RegistrationPair{BindingID: "right", Target: RegistrationTarget{Selector: "ingress:right:telegram", Alias: "right", Provider: "telegram"}}
 	leftSlot, rightSlot := "provider:slot:left", "provider:slot:right"
-	owner.replaceSelected([]admittedPair{{pair: left, slotID: leftSlot}})
+	owner.replaceSelected([]admittedPair{{pair: left, slotID: leftSlot}}, "")
 
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
 		for index := 0; index < 2000; index++ {
 			if index%2 == 0 {
-				owner.replaceSelected([]admittedPair{{pair: right, slotID: rightSlot}})
+				owner.replaceSelected([]admittedPair{{pair: right, slotID: rightSlot}}, "")
 			} else {
-				owner.replaceSelected([]admittedPair{{pair: left, slotID: leftSlot}})
+				owner.replaceSelected([]admittedPair{{pair: left, slotID: leftSlot}}, "")
 			}
 		}
 	}()
@@ -137,7 +149,7 @@ func TestRegistrationSnapshotInvalidatesChangedSameKeyBeforeReconcile(t *testing
 		Target:    RegistrationTarget{Selector: "ingress:support:telegram", Alias: "support", Provider: "telegram"},
 	}
 	const slotID = "provider:slot:binding"
-	owner.replaceSelected([]admittedPair{{pair: pair, slotID: slotID}})
+	owner.replaceSelected([]admittedPair{{pair: pair, slotID: slotID}}, "")
 	key := registrationSelectionKey(pair, slotID)
 	state, ok := owner.state(key)
 	if !ok {
@@ -150,7 +162,7 @@ func TestRegistrationSnapshotInvalidatesChangedSameKeyBeforeReconcile(t *testing
 
 	changed := pair
 	changed.Target.BundleHash = "replacement-source"
-	owner.replaceSelected([]admittedPair{{pair: changed, slotID: slotID}})
+	owner.replaceSelected([]admittedPair{{pair: changed, slotID: slotID}}, "")
 	invalidated, ok := owner.state(registrationSelectionKey(changed, slotID))
 	if !ok || invalidated.SelectedBase != "" || invalidated.Failure == "" || invalidated.LastVerified == nil {
 		t.Fatalf("changed same-key selection state = %#v", invalidated)
@@ -207,6 +219,6 @@ func installReadinessRegistration(t *testing.T, owner *ReadinessOwner, evidence 
 		pairs = append(pairs, admittedPair{pair: existing.Pair, slotID: existing.SelectionSlotID})
 	}
 	pairs = append(pairs, admittedPair{pair: pair, slotID: slotID})
-	owner.registration.replaceSelected(pairs)
+	owner.registration.replaceSelected(pairs, "")
 	owner.registration.publishState(registrationSelectionKey(pair, slotID), state)
 }

@@ -106,6 +106,8 @@ type serveLifecyclePresenter struct {
 	warningsWritten    bool
 	bootWritten        bool
 	terminalWritten    bool
+	webhookLine        string
+	webhookSampled     time.Time
 }
 
 func newServeLifecyclePresenter(opts cliapp.ServeOptions) *serveLifecyclePresenter {
