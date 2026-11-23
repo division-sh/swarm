@@ -3150,6 +3150,8 @@ func runServedCreateCarryProjectionPostgresProof(t *testing.T) {
 	_, db, _ := installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
 	})
+	// Keep the sandbox observer, but open serve's store from the boot check's declaration.
+	buildStoresForServe = buildStores
 	sourceRoot := canonicalrouting.CopyExample(t, canonicalrouting.TemplateCreateMintedKey)
 	bundleHash := servedEventPublishFixtureBundleHash(t, sourceRoot)
 	endpoint, _ := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
