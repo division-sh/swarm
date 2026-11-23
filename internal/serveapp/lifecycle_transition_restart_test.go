@@ -3,6 +3,7 @@ package serveapp
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -18,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/operatorread"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
+	"github.com/division-sh/swarm/internal/runtime/mutationlog"
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -28,6 +30,11 @@ import (
 // Restarts the real serve owner against the same selected database, not seeded
 // lifecycle rows or a replacement receiver/transition implementation.
 func lifecycleRestartHarness(t *testing.T, backend, root string, readinessBudget ...time.Duration) (*cliapp.ServeOptions, func() (*serveRuntimeTestProcess, servedControlProofRuntime)) {
+	t.Helper()
+	return lifecycleRestartHarnessWithVerifyDSN(t, backend, root, nil, readinessBudget...)
+}
+
+func lifecycleRestartHarnessWithVerifyDSN(t *testing.T, backend, root string, verifyDSN *string, readinessBudget ...time.Duration) (*cliapp.ServeOptions, func() (*serveRuntimeTestProcess, servedControlProofRuntime)) {
 	t.Helper()
 	var deliveryReader servedRunDeliveryReader
 	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { deliveryReader = p.deps.DeliveryStore.SummarizeRun })
@@ -51,6 +58,9 @@ func lifecycleRestartHarness(t *testing.T, backend, root string, readinessBudget
 	} else {
 		dsn, _, cleanup := testutil.StartPostgres(t)
 		t.Cleanup(cleanup)
+		if verifyDSN != nil {
+			*verifyDSN = dsn
+		}
 		original := buildStoresForServe
 		buildStoresForServe = func(_ context.Context, _ storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
 			pg, err := store.NewPostgresStore(dsn)
@@ -123,6 +133,34 @@ func lifecycleDecisionParamsFromEndpoint(t *testing.T, endpoint, cardID, verdict
 	return map[string]any{"card_id": cardID, "verdict": verdict, "observed_content_hash": detail.DecisionCard.ContentHash, "idempotency_key": "frozen-decision"}
 }
 
+func requireGateUpgradeDriftFree(t *testing.T, opts *cliapp.ServeOptions, backend, dsn, runID string) {
+	t.Helper()
+	configPath := opts.ConfigPath
+	if backend == "postgres" {
+		if dsn == "" {
+			t.Fatal("verify requires the fixture's selected PostgreSQL database")
+		}
+		setPostgresEnvFromDSN(t, dsn)
+		configPath = os.Getenv("SWARM_CONFIG")
+	}
+	out, stderr := &lockedBuffer{}, &lockedBuffer{}
+	code := executeCLIFrom(t.Context(), repoRootForTest(), []string{
+		"verify", opts.SourceRoot, "--config", configPath, "--swarm-dir", opts.SwarmDir,
+		"--run", runID, "--json",
+	}, out, stderr, nil)
+	var report struct {
+		mutationlog.DriftReport
+		Status string `json:"status"`
+		OK     bool   `json:"ok"`
+	}
+	err := json.Unmarshal([]byte(out.String()), &report)
+	if err != nil || code != 0 || !report.OK || report.Status != "passed" ||
+		report.RunID != runID || report.EntitiesChecked == 0 || len(report.Rows) != 0 {
+		t.Fatalf("joined run verification: code=%d run=%s stdout=%s stderr=%s decode=%v",
+			code, runID, out.String(), stderr.String(), err)
+	}
+}
+
 func TestServedCompiledGateFrozenTransitionEvidenceOnBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
@@ -145,7 +183,8 @@ func TestServedCompiledGateFrozenTransitionEvidenceOnBothStores(t *testing.T) {
 					}
 				}
 			}
-			opts, start := lifecycleRestartHarness(t, backend, sourceA)
+			var verifyDSN string
+			opts, start := lifecycleRestartHarnessWithVerifyDSN(t, backend, sourceA, &verifyDSN)
 			tokenFile := filepath.Join(t.TempDir(), "api-token")
 			if err := os.WriteFile(tokenFile, []byte(apiv1.DefaultLoopbackAPIToken), 0o600); err != nil {
 				t.Fatal(err)
@@ -164,6 +203,11 @@ func TestServedCompiledGateFrozenTransitionEvidenceOnBothStores(t *testing.T) {
 			}
 			if code := first.stop(); code != 0 {
 				t.Fatalf("first stop=%d", code)
+			}
+			if !t.Run("verify_before_upgrade", func(t *testing.T) {
+				requireGateUpgradeDriftFree(t, opts, backend, verifyDSN, seed.RunID)
+			}) {
+				return
 			}
 			setServeRuntimeRecovery(t, opts.ConfigPath, false, true)
 			var second *serveRuntimeTestProcess
@@ -241,6 +285,9 @@ func TestServedCompiledGateFrozenTransitionEvidenceOnBothStores(t *testing.T) {
 					if code := second.stop(); code != 0 {
 						t.Fatalf("unpinned stop=%d", code)
 					}
+					t.Run("verify_after_upgrade", func(t *testing.T) {
+						requireGateUpgradeDriftFree(t, opts, backend, verifyDSN, seed.RunID)
+					})
 				}
 			}
 			var decided map[string]any
