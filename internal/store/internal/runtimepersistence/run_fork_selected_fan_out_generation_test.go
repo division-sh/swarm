@@ -3,10 +3,13 @@ package runtimepersistence
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -34,9 +37,11 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkreadiness"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 )
 
 type selectedForkFanOutConsumer struct {
@@ -385,7 +390,9 @@ func consumeSelectedForkFanOutEmissions(t *testing.T, fixture authorActivityRece
 	if expectedFailure != "" && fenced != len(emissions) {
 		t.Fatalf("historical failure accounting lost committed ordinals: fenced=%d committed=%d", fenced, len(emissions))
 	}
-	if _, err := owner.AdvanceFanOutBarriers(ctx, intent.Request.Key); err != nil {
+	if backend == "postgres" && !join.Generation().Valid() {
+		requireConcurrentSelectedBarrierAdvancement(t, ctx, fixture.db, owner, intent.Request.Key)
+	} else if _, err := owner.AdvanceFanOutBarriers(ctx, intent.Request.Key); err != nil {
 		t.Fatal(err)
 	}
 	wantStatus := fanoutbarrier.StatusClosedPending
@@ -420,6 +427,91 @@ func consumeSelectedForkFanOutEmissions(t *testing.T, fixture authorActivityRece
 		}
 		t.Logf("F07 historical fencing complete: ordinals=%d native_deliveries=dead_letter native_receipts=dead_letter class=%s code=%s retryable=false barrier=%s business_unchanged=true source_isolation_checked=true",
 			fenced, failures.ClassStaleArrival, expectedFailure, barrier.Status)
+	}
+}
+
+func requireConcurrentSelectedBarrierAdvancement(t *testing.T, ctx context.Context, db *sql.DB, owner pipeline.FanOutObligationOwner, key fanoutobligation.IntentKey) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	var workers sync.WaitGroup
+	defer func() {
+		cancel()
+		workers.Wait()
+	}()
+	gate, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer gate.Rollback()
+	var pid int
+	if err := gate.QueryRowContext(ctx, `SELECT pg_backend_pid() FROM fan_out_obligation_barriers
+		WHERE run_id=$1 AND triggering_delivery_id=$2 AND flow_path=$3 AND declaration_family=$4 AND semantic_path=$5
+		  AND status='armed' FOR UPDATE`, key.RunID, key.TriggeringDeliveryID, key.ElementRef.FlowPath, key.ElementRef.Family, key.ElementRef.SemanticPath).Scan(&pid); err != nil {
+		t.Fatalf("gate the selected armed barrier: %v", err)
+	}
+	type result struct {
+		path        string
+		activations []runlifecycle.CommittedGenericScheduleActivation
+		err         error
+	}
+	results := make(chan result, 2)
+	start := func(path string, advance func() ([]runlifecycle.CommittedGenericScheduleActivation, error)) {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			activations, err := advance()
+			results <- result{path: path, activations: activations, err: err}
+		}()
+	}
+	start("pump", func() ([]runlifecycle.CommittedGenericScheduleActivation, error) {
+		return owner.AdvanceFanOutBarriers(ctx, key)
+	})
+	start("reconciliation", func() ([]runlifecycle.CommittedGenericScheduleActivation, error) {
+		return owner.(pipeline.SelectedFanOutObligationOwner).ReconcileFanOutBarriers(ctx)
+	})
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		// Wait for both calls to queue, including waiters blocked behind the first waiter.
+		var waiting int
+		if err := db.QueryRowContext(ctx, `WITH RECURSIVE blocked(pid) AS (
+			SELECT $1::integer UNION
+			SELECT a.pid FROM pg_stat_activity a JOIN blocked b ON b.pid=ANY(pg_blocking_pids(a.pid))
+			WHERE a.datname=current_database())
+			SELECT count(*)-1 FROM blocked`, pid).Scan(&waiting); err != nil {
+			t.Fatalf("observe selected barrier wait graph: %v", err)
+		}
+		if waiting == 2 {
+			break
+		}
+		select {
+		case got := <-results:
+			t.Fatalf("%s returned before both native attempts queued: %v", got.path, got.err)
+		case <-ctx.Done():
+			t.Fatalf("both native attempts did not queue behind barrier: waiting=%d: %v", waiting, ctx.Err())
+		case <-tick.C:
+		}
+	}
+	if err := gate.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	var activationID string
+	for range 2 {
+		got := <-results
+		if got.err != nil || len(got.activations) != 1 {
+			var pgErr *pq.Error
+			if errors.As(got.err, &pgErr) {
+				t.Errorf("%s: SQLSTATE %s: %v (detail: %s)", got.path, pgErr.Code, got.err, pgErr.Detail)
+			} else {
+				t.Errorf("%s: want one committed activation, got %v: %v", got.path, got.activations, got.err)
+			}
+			continue
+		}
+		id := got.activations[0].ID()
+		if id == "" || (activationID != "" && activationID != id) {
+			t.Errorf("%s: conflicting committed activation %q (first %q)", got.path, id, activationID)
+		}
+		activationID = id
 	}
 }
 
