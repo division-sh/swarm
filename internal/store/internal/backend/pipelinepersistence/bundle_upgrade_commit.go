@@ -43,6 +43,7 @@ type bundleUpgradeMutationOwner interface {
 	ReviseSourceTx(context.Context, *mutationprotocol.Attempt, runlifecycle.SourceRevisionRequest) (runlifecycle.MutationDisposition, error)
 	genericScheduleTxOwner() GenericScheduleTxOwner
 	workflowDecisionLifecycleOwner() workflowDecisionLifecycleTxOwner
+	commitUpgradeGateStateTx(context.Context, *sql.Tx, *mutationprotocol.Attempt, runtimepipeline.WorkflowEngineStateRecord) error
 }
 
 func (s *PipelinePostgresOwner) CommitBundleUpgradeTx(ctx context.Context, attempt *mutationprotocol.Attempt, plan *runbundle.UpgradePlan) error {
@@ -51,6 +52,14 @@ func (s *PipelinePostgresOwner) CommitBundleUpgradeTx(ctx context.Context, attem
 
 func (s *PipelineSQLiteOwner) CommitBundleUpgradeTx(ctx context.Context, attempt *mutationprotocol.Attempt, plan *runbundle.UpgradePlan) error {
 	return commitBundleUpgrade(ctx, attempt, s, true, plan)
+}
+
+func (s *PipelinePostgresOwner) commitUpgradeGateStateTx(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, state runtimepipeline.WorkflowEngineStateRecord) error {
+	return commitDecisionCardGateState(ctx, tx, attempt, s, true, state)
+}
+
+func (s *PipelineSQLiteOwner) commitUpgradeGateStateTx(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, state runtimepipeline.WorkflowEngineStateRecord) error {
+	return commitDecisionCardGateState(ctx, tx, attempt, s, false, state)
 }
 
 func commitBundleUpgrade(ctx context.Context, attempt *mutationprotocol.Attempt, owner bundleUpgradeMutationOwner, sqlite bool, plan *runbundle.UpgradePlan) error {

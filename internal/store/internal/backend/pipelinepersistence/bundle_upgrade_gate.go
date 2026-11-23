@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
@@ -67,14 +68,15 @@ func replaceUpgradeGateCards(ctx context.Context, tx *sql.Tx, attempt *mutationp
 		if index < 0 {
 			return fmt.Errorf("pending upgrade card %s lacks its exact instance", card.CardID)
 		}
-		if err := replaceUpgradeGateCard(ctx, attempt, owner.workflowDecisionLifecycleOwner(), !sqlite, current, candidate, cadence, card, instances[index]); err != nil {
+		if err := replaceUpgradeGateCard(ctx, tx, attempt, owner, current, candidate, cadence, card, instances[index]); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func replaceUpgradeGateCard(ctx context.Context, attempt *mutationprotocol.Attempt, decisions workflowDecisionLifecycleTxOwner, postgres bool, current, candidate semanticview.Source, cadence decisioncard.CadencePolicy, listed decisioncard.ListItem, instance runtimepipeline.WorkflowInstance) error {
+func replaceUpgradeGateCard(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, owner bundleUpgradeMutationOwner, current, candidate semanticview.Source, cadence decisioncard.CadencePolicy, listed decisioncard.ListItem, instance runtimepipeline.WorkflowInstance) error {
+	decisions := owner.workflowDecisionLifecycleOwner()
 	if decisions == nil {
 		return fmt.Errorf("gate replacement requires its existing decision owner")
 	}
@@ -107,5 +109,20 @@ func replaceUpgradeGateCard(ctx context.Context, attempt *mutationprotocol.Attem
 	if !inserted {
 		return fmt.Errorf("changed gate replacement did not create its exact successor")
 	}
-	return commitWorkflowEngineState(ctx, attempt, postgres, prepared.State)
+	// The run still names the revalidated pre-switch source when its state is written.
+	bundle, ok := semanticview.Bundle(current)
+	if !ok || bundle == nil {
+		return fmt.Errorf("gate replacement requires its retained run source")
+	}
+	root, err := bundle.RootedSource()
+	if err != nil {
+		return err
+	}
+	fact, err := correlation.NewSourceArtifactFact(root.Admission().BundleHash())
+	if err != nil {
+		return err
+	}
+	stateContext := correlation.WithRunID(ctx, card.RunID)
+	stateContext = correlation.WithRootAdmission(correlation.WithSourceArtifactFact(stateContext, fact), root.Admission())
+	return owner.commitUpgradeGateStateTx(stateContext, tx, attempt, prepared.State)
 }
