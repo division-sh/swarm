@@ -3440,14 +3440,15 @@ compute_module_contracts:
       rows and bind only computed.*. Public `compute.operation: compute_module`
       is forbidden; `compute_module` is not a standalone handler field and does
       not overload the existing compute primitive vocabulary.
-    input_roots: '`compute_module.input` remains a required nonempty map of simple explicit paths rooted in payload, state, instance, event, or computed.'
+    input_roots: 'When supplied, `compute_module.input` must be a nonempty map of simple explicit paths rooted in payload, state, instance, event, or computed.'
     secret_input: |
       A Wasm compute_module row may additionally declare `secret_input`, a map
       from a declared module input parameter to one static stored key name.
       Ordinary and secret inputs jointly satisfy the module input schema;
       overlapping, duplicate or undeclared parameters are refused. Python and
-      other row families cannot use this field. A secret-only invocation does
-      not remove the required ordinary input map or justify a dummy input.
+      other row families cannot use this field. `input` may be omitted when
+      `secret_input` supplies every required module input. A row with neither
+      map is refused.
       Any static key the author names is readable by that invocation; there is
       no deployment/per-flow allowlist or store-listing capability. Imported
       code is trusted with this access. Provider/session/managed stores are not
