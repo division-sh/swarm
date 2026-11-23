@@ -22,7 +22,7 @@ import (
 
 func TestDeploymentSourceSelectedForkParksOtherFeedBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
-		for _, variant := range []string{"same_batch", "prior_batch", "legacy_recovery"} {
+		for _, variant := range []string{"same_batch", "prior_batch", "settled_other", "legacy_recovery"} {
 			t.Run(backend+"/"+variant, func(t *testing.T) {
 				proveSelectedNamedFeedFork(t, backend, variant)
 			})
@@ -41,6 +41,9 @@ func proveSelectedNamedFeedFork(t *testing.T, backend, variant string) {
 	f.runtime.fanOutServing.Close()
 	names := []string{"scan.requested", "score.observed"}
 	input := [][]byte{[]byte("{\"topic\":\"named\"}\n"), []byte("{\"label\":\"other\"}\n")}
+	if variant == "settled_other" {
+		input[1] = nil
+	}
 	var sourceID, batchID string
 	if variant == "legacy_recovery" {
 		var data durabledata.RunCreationDataEnvelope
@@ -83,9 +86,6 @@ func proveSelectedNamedFeedFork(t *testing.T, backend, variant string) {
 	}
 	var named, other runfork.RunForkFanOutObligation
 	for _, o := range before.FanOutObligations {
-		if o.Intent.Cursor != 0 || o.Intent.Request.Cardinality != 1 {
-			t.Fatalf("source advanced before its fixed cut: %+v", o)
-		}
 		switch o.Intent.Source.Declaration.EventName {
 		case names[0]:
 			named = o
@@ -95,6 +95,14 @@ func proveSelectedNamedFeedFork(t *testing.T, backend, variant string) {
 	}
 	if named.Intent.Request.Key.DeploymentFeedID == "" || other.Intent.Request.Key.DeploymentFeedID == "" {
 		t.Fatal("fixture lacks exact named and other source members")
+	}
+	otherCardinality := 1
+	if variant == "settled_other" {
+		otherCardinality = 0
+	}
+	if named.Intent.Cursor != 0 || named.Intent.Request.Cardinality != 1 ||
+		other.Intent.Cursor != 0 || other.Intent.Request.Cardinality != otherCardinality {
+		t.Fatalf("source advanced before its fixed cut: named=%+v other=%+v", named.Intent, other.Intent)
 	}
 	pauseDeploymentFixtureRun(t, f, sourceID)
 	params := map[string]any{
@@ -148,7 +156,17 @@ func proveSelectedNamedFeedFork(t *testing.T, backend, variant string) {
 			t.Fatal(err)
 		}
 	}
-	if childFeeds != 1 || namedRows != 1 || otherEvents != 0 || sourceFeeds != 2 || childRuns != 1 {
+	wantChildFeeds, wantSourceFeeds := 1, 2
+	if variant == "settled_other" {
+		wantChildFeeds, wantSourceFeeds = 2, 1
+		otherID := (durabledata.DeploymentFeed{RunID: result.ForkRunID, Publication: childBatchID, Declaration: other.Intent.Source.Declaration}).PublicationID()
+		var retained int
+		if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM fan_out_intents WHERE run_id=$1
+			AND deployment_feed_id=$2 AND status='closed' AND cardinality=0`, result.ForkRunID, otherID).Scan(&retained); err != nil || retained != 1 {
+			t.Fatalf("named selection lost the other feed's settled history: retained=%d err=%v", retained, err)
+		}
+	}
+	if childFeeds != wantChildFeeds || namedRows != 1 || otherEvents != 0 || sourceFeeds != wantSourceFeeds || childRuns != 1 {
 		t.Fatalf("named-only work or source custody changed: child feeds=%d named settled=%d other events=%d source feeds=%d children=%d", childFeeds, namedRows, otherEvents, sourceFeeds, childRuns)
 	}
 	var delivered int
