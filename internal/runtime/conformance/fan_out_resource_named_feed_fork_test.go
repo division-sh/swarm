@@ -11,11 +11,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 	"github.com/google/uuid"
@@ -102,33 +102,25 @@ func proveSelectedNamedFeedFork(t *testing.T, backend string, legacy bool) {
 		t.Fatal("fixture lacks exact named and other source members")
 	}
 	pauseDeploymentFixtureRun(t, f, sourceID)
-	owner, recovered := deploymentForkOwner(t, f)
-	if len(recovered) != 0 {
-		t.Fatalf("fresh selected owner found competing work: %+v", recovered)
-	}
-	server := deploymentForkServer(t, f, owner)
 	params := map[string]any{
 		"source_run_id": sourceID, "publication_id": named.Intent.Request.Key.DeploymentFeedID,
 		"idempotency_key": uuid.NewString(),
 	}
-	result, refused := deploymentForkRPC(t, f.ctx, server, params)
-	if len(refused) != 0 || result.ForkRunID == "" || result.ForkRevision != before.ForkPoint.Revision {
-		t.Fatalf("named feed fork: %+v refusal=%s", result, refused)
+	var owner runforkexecution.SelectedContractExecutionOwner
+	var recoveredID string
+	if legacy {
+		owner, recoveredID = restartNamedFeedForkAtActivation(t, f, params)
+	} else {
+		var recovered []runfork.SelectedForkRecoveryResult
+		owner, recovered = deploymentForkOwner(t, f)
+		if len(recovered) != 0 {
+			t.Fatalf("fresh selected owner found competing work: %+v", recovered)
+		}
 	}
-	availability := f.selected.(apiv1.RunForkAvailabilityStore)
-	deadline := time.Now().Add(10 * time.Second)
-	for {
-		state, err := availability.LoadRunBundleAvailability(f.ctx, result.ForkRunID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if state.Status == "completed" {
-			break
-		}
-		if state.Status == "failed" || time.Now().After(deadline) {
-			t.Fatalf("named feed did not settle: %+v", state)
-		}
-		time.Sleep(20 * time.Millisecond)
+	result, refused := deploymentForkRPC(t, f.ctx, deploymentForkServer(t, f, owner), params)
+	if len(refused) != 0 || result.ForkRunID == "" || result.ForkRevision != before.ForkPoint.Revision ||
+		(recoveredID != "" && result.ForkRunID != recoveredID) {
+		t.Fatalf("named feed fork: %+v refusal=%s", result, refused)
 	}
 	retry, refused := deploymentForkRPC(t, f.ctx, deploymentForkServer(t, f, owner), params)
 	if len(refused) != 0 || !reflect.DeepEqual(retry, result) {
@@ -154,7 +146,7 @@ func proveSelectedNamedFeedFork(t *testing.T, backend string, legacy bool) {
 		{result.ForkRunID, "SELECT COUNT(*) FROM fan_out_intents WHERE run_id=$1 AND origin_kind='deployment'", &childFeeds},
 		{result.ForkRunID, "SELECT COUNT(*) FROM fan_out_intents WHERE run_id=$1 AND source_resource_event_name='scan.requested' AND cursor=1 AND status='closed'", &namedRows},
 		{result.ForkRunID, "SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='score.observed'", &otherEvents},
-		{sourceID, "SELECT COUNT(*) FROM fan_out_intents WHERE run_id=$1 AND origin_kind='deployment' AND cursor=0", &sourceFeeds},
+		{sourceID, "SELECT COUNT(*) FROM fan_out_intents WHERE run_id=$1 AND origin_kind='deployment' AND cursor=0 AND status='open'", &sourceFeeds},
 		{sourceID, "SELECT COUNT(*) FROM runs WHERE forked_from_run_id=$1", &childRuns},
 	} {
 		if err := f.db.QueryRowContext(f.ctx, check.query, check.id).Scan(check.got); err != nil {
@@ -164,4 +156,55 @@ func proveSelectedNamedFeedFork(t *testing.T, backend string, legacy bool) {
 	if childFeeds != 1 || namedRows != 1 || otherEvents != 0 || sourceFeeds != 2 || childRuns != 1 {
 		t.Fatalf("named-only work or source custody changed: child feeds=%d named settled=%d other events=%d source feeds=%d children=%d", childFeeds, namedRows, otherEvents, sourceFeeds, childRuns)
 	}
+	var delivered int
+	if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM fan_out_outcomes o
+		JOIN event_deliveries d ON d.event_id=o.event_id AND d.run_id=o.run_id
+		WHERE o.run_id=$1 AND o.deployment_feed_id=$2 AND o.ordinal=0 AND o.outcome_kind='committed'
+		AND d.status='delivered' AND d.claim_version=1`, result.ForkRunID, childMemberID).Scan(&delivered); err != nil || delivered != 1 {
+		t.Fatalf("named ordinal did not settle exactly once: delivered=%d err=%v", delivered, err)
+	}
+}
+
+func restartNamedFeedForkAtActivation(t *testing.T, f *deploymentResourceFixture, params map[string]any) (runforkexecution.SelectedContractExecutionOwner, string) {
+	t.Helper()
+	cut := selectedDeploymentBeforeActivationCrash{
+		SelectedContractForkLifecycle: f.selected.(runforkexecution.SelectedContractForkLifecycle),
+		entered:                       make(chan string, 1),
+	}
+	owner, recovered := deploymentForkOwnerWithOverrides(t, f, nil, cut)
+	if len(recovered) != 0 {
+		t.Fatalf("fresh selected owner found competing work: %+v", recovered)
+	}
+	ctx, cancel := context.WithTimeout(f.ctx, 15*time.Second)
+	defer cancel()
+	_, rpcErr, transportErr := deploymentForkRPCRequest(ctx, deploymentForkServer(t, f, owner), params)
+	if transportErr == nil && len(rpcErr) == 0 {
+		t.Fatal("interrupted activation returned success")
+	}
+	var childID string
+	select {
+	case childID = <-cut.entered:
+	default:
+		t.Fatalf("did not reach pre-activation cut: refusal=%s transport=%v", rpcErr, transportErr)
+	}
+	if err := owner.RetireSelectedContexts(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	oldRuntime := f.runtime
+	assertServingJoinComplete(t, beginServingLifetimeJoin(oldRuntime, nil), oldRuntime, nil)
+	if err := f.topology.capability.Release(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	f.ctx = testAuthorActivityContextForBundle(context.Background(), f.runtime.sourceArtifactFact)
+	f.topology = newNotifyAllChildrenProcessTopology(t, f.ctx, f.selected, f.source)
+	f.ctx = originalConformanceFixtureContext(t, f.ctx, f.selected)
+	f.boot(t)
+	restarted, recovery := deploymentForkOwner(t, f)
+	for _, recovered := range recovery {
+		if recovered.RunID == childID {
+			return restarted, childID
+		}
+	}
+	t.Fatalf("recovery did not retain the exact materialized child %s: %+v", childID, recovery)
+	return restarted, ""
 }
