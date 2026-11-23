@@ -138,6 +138,13 @@ func activateRunForkForSelectedContractExecution(ctx context.Context, req runfor
 			planRequest.ResolvedPoint = &lineage.ForkPoint
 			planRequest.AtStart = lineage.ForkPoint.Kind == runfork.RunForkPointRunStart
 		}
+		if lineage.ForkPoint.Kind == runfork.RunForkPointStateRevision && req.ForkOperation != nil && req.ForkOperation.PublicationID != "" {
+			operation, err := resolvedForkOperationForActivationTx(txctx, tx, *req.ForkOperation, lineage, port.postgres)
+			if err != nil {
+				return err
+			}
+			planRequest.PublicationID = operation.PublicationID
+		}
 		plan, err := port.plan(txctx, tx, planRequest)
 		if err != nil {
 			return err
@@ -482,7 +489,7 @@ func postgresRunForkSelectedContractActivationPort(s *RunForkPostgresOwner) runF
 		},
 		lockFrontier: lockRunForkSourceRevisionFrontier,
 		plan: func(ctx context.Context, tx *sql.Tx, req runfork.RunForkPlanRequest) (runfork.RunForkPlan, error) {
-			return planRunForkSnapshot(ctx, tx, req, runforkrevision.ValidateCompletePostgres, resolveRunForkRevisionPoint, true)
+			return planRunForkSnapshot(ctx, tx, req, runforkrevision.ValidateCompletePostgres, resolveRunForkRevisionPoint, true, s.durableData)
 		},
 		deliveries: postgresDeliveryAdapter,
 		loadSnapshot: func(ctx context.Context, tx *sql.Tx, runID string) (runtimerunlifecycle.Snapshot, error) {
@@ -525,7 +532,7 @@ func sqliteRunForkSelectedContractActivationPort(s *RunForkSQLiteOwner) runForkS
 		},
 		lockFrontier: lockSQLiteRunForkSourceRevisionFrontier,
 		plan: func(ctx context.Context, tx *sql.Tx, req runfork.RunForkPlanRequest) (runfork.RunForkPlan, error) {
-			return planRunForkSnapshot(ctx, tx, req, runforkrevision.ValidateCompleteSQLite, resolveSQLiteRunForkRevisionPoint, false)
+			return planRunForkSnapshot(ctx, tx, req, runforkrevision.ValidateCompleteSQLite, resolveSQLiteRunForkRevisionPoint, false, s.durableData)
 		},
 		deliveries: sqliteDeliveryAdapter,
 		loadSnapshot: func(ctx context.Context, tx *sql.Tx, runID string) (runtimerunlifecycle.Snapshot, error) {

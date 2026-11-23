@@ -3,11 +3,11 @@ package conformance
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -60,7 +60,7 @@ func proveSelectedNamedFeedFork(t *testing.T, backend string, legacy bool) {
 		sourceID = uuid.NewString()
 		prepareDeploymentRowsFixtureRun(t, f, sourceID, ".")
 		server := f.operatorServer(t)
-		args := []string{"run", "start", "--connect", server.URL, "--run-id", sourceID, "--idempotency-key", sourceID, "--no-follow", "--json"}
+		args := []string{"run", "start", "--connect", server.URL, "--run-id", sourceID, "--idempotency-key", sourceID, "--no-follow"}
 		dir := t.TempDir()
 		for i, name := range names {
 			path := filepath.Join(dir, name+".jsonl")
@@ -73,13 +73,11 @@ func proveSelectedNamedFeedFork(t *testing.T, backend string, legacy bool) {
 		if code := cliapp.Execute(f.ctx, args, &stdout, &stderr, nil, nil); code != 0 {
 			t.Fatalf("commit source feed batch: exit=%d stderr=%s", code, stderr.String())
 		}
-		var result struct {
-			PublicationID string `json:"publication_id"`
-		}
-		if err := json.Unmarshal(stdout.Bytes(), &result); err != nil || result.PublicationID == "" {
+		_, receipt, ok := strings.Cut(stdout.String(), "rows published: publication_id=")
+		batchID, _, _ = strings.Cut(receipt, "\n")
+		if _, err := uuid.Parse(batchID); !ok || err != nil {
 			t.Fatalf("source batch receipt: %s err=%v", stdout.String(), err)
 		}
-		batchID = result.PublicationID
 	}
 	planner := f.selected.(interface {
 		PlanRunFork(context.Context, runfork.RunForkPlanRequest) (runfork.RunForkPlan, error)
