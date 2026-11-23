@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -27,14 +28,11 @@ import (
 	"github.com/division-sh/swarm/tests/support/testutil"
 )
 
+var lifecycleRestartVerifyDSNTargets sync.Map // *testing.T -> *string, verification opt-in only
+
 // Restarts the real serve owner against the same selected database, not seeded
 // lifecycle rows or a replacement receiver/transition implementation.
 func lifecycleRestartHarness(t *testing.T, backend, root string, readinessBudget ...time.Duration) (*cliapp.ServeOptions, func() (*serveRuntimeTestProcess, servedControlProofRuntime)) {
-	t.Helper()
-	return lifecycleRestartHarnessWithVerifyDSN(t, backend, root, nil, readinessBudget...)
-}
-
-func lifecycleRestartHarnessWithVerifyDSN(t *testing.T, backend, root string, verifyDSN *string, readinessBudget ...time.Duration) (*cliapp.ServeOptions, func() (*serveRuntimeTestProcess, servedControlProofRuntime)) {
 	t.Helper()
 	var deliveryReader servedRunDeliveryReader
 	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { deliveryReader = p.deps.DeliveryStore.SummarizeRun })
@@ -58,8 +56,8 @@ func lifecycleRestartHarnessWithVerifyDSN(t *testing.T, backend, root string, ve
 	} else {
 		dsn, _, cleanup := testutil.StartPostgres(t)
 		t.Cleanup(cleanup)
-		if verifyDSN != nil {
-			*verifyDSN = dsn
+		if target, ok := lifecycleRestartVerifyDSNTargets.LoadAndDelete(t); ok {
+			*target.(*string) = dsn
 		}
 		original := buildStoresForServe
 		buildStoresForServe = func(_ context.Context, _ storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
@@ -184,7 +182,11 @@ func TestServedCompiledGateFrozenTransitionEvidenceOnBothStores(t *testing.T) {
 				}
 			}
 			var verifyDSN string
-			opts, start := lifecycleRestartHarnessWithVerifyDSN(t, backend, sourceA, &verifyDSN)
+			if backend == "postgres" {
+				lifecycleRestartVerifyDSNTargets.Store(t, &verifyDSN)
+				defer lifecycleRestartVerifyDSNTargets.Delete(t)
+			}
+			opts, start := lifecycleRestartHarness(t, backend, sourceA)
 			tokenFile := filepath.Join(t.TempDir(), "api-token")
 			if err := os.WriteFile(tokenFile, []byte(apiv1.DefaultLoopbackAPIToken), 0o600); err != nil {
 				t.Fatal(err)
