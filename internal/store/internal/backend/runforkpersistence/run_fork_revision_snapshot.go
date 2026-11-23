@@ -222,6 +222,10 @@ type runForkHistoricalFactKey struct {
 	key    string
 }
 
+type missingRunForkEvent string
+
+func (e missingRunForkEvent) Error() string { return string(e) }
+
 func resolveRunForkRevisionPoint(ctx context.Context, tx *sql.Tx, runID, at string) (runForkEventCursor, error) {
 	if tx == nil {
 		return runForkEventCursor{}, fmt.Errorf("run fork revision point requires a database snapshot")
@@ -259,7 +263,7 @@ func resolveRunForkRevisionPoint(ctx context.Context, tx *sql.Tx, runID, at stri
 	var present bool
 	if err := row.Scan(&fact.RunID, &fact.Key, &fact.Revision, &raw, &present); err != nil {
 		if err == sql.ErrNoRows {
-			return runForkEventCursor{}, fmt.Errorf("fork point event %s not found in revisioned source run %s", at, runID)
+			return runForkEventCursor{}, missingRunForkEvent(fmt.Sprintf("fork point event %s not found in revisioned source run %s", at, runID))
 		}
 		return runForkEventCursor{}, fmt.Errorf("resolve fork event revision: %w", err)
 	}

@@ -3,6 +3,7 @@ package runforkpersistence
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 
 	runtimedata "github.com/division-sh/swarm/internal/durabledata"
@@ -11,30 +12,89 @@ import (
 	storedurabledata "github.com/division-sh/swarm/internal/store/internal/durabledata"
 )
 
-func resolveRunForkPublicationPoint(ctx context.Context, tx *sql.Tx, data *storedurabledata.Owner, runID, publicationID string, resolve runForkRevisionPointResolver) (runfork.RunForkPoint, error) {
+func resolveRunForkPublicationPoint(ctx context.Context, tx *sql.Tx, data *storedurabledata.Owner, runID, publicationID string, resolve runForkRevisionPointResolver) (runfork.RunForkPoint, bool, error) {
 	record, found, err := storedurabledata.ReadFeedPublicationTx(data, ctx, tx, publicationID)
 	if err != nil {
-		return runfork.RunForkPoint{}, err
+		return runfork.RunForkPoint{}, false, err
 	}
 	if !found {
 		cursor, err := resolve(ctx, tx, runID, publicationID)
-		return runfork.RunForkPoint{Kind: cursor.Kind, Revision: cursor.Revision, Input: publicationID, EventID: cursor.EventID}, err
+		var missing missingRunForkEvent
+		if !errors.As(err, &missing) {
+			return runfork.RunForkPoint{Kind: cursor.Kind, Revision: cursor.Revision, Input: publicationID, EventID: cursor.EventID}, false, err
+		}
+		revision, found, readErr := runforkrevision.FirstDeploymentFeedRevisionTx(ctx, tx, runID, publicationID)
+		if readErr != nil {
+			return runfork.RunForkPoint{}, false, readErr
+		}
+		if !found {
+			return runfork.RunForkPoint{}, false, err
+		}
+		return runfork.RunForkPoint{Kind: runfork.RunForkPointStateRevision, Revision: revision}, true, nil
 	}
 	if record.Summary.RunID != runID || record.Summary.Outcome != "created" || len(record.DeploymentFeedIDs()) == 0 {
-		return runfork.RunForkPoint{}, fmt.Errorf("publication is not an accepted feed of the selected source run")
+		return runfork.RunForkPoint{}, false, fmt.Errorf("publication is not an accepted feed of the selected source run")
 	}
 	point := runfork.RunForkPoint{Kind: runfork.RunForkPointStateRevision}
 	for _, feedID := range record.DeploymentFeedIDs() {
-		revision, err := runforkrevision.FirstDeploymentFeedRevisionTx(ctx, tx, runID, feedID)
+		revision, found, err := runforkrevision.FirstDeploymentFeedRevisionTx(ctx, tx, runID, feedID)
 		if err != nil {
-			return runfork.RunForkPoint{}, err
+			return runfork.RunForkPoint{}, false, err
+		}
+		if !found {
+			return runfork.RunForkPoint{}, false, fmt.Errorf("publication feed has no committed insertion revision")
 		}
 		if point.Revision != 0 && point.Revision != revision {
-			return runfork.RunForkPoint{}, fmt.Errorf("publication feeds do not share one committed revision")
+			return runfork.RunForkPoint{}, false, fmt.Errorf("publication feeds do not share one committed revision")
 		}
 		point.Revision = revision
 	}
-	return point, point.Validate()
+	return point, false, point.Validate()
+}
+
+func selectRunForkDeploymentFeed(ctx context.Context, tx *sql.Tx, data *storedurabledata.Owner, plan *runfork.RunForkPlan, named string) error {
+	owed, err := runfork.FanOutContinuationRequirements(*plan)
+	if err != nil {
+		return err
+	}
+	selection := &runfork.RunForkDeploymentFeedSelection{Named: named}
+	retained := make([]runfork.RunForkFanOutObligation, 0, len(plan.FanOutObligations))
+	parkedDeliveries := make(map[string]bool)
+	found := false
+	for _, obligation := range plan.FanOutObligations {
+		req := obligation.Intent.Request
+		switch {
+		case req.Deployment == nil:
+		case req.Key.DeploymentFeedID == named:
+			source, err := storedurabledata.RequireFeedSourceTx(ctx, data, tx, plan.SourceRunID, req.Deployment.BundleHash, named, req.Deployment.Declaration)
+			if err != nil || source.VersionID != req.Deployment.VersionID || source.SchemaDigest != req.Deployment.SchemaDigest || source.RowCount != req.Cardinality {
+				return fmt.Errorf("fork deployment feed contradicts its exact source: %w", err)
+			}
+			found = true
+		case owed[req.Key]:
+			selection.Parked = append(selection.Parked, obligation)
+			for _, ordinal := range obligation.PendingDeployment {
+				for _, delivery := range ordinal.SourceDeliveryIDs {
+					parkedDeliveries[delivery] = true
+				}
+			}
+			continue
+		}
+		retained = append(retained, obligation)
+	}
+	if !found {
+		return fmt.Errorf("named fork feed is absent from its committed cut")
+	}
+	pending := make([]runfork.RunForkPendingWork, 0, len(plan.PendingWork))
+	for _, item := range plan.PendingWork {
+		if !parkedDeliveries[item.DeliveryID] {
+			pending = append(pending, item)
+		}
+	}
+	plan.DeploymentFeedSelection = selection
+	plan.FanOutObligations, plan.FanOutObligationCount = retained, len(retained)
+	plan.PendingWork, plan.PendingWorkCount = pending, len(pending)
+	return nil
 }
 
 type runForkDeploymentProjection struct {
@@ -51,7 +111,16 @@ func projectRunForkDeploymentFeeds(ctx context.Context, tx *sql.Tx, data *stored
 			overrides = append(overrides, runtimedata.ExplicitPin{Declaration: pin.Declaration, VersionID: pin.VersionID})
 		}
 	}
-	for _, obligation := range plan.FanOutObligations {
+	all := plan.FanOutObligations
+	var parked map[string]bool
+	if selection := plan.DeploymentFeedSelection; selection != nil && len(selection.Parked) > 0 {
+		all = append(append([]runfork.RunForkFanOutObligation(nil), all...), selection.Parked...)
+		parked = make(map[string]bool, len(selection.Parked))
+		for _, obligation := range selection.Parked {
+			parked[obligation.Intent.Request.Key.DeploymentFeedID] = true
+		}
+	}
+	for _, obligation := range all {
 		intent := obligation.Intent
 		if intent.Request.Deployment == nil {
 			continue
@@ -64,7 +133,7 @@ func projectRunForkDeploymentFeeds(ctx context.Context, tx *sql.Tx, data *stored
 			VersionID: intent.Source.VersionID, SchemaDigest: intent.Request.Deployment.SchemaDigest, RowCount: uint64(intent.Request.Cardinality),
 		}
 	}
-	publications, err := storedurabledata.MaterializeForkFeedPublicationsTx(data, ctx, tx, plan.SourceRunID, forkRunID, targetBundle, sources, overrides, replay)
+	publications, err := storedurabledata.MaterializeForkFeedPublicationsTx(data, ctx, tx, plan.SourceRunID, forkRunID, targetBundle, sources, parked, overrides, replay)
 	if err != nil {
 		return nil, err
 	}
@@ -97,6 +166,9 @@ func projectRunForkDeploymentFeeds(ctx context.Context, tx *sql.Tx, data *stored
 			return nil, fmt.Errorf("fork deployment pin belongs to another run")
 		}
 		if publicationDeclarations[pin.Declaration] && legacy[pin.Declaration] == nil {
+			continue
+		}
+		if legacy[pin.Declaration] == nil && plan.IsParkedDeploymentPin(pin) {
 			continue
 		}
 		target, err := storedurabledata.RequirePinnedSourceTx(ctx, data, tx, forkRunID, targetBundle, pin.Declaration)

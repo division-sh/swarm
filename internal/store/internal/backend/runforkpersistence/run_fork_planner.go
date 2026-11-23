@@ -118,6 +118,7 @@ func planRunForkSnapshotWithActivityOrigins(
 		return runfork.RunForkPlan{}, fmt.Errorf("source run_id must be a UUID: %w", err)
 	}
 	at := strings.TrimSpace(req.At)
+	var member bool
 	if req.AtStart && at != "" {
 		return runfork.RunForkPlan{}, fmt.Errorf("start and event fork selectors are mutually exclusive")
 	}
@@ -125,7 +126,7 @@ func planRunForkSnapshotWithActivityOrigins(
 		if req.AtStart || at != "" && at != req.PublicationID || len(data) != 1 {
 			return runfork.RunForkPlan{}, fmt.Errorf("publication cut requires its exact data owner and no other selector")
 		}
-		point, err := resolveRunForkPublicationPoint(ctx, tx, data[0], runID, req.PublicationID, resolve)
+		point, selectedMember, err := resolveRunForkPublicationPoint(ctx, tx, data[0], runID, req.PublicationID, resolve)
 		if err != nil {
 			return runfork.RunForkPlan{}, err
 		}
@@ -134,6 +135,7 @@ func planRunForkSnapshotWithActivityOrigins(
 		}
 		req.ResolvedPoint = &point
 		at = point.Input
+		member = selectedMember
 	}
 	if req.ResolvedPoint != nil {
 		if err := req.ResolvedPoint.Validate(); err != nil {
@@ -328,7 +330,12 @@ func planRunForkSnapshotWithActivityOrigins(
 	if err := runfork.ValidateFanOutPendingReplayAdmission(plan); err != nil {
 		return runfork.RunForkPlan{}, fmt.Errorf("fixed-revision fan-out admission: %w", err)
 	}
-	evidence, err := loadRunForkAdmissionEvidenceFromRevision(snapshot, entities, pending, fanOutObligations)
+	if member {
+		if err := selectRunForkDeploymentFeed(ctx, tx, data[0], &plan, req.PublicationID); err != nil {
+			return runfork.RunForkPlan{}, err
+		}
+	}
+	evidence, err := loadRunForkAdmissionEvidenceFromRevision(snapshot, entities, plan.PendingWork, plan.FanOutObligations)
 	if err != nil {
 		return runfork.RunForkPlan{}, err
 	}

@@ -6,6 +6,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	storedurabledata "github.com/division-sh/swarm/internal/store/internal/durabledata"
 )
 
 func (s *RunForkPostgresOwner) InspectSelectedForkRecovery(ctx context.Context, entry runfork.SelectedForkRecoveryEntry) (runfork.SelectedForkRecoveryInspection, error) {
@@ -15,7 +16,7 @@ func (s *RunForkPostgresOwner) InspectSelectedForkRecovery(ctx context.Context, 
 		if err != nil {
 			return err
 		}
-		inspection, err = inspectSelectedRecoveryTx(ctx, tx, snapshot, entry, false)
+		inspection, err = inspectSelectedRecoveryTx(ctx, tx, snapshot, entry, false, s.durableData)
 		return err
 	})
 	return inspection, err
@@ -28,15 +29,16 @@ func (s *RunForkSQLiteOwner) InspectSelectedForkRecovery(ctx context.Context, en
 		if err != nil {
 			return err
 		}
-		inspection, err = inspectSelectedRecoveryTx(ctx, tx, snapshot, entry, true)
+		inspection, err = inspectSelectedRecoveryTx(ctx, tx, snapshot, entry, true, s.durableData)
 		return err
 	})
 	return inspection, err
 }
 
-func inspectSelectedRecoveryTx(ctx context.Context, tx *sql.Tx, snapshot runlifecycle.Snapshot, entry runfork.SelectedForkRecoveryEntry, sqlite bool) (runfork.SelectedForkRecoveryInspection, error) {
+func inspectSelectedRecoveryTx(ctx context.Context, tx *sql.Tx, snapshot runlifecycle.Snapshot, entry runfork.SelectedForkRecoveryEntry, sqlite bool, data *storedurabledata.Owner) (runfork.SelectedForkRecoveryInspection, error) {
 	inspection := runfork.SelectedForkRecoveryInspection{RunState: snapshot.State}
 	record, err := loadSelectedRecoveryRecordTx(ctx, tx, snapshot, entry, sqlite, false)
+	record.data = data
 	if err != nil {
 		return inspection, err
 	}

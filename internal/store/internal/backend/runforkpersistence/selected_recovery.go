@@ -26,6 +26,7 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	privaterunlifecycle "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle/sourceadmission"
+	storedurabledata "github.com/division-sh/swarm/internal/store/internal/durabledata"
 	"github.com/google/uuid"
 )
 
@@ -119,7 +120,7 @@ func (s *RunForkPostgresOwner) RecoverSelectedFork(ctx context.Context, req runc
 			if err != nil {
 				return err
 			}
-			recovered, err = recoverSelectedForkTx(txctx, tx, s, attempt, snapshot, req, false, &changes)
+			recovered, err = recoverSelectedForkTx(txctx, tx, s, attempt, snapshot, req, false, &changes, s.durableData)
 			return err
 		})
 		return recovered, err
@@ -166,7 +167,7 @@ func (s *RunForkSQLiteOwner) RecoverSelectedFork(ctx context.Context, req runcon
 			if err != nil {
 				return err
 			}
-			recovered, err = recoverSelectedForkTx(txctx, tx, s, attempt, snapshot, req, true, &changes)
+			recovered, err = recoverSelectedForkTx(txctx, tx, s, attempt, snapshot, req, true, &changes, s.durableData)
 			return err
 		})
 		return recovered, err
@@ -197,6 +198,7 @@ func admitSelectedRecoveryTx(ctx context.Context, tx *sql.Tx, req runcontrol.Sel
 
 type selectedRecoveryRecord struct {
 	runfork.SelectedForkRecoveryResult
+	data         *storedurabledata.Owner
 	binding      runfork.RunForkSelectedContractBinding
 	preparation  runfork.SelectedForkPreparationBinding
 	state        string
@@ -370,8 +372,9 @@ func selectedRecoveryWithoutExecution(snapshot runlifecycle.Snapshot, result sel
 	return result, nil
 }
 
-func recoverSelectedForkTx(ctx context.Context, tx *sql.Tx, owner selectedRecoveryTxOwner, attempt *mutationprotocol.Attempt, snapshot runlifecycle.Snapshot, req runcontrol.SelectedForkRecoveryRequest, sqlite bool, changes *privaterunlifecycle.ChannelCardChanges) (runfork.SelectedForkRecoveryResult, error) {
+func recoverSelectedForkTx(ctx context.Context, tx *sql.Tx, owner selectedRecoveryTxOwner, attempt *mutationprotocol.Attempt, snapshot runlifecycle.Snapshot, req runcontrol.SelectedForkRecoveryRequest, sqlite bool, changes *privaterunlifecycle.ChannelCardChanges, data *storedurabledata.Owner) (runfork.SelectedForkRecoveryResult, error) {
 	record, err := loadSelectedRecoveryRecordTx(ctx, tx, snapshot, req.Entry, sqlite, true)
+	record.data = data
 	result := record.SelectedForkRecoveryResult
 	if err != nil {
 		return result, err
@@ -607,7 +610,9 @@ func planSelectedRecoveryTx(ctx context.Context, tx *sql.Tx, snapshot runlifecyc
 			}
 		}
 		if settled {
-			pins, err := selectedForkRecoveryPinsTx(ctx, tx, result.RunID, snapshot.BundleHash)
+			pins, err := selectedForkRecoveryPinsTx(ctx, tx, result.RunID, snapshot.BundleHash, func(missing []durabledata.Pin) error {
+				return requireParkedRecoveryPinsTx(ctx, tx, record, snapshot.BundleHash, sqlite, missing)
+			})
 			if err != nil {
 				return result, err
 			}
@@ -730,7 +735,34 @@ func selectedRecoveryContinuationDisposition(state runlifecycle.State, record se
 	}
 }
 
-func selectedForkRecoveryPinsTx(ctx context.Context, tx *sql.Tx, forkRunID, bundleHash string) ([]durabledata.Pin, error) {
+func requireParkedRecoveryPinsTx(ctx context.Context, tx *sql.Tx, record selectedRecoveryRecord, bundleHash string, sqlite bool, missing []durabledata.Pin) error {
+	if record.data == nil || record.Operation == nil || record.Operation.Request.PublicationID == "" ||
+		record.binding.ForkPoint.Kind != runfork.RunForkPointStateRevision {
+		return fmt.Errorf("selected recovery pin conflicts with fork run")
+	}
+	op := record.Operation.Request
+	validate, resolve := runforkrevision.ValidateCompletePostgres, resolveRunForkRevisionPoint
+	if sqlite {
+		validate, resolve = runforkrevision.ValidateCompleteSQLite, resolveSQLiteRunForkRevisionPoint
+	}
+	req := runfork.RunForkPlanRequest{SourceRunID: op.SourceRunID, PublicationID: op.PublicationID, ResolvedPoint: op.ResolvedPoint}
+	plan, err := planRunForkSnapshot(ctx, tx, req, validate, resolve, !sqlite, record.data)
+	if err != nil {
+		return err
+	}
+	for _, pin := range missing {
+		if !plan.IsParkedDeploymentPin(pin) {
+			return fmt.Errorf("selected recovery pin conflicts with fork run")
+		}
+	}
+	pins, err := storedurabledata.MaterializeForkPinsTx(record.data, ctx, tx, op.SourceRunID, record.RunID, bundleHash, op.DataPinOverrides, true, time.Time{})
+	if err != nil {
+		return err
+	}
+	return requireExactMaterializedRunForkDeploymentFeeds(ctx, tx, !sqlite, record.RunID, bundleHash, record.data, plan, pins)
+}
+
+func selectedForkRecoveryPinsTx(ctx context.Context, tx *sql.Tx, forkRunID, bundleHash string, verifyParked ...func([]durabledata.Pin) error) ([]durabledata.Pin, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT p.run_id,r.status,p.flow_path,p.event_name,p.schema_digest,p.version_id,p.selection,
 		i.source_resource_version_id,i.deployment_schema_digest,i.bundle_hash
 		FROM resource_version_pins p JOIN runs r ON r.run_id=p.run_id
@@ -744,6 +776,7 @@ func selectedForkRecoveryPinsTx(ctx context.Context, tx *sql.Tx, forkRunID, bund
 	}
 	defer rows.Close()
 	var pins []durabledata.Pin
+	var missing []durabledata.Pin
 	seen := make(map[durabledata.DeclarationRef]struct{})
 	for rows.Next() {
 		var pin durabledata.Pin
@@ -752,7 +785,12 @@ func selectedForkRecoveryPinsTx(ctx context.Context, tx *sql.Tx, forkRunID, bund
 			&pin.SchemaDigest, &pin.VersionID, &pin.Selection, &version, &schema, &feedBundle); err != nil {
 			return nil, fmt.Errorf("decode selected recovery pin: %w", err)
 		}
-		if pin.RunID != forkRunID || pin.Validate() != nil || !version.Valid || version.String != string(pin.VersionID) ||
+		if pin.RunID != forkRunID || pin.Validate() != nil {
+			return nil, fmt.Errorf("selected recovery pin conflicts with fork run")
+		}
+		if !version.Valid && !schema.Valid && !feedBundle.Valid && len(verifyParked) == 1 {
+			missing = append(missing, pin)
+		} else if !version.Valid || version.String != string(pin.VersionID) ||
 			!schema.Valid || schema.String != string(pin.SchemaDigest) || !feedBundle.Valid || feedBundle.String != bundleHash {
 			return nil, fmt.Errorf("selected recovery pin conflicts with fork run")
 		}
@@ -764,6 +802,11 @@ func selectedForkRecoveryPinsTx(ctx context.Context, tx *sql.Tx, forkRunID, bund
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("read selected recovery pins: %w", err)
+	}
+	if len(missing) != 0 {
+		if err := verifyParked[0](missing); err != nil {
+			return nil, err
+		}
 	}
 	var feeds int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM fan_out_intents i WHERE run_id=$1 AND origin_kind='deployment'
