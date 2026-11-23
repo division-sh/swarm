@@ -75,9 +75,20 @@ func TestProjectNodePolicyValueRows(t *testing.T) {
 		{"nonmapping", "{document: payload.document}", "[stored_key]", false},
 		{"duplicate", "{document: payload.document}", "{private_key: one, private_key: two}", false},
 		{"empty_ordinary", "{}", "{private_key: stored_key}", false},
+		{"null_ordinary", "null", "{private_key: stored_key}", false},
+		{"omitted_ordinary", "", "{private_key: stored_key}", true},
+		{"omitted_both", "", "", false},
+		{"empty_secret_only", "", "{}", false},
+		{"invalid_secret_only", "", "{private_key: 12}", false},
 	} {
 		t.Run("secret_input/"+tc.name, func(t *testing.T) {
-			body := "module: transform\ninput: " + tc.input + "\nsecret_input: " + tc.secret + "\ninto: computed.result\n"
+			body := "module: transform\ninto: computed.result\n"
+			if tc.input != "" {
+				body += "input: " + tc.input + "\n"
+			}
+			if tc.secret != "" {
+				body += "secret_input: " + tc.secret + "\n"
+			}
 			snapshot, err := yamlsource.Load([]byte(body))
 			if err != nil {
 				t.Fatal(err)
@@ -88,6 +99,9 @@ func TestProjectNodePolicyValueRows(t *testing.T) {
 			}
 			if tc.ok && compute.Module.SecretInput == nil {
 				t.Fatal("secret bindings were not retained")
+			}
+			if tc.ok && tc.input == "" && (compute.Module.Input != nil || compute.Module.InputPaths != nil) {
+				t.Fatal("projection synthesized an ordinary input map")
 			}
 		})
 	}

@@ -32,7 +32,7 @@ func TestComputeModuleSecretInputNativeBoundaryBothStores(t *testing.T) {
 			if err := file.Set(t.Context(), key, values[0]); err != nil {
 				t.Fatal(err)
 			}
-			root := computeSecretNativeSource(t, key)
+			root := computeSecretNativeSource(t, key, false)
 			process, fixture := startServedBoundaryFixture(t, backend, root)
 			uses := credentials.BuildRequirementUses(fixture.Runtime.Options.WorkflowModule.SemanticSource())[key]
 			worker := identitytest.RootNode(t, "worker")
@@ -163,6 +163,29 @@ func TestComputeModuleSecretInputNativeBoundaryBothStores(t *testing.T) {
 					t.Fatal("serve --verbose exposed injected input")
 				}
 			}
+			t.Run("secret_only", func(t *testing.T) {
+				if err := file.Set(t.Context(), key, values[0]); err != nil {
+					t.Fatal(err)
+				}
+				process, fixture := startServedBoundaryFixture(t, backend, computeSecretNativeSource(t, key, true))
+				runID := seedServedPublicationRun(t, fixture.Runtime)
+				result := requireServedEventPublishRPCResult(t, fixture.Endpoint, map[string]any{
+					"event_name": "compute.requested", "bundle_hash": fixture.BundleHash, "run_id": runID,
+					"payload": map[string]any{}, "idempotency_key": "secret-only",
+				})
+				if result.RunID != runID || result.EventID == "" || result.NewRunCreated {
+					t.Fatal("secret-only publication did not acknowledge the exact fixture run")
+				}
+				if readback := computeSecretNativeEntity(t, fixture.Endpoint, runID, "done"); readback.Fields["seen"] != true {
+					t.Fatal("secret-only guest did not observe the injected key")
+				}
+				if code := process.stop(); code != 0 {
+					t.Fatal("secret-only serve did not join", code)
+				}
+				if strings.Contains(process.outputString(), values[0]) {
+					t.Fatal("serve --verbose exposed the secret-only guest input")
+				}
+			})
 		})
 	}
 }
@@ -239,26 +262,37 @@ func computeSecretNativeEvents(t *testing.T, endpoint string) map[string]operato
 	return events
 }
 
-func computeSecretNativeSource(t *testing.T, key string) string {
+func computeSecretNativeSource(t *testing.T, key string, secretOnly bool) string {
 	t.Helper()
 	root := t.TempDir()
 	// Both the ordinary document and named key determine this non-signing result.
 	// The output contains only a boolean, not either input value.
 	offset := len(`{"document":"x","private_key":"`)
+	documentCheck := fmt.Sprintf("local.get $p i32.const %d i32.add i32.load8_u i32.const 120 i32.eq", len(`{"document":"`))
+	combine := "i32.and"
+	binding := "          input: {document: payload.document}\n"
+	required := "document, private_key"
+	property := "      document: {type: string, enum: [x, y]}\n"
+	eventProperty := "  document: text\n"
+	if secretOnly {
+		offset = len(`{"private_key":"`)
+		documentCheck, combine, binding, property, eventProperty = "", "", "", "", ""
+		required = "private_key"
+	}
 	wasm, err := wasmtime.Wat2Wasm(fmt.Sprintf(`(module
   (memory (export "memory") 1 1)
   (data (i32.const 1024) "{\22seen\22:true}")
   (data (i32.const 2048) "{\22seen\22:false}")
   (func (export "alloc") (param i32) (result i32) i32.const 4096)
   (func (export "compute") (param $p i32) (param i32) (result i64)
-    local.get $p i32.const %d i32.add i32.load8_u i32.const 120 i32.eq
+    %s
     local.get $p i32.const %d i32.add i32.load8_u i32.const 65 i32.eq
-    i32.and
+    %s
     if (result i64)
       i64.const %d
     else
       i64.const %d
-    end))`, len(`{"document":"`), offset, uint64(1024)<<32|uint64(len(`{"seen":true}`)), uint64(2048)<<32|uint64(len(`{"seen":false}`))))
+    end))`, documentCheck, offset, combine, uint64(1024)<<32|uint64(len(`{"seen":true}`)), uint64(2048)<<32|uint64(len(`{"seen":false}`))))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -266,14 +300,13 @@ func computeSecretNativeSource(t *testing.T, key string) string {
 		"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		"schema.yaml":   "stages:\n  waiting: {}\n  done: {final: true}\ninputs: [compute.requested]\noutputs: [compute.completed]\n",
 		"state.yaml":    "seen: boolean\n",
-		"events.yaml":   "compute.requested:\n  document: text\ncompute.completed:\n  seen: boolean\n",
+		"events.yaml":   "compute.requested:\n" + eventProperty + "compute.completed:\n  seen: boolean\n",
 		"nodes.yaml": fmt.Sprintf(`worker:
   compute.requested:
     rules:
       - compute_module:
           module: inspect_key
-          input: {document: payload.document}
-          secret_input: {private_key: %s}
+%s          secret_input: {private_key: %s}
           into: computed.result
       - emit:
           event: compute.completed
@@ -285,7 +318,7 @@ sink:
         - target_field: seen
           value: payload.seen
     advances_to: done
-`, key),
+`, binding, key),
 		"tools.yaml": fmt.Sprintf(`inspect_key:
   handler_type: wasm
   path: modules/guest.wasm
@@ -295,10 +328,9 @@ sink:
   input_schema:
     type: object
     additionalProperties: false
-    required: [document, private_key]
+    required: [%s]
     properties:
-      document: {type: string, enum: [x, y]}
-      private_key: {type: string}
+%s      private_key: {type: string}
   output_schema:
     type: object
     additionalProperties: false
@@ -306,7 +338,7 @@ sink:
     properties:
       seen: {type: boolean}
   limits: {gas: 100000, memory_pages: 1, output_bytes: 128}
-`, computemodule.HashBytes(wasm)),
+`, computemodule.HashBytes(wasm), required, property),
 	} {
 		writeStandingCandidateFile(t, filepath.Join(root, name), body)
 	}
