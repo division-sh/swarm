@@ -11,6 +11,7 @@ import (
 	"net"
 	"reflect"
 	"syscall"
+	"time"
 
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/config"
@@ -65,8 +66,7 @@ func InspectServeCheckStage(ctx context.Context, in ServeCheckStageRequest) (out
 			if out.Validation.BootReport.SourceArtifactHash == "" {
 				out.Validation = runtime.BlockedWorkflowContractAdmission(bootverify.ExecutionValidation, in.Paths.SourceRoot, "deployment_configuration", "prerequisite refused the selected source or configuration before validation")
 			}
-			verifyDeploymentObservation(ctx, &out.Validation, "check_stage_completion", "internal/cliapp.InspectServeCheckStage", in.Paths.SourceRoot, failures.ClassSchemaInvalid, func(context.Context) error { return retErr })
-			out.Validation.BootReport.Sort()
+			retErr = out.recordCompletionFailure(ctx, in.Paths.SourceRoot, retErr)
 		}
 	}()
 	if err := ctx.Err(); err != nil {
@@ -165,6 +165,24 @@ func InspectServeCheckStage(ctx context.Context, in ServeCheckStageRequest) (out
 	})
 	out.Validation.BootReport.Sort()
 	return out, ctx.Err()
+}
+
+func (r *ServeCheckStageResult) recordCompletionFailure(ctx context.Context, subject string, err error) error {
+	class := failures.ClassSchemaInvalid
+	if runtime.IsSoleWorkflowAdmissionReportRefusal(err) {
+		if reportClass := r.Decision().FailureClass; reportClass != "" {
+			class = reportClass
+		}
+	}
+	// The work has already returned. Record its cause even if cancellation
+	// would prevent a new observation from starting.
+	started := time.Now().UTC()
+	if canceled := ctx.Err(); canceled != nil && !errors.Is(err, canceled) {
+		err = errors.Join(err, canceled)
+	}
+	recordDeploymentObservation(ctx, &r.Validation, "check_stage_completion", "internal/cliapp.InspectServeCheckStage", subject, class, started, err)
+	r.Validation.BootReport.Sort()
+	return err
 }
 
 func serveCheckSnapshotOutput(in ServeCheckStageRequest, out *ServeCheckStageResult) **storeselected.BootCheckInput {
