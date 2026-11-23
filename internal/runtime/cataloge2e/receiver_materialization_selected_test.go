@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -411,6 +412,11 @@ func proveSelectedCrossInstanceFork(t *testing.T, backend catalogRuntimeBackend,
 			t.Fatalf("captured source publication: found=%t value=%+v error=%v", found, publication, err)
 		}
 		originalRoute := publication.DeliveryRoutes[0]
+		wantClaim, wantContext := originalRoute.ConnectClaim, originalRoute.Context
+		if hop == 0 {
+			wantContext.Life = nil
+			wantClaim = selectedFirstHopClaim(t, loaded.Source, originalRoute)
+		}
 		captured, entity, found, err := runforkadmission.FixedConstructionForRoute(loaded.Source, plan, flowidentity.StoredRoute(originalRoute.Target.Route().FlowID, flowidentity.LogicalInstanceID(receiverPath), receiverPath))
 		if err != nil || !found || entity.Fields["cross_count"] != int64(0) {
 			t.Fatalf("fixed receiver was not captured before delivery: found=%t entity=%+v error=%v", found, entity, err)
@@ -469,11 +475,12 @@ func proveSelectedCrossInstanceFork(t *testing.T, backend catalogRuntimeBackend,
 				wantTarget := events.RouteIdentity{FlowID: projected.TemplateID, FlowInstance: projected.InstancePath, EntityID: projected.EntityID}
 				targetMatches := route.Target.Route() == wantTarget
 				recipientMatches := route.Recipient == originalRoute.Recipient
-				claimMatches := route.ConnectClaim.Equal(originalRoute.ConnectClaim)
-				if !targetMatches || !recipientMatches || !claimMatches || !hasEvent || localEvent == "" {
-					t.Fatalf("fork changed selected receiver/handler/claim: target match=%t got=%+v want=%+v; recipient match=%t got=%+v want=%+v; claim match=%t got=%+v source=%+v; context got=%+v (life=%+v) source=%+v (life=%+v); receiver event=%q present=%t",
-						targetMatches, route.Target.Route(), wantTarget, recipientMatches, route.Recipient, originalRoute.Recipient,
-						claimMatches, route.ConnectClaim, originalRoute.ConnectClaim, route.Context, route.Context.Life, originalRoute.Context, originalRoute.Context.Life, localEvent, hasEvent)
+				claimMatches := route.ConnectClaim.Equal(wantClaim)
+				contextMatches := hop != 0 || (route.Context.Life == nil && reflect.DeepEqual(route.Context.Normalized(), wantContext.Normalized()))
+				if !targetMatches || !recipientMatches || !claimMatches || !contextMatches || !hasEvent || localEvent == "" {
+					t.Fatalf("fork changed selected receiver/handler/claim: hop=%d; target match=%t got=%+v want=%+v; recipient match=%t got=%+v want=%+v; claim match=%t got=%+v want=%+v source=%+v; context match=%t got=%+v (life=%+v) want=%+v source life=%+v; receiver event=%q present=%t",
+						hop, targetMatches, route.Target.Route(), wantTarget, recipientMatches, route.Recipient, originalRoute.Recipient,
+						claimMatches, route.ConnectClaim, wantClaim, originalRoute.ConnectClaim, contextMatches, route.Context, route.Context.Life, wantContext, originalRoute.Context.Life, localEvent, hasEvent)
 				}
 				id, err := deliverylifecycle.DeliveryID(childEvent, route)
 				if err != nil {
@@ -555,6 +562,28 @@ func proveSelectedCrossInstanceFork(t *testing.T, backend catalogRuntimeBackend,
 		}
 		sourceRun, cut, receiverPath = child, childEvent, projected.InstancePath
 	}
+}
+
+func selectedFirstHopClaim(t *testing.T, source semanticview.Source, original events.DeliveryRoute) events.ConnectExecutionClaim {
+	t.Helper()
+	var matched pinrouting.ConnectRoutePlan
+	matches := 0
+	for _, plan := range pinrouting.CompileConnectGraph(source).Plans() {
+		claim, err := plan.ClaimForRetainedDelivery(original)
+		if err == nil && claim.Equal(original.ConnectClaim) {
+			matched = plan
+			matches++
+		}
+	}
+	if matches != 1 {
+		t.Fatalf("source delivery claim matches %d compiled plans, want one: %+v", matches, original)
+	}
+	original.Context.Life = nil
+	claim, err := matched.ClaimForRetainedDelivery(original)
+	if err != nil {
+		t.Fatalf("derive first-hop claim without producer life: %v", err)
+	}
+	return claim
 }
 
 func proveCrossInstanceCutRefusals(t *testing.T, h *runtimeHarness, selected crossInstanceSelectedForkStore, source semanticview.Source, selection runfork.RunForkContractSelection, original runfork.RunForkPlan, keyedPath, intermediatePath, receiverPath string) {
