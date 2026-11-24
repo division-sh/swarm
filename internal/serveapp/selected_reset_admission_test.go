@@ -30,6 +30,9 @@ func TestSelectedResetPreparationAdmissionOrderBothStores(t *testing.T) {
 		t.Run(string(backend), func(t *testing.T) {
 			for _, first := range []string{"admission", "reset"} {
 				t.Run(first, func(t *testing.T) {
+					if backend == servedparity.BackendExplicitPostgres {
+						useDeclaredServePostgresTarget(t)
+					}
 					probe := &selectedResetPreparationProbe{make(chan struct{}), make(chan struct{}), make(chan struct{})}
 					var release sync.Once
 					defer release.Do(func() { close(probe.release) })

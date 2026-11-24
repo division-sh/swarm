@@ -180,6 +180,7 @@ func newIssue2394StopRig(t *testing.T, backend servedparity.Backend) *issue2394S
 		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(), TestLLMRuntime: servedNoopLLMRuntime{},
 	}
 	if backend == servedparity.BackendExplicitPostgres {
+		useDeclaredServePostgresTarget(t)
 		_, rig.db, _ = installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle { return serveRuntimeWorkspaceStub{} })
 		rig.backend, rig.opts.StoreMode, rig.opts.StoreModeSet = "postgres", "postgres", true
 		rig.opts.ConfigPath = writeServeRuntimeTestConfig(t)

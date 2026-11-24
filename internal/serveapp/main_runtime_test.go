@@ -533,6 +533,7 @@ func TestCLI_ServeLifecycleRoutesDiagnosticsToStderr(t *testing.T) {
 }
 
 func TestRunServeRuntimeJoinFailureReachesAPIAndCLI(t *testing.T) {
+	useDeclaredServePostgresTarget(t)
 	endpoint, db, bundleHash, _, _ := startServedJoinProofRuntime(t)
 	initial := requireServedEventPublishRPCResult(t, endpoint, map[string]any{
 		"event_name":      "order.started",
@@ -800,6 +801,7 @@ func TestRunServeRuntimeEventPublishExistingRunActiveLoadServedPathDefaultSQLite
 }
 
 func TestRunServeRuntimeEventPublishExistingRunActiveLoadServedPathPostgres(t *testing.T) {
+	useDeclaredServePostgresTarget(t)
 	_, db, _ := installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
 	})
@@ -978,6 +980,7 @@ type servedSessionCleanupProof struct {
 
 func startServedSessionCleanupProof(t *testing.T) servedSessionCleanupProof {
 	t.Helper()
+	useDeclaredServePostgresTarget(t)
 	_, db, pg := installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
 	})
@@ -1572,6 +1575,9 @@ func runServedLiveAgentEventReplayBackendProof(t *testing.T, backend servedparit
 	t.Helper()
 	if backend == servedparity.BackendDefaultSQLite {
 		setDoctorProviderSecret(t, "ANTHROPIC_API_KEY", "agent-replay-provider-fixture")
+	}
+	if backend == servedparity.BackendExplicitPostgres {
+		useDeclaredServePostgresTarget(t)
 	}
 	rt := startServedLiveAgentProofRuntime(t, backend)
 	runServedLiveAgentEventReplayLifecycleProof(t, rt)
@@ -6219,6 +6225,7 @@ func servedEventPublishEntityState(t *testing.T, db *sql.DB, backend, runID, ent
 
 func TestRunServeRuntimePassesNoAmbientDataSourceToWorkspaceLifecycle(t *testing.T) {
 	var capturedMountSources cliapp.WorkspaceMountSources
+	useDeclaredServePostgresTarget(t)
 	_, _, _ = installServeRuntimePostgresTestStoresWithWorkspaceFactory(t, func(mountSources cliapp.WorkspaceMountSources) cliapp.ServeWorkspaceLifecycle {
 		capturedMountSources = mountSources
 		return serveRuntimeWorkspaceStub{}
