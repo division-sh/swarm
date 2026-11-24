@@ -1743,6 +1743,7 @@ func startServedConversationForkProofRuntime(t *testing.T, backend servedparity.
 		rt = start(configPath, cliapp.ServeOptions{})
 		rt.Backend = "sqlite"
 	case servedparity.BackendExplicitPostgres:
+		useDeclaredServePostgresTarget(t)
 		_, _, _ = installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle { return serveRuntimeWorkspaceStub{} })
 		configPath := writeServedConversationForkConfig(t, storebackend.BackendPostgres.String(), "", provider.URL)
 		rt = start(configPath, cliapp.ServeOptions{StoreMode: "postgres", StoreModeSet: true})
@@ -6431,6 +6432,7 @@ func TestRunServeRuntimeNativeBashDefaultDockerFailsWithoutDocker(t *testing.T) 
 }
 
 func TestRunServeRuntimeFreshEmptyPostgresBootstrapsSchemaBeforeDiskContractsServe(t *testing.T) {
+	useDeclaredServePostgresTarget(t)
 	_, db, _ := installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
 	})
@@ -6461,6 +6463,7 @@ func TestRunServeRuntimeFreshEmptyPostgresBootstrapsSchemaBeforeDiskContractsSer
 }
 
 func TestRunLocalRuntimeFreshEmptyPostgresBootstrapsSchemaBeforeDevAbandon(t *testing.T) {
+	useDeclaredServePostgresTarget(t)
 	_, db, _ := installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
 	})
@@ -7083,6 +7086,7 @@ func TestRunServeRuntimeRejectsPresentZeroBeforeContextPublication(t *testing.T)
 }
 
 func TestRunServeRuntimeUnavailableBundleStartupRecoveryFailsPersistedMissingBeforeCleanup(t *testing.T) {
+	useDeclaredServePostgresTarget(t)
 	_, db, pg := installServeRuntimePostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
 	})

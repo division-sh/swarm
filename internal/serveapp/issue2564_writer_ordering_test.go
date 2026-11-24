@@ -495,7 +495,7 @@ func issue2564ToolResults(value any) []issue2564ToolResult {
 
 func startIssue2564Served(t *testing.T, backend, root string, p *issue2564Provider, hook func(context.Context, string, events.Event) error, probe runtimelifecycleprobe.Observer) (*serveRuntimeTestProcess, issue2564ServedFixture) {
 	t.Helper()
-	opts, start := issue2564ServeHarness(t, backend, root, false)
+	opts, start := issue2564ServeHarnessAtLocation(t, backend, root, false, "", true)
 	opts.TestWorkflowNodeHandlerStartHook = hook
 	opts.TestLifecycleProbe = probe
 	server := httptest.NewServer(p)

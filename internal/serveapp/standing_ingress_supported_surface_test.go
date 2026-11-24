@@ -652,12 +652,15 @@ func TestStandingRestartMixedHealthyAndTerminalProcessParity(t *testing.T) {
 				oldBuildStores := buildStoresForServe
 				oldWorkspace := cliapp.ConfiguredWorkspaceLifecycleForServe
 				buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config, bootCheck ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {
-					var err error
+					openDSN, err := checkedPostgresFixtureDSN(ctx, cfg, dsn, true, bootCheck)
+					if err != nil {
+						return nil, err
+					}
 					opened, err = store.NewPostgresStore(dsn)
 					if err != nil {
 						return nil, err
 					}
-					owner := openSelectedPostgresOwner(t, dsn, storetest.DatabaseForTest(opened), cfg, bootCheck...)
+					owner := openSelectedPostgresOwner(t, openDSN, storetest.DatabaseForTest(opened), cfg, bootCheck...)
 					storetest.BootstrapPostgresRuntimeStore(t, opened)
 					return owner, nil
 				}

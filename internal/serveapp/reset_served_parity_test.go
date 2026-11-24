@@ -26,6 +26,9 @@ func TestServedResetRetainClearAndHistoricalReplayBothStores(t *testing.T) {
 	servedparity.Run(t, scenario, func(t *testing.T, backend servedparity.Backend) {
 		for _, clear := range []bool{false, true} {
 			t.Run(fmt.Sprintf("clear=%t", clear), func(t *testing.T) {
+				if backend == servedparity.BackendExplicitPostgres {
+					useDeclaredServePostgresTarget(t)
+				}
 				captured := captureSelectedResetSupervisor(t)
 				var originalRoot string
 				proof := startServedControlProofRuntimeWithFixture(t, backend, func(t *testing.T) string {
@@ -189,6 +192,9 @@ func TestServedResetRetainClearAndHistoricalReplayBothStores(t *testing.T) {
 func TestServedResetCLIDryRunApplyAndReplayBothStores(t *testing.T) {
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
+			if backend == servedparity.BackendExplicitPostgres {
+				useDeclaredServePostgresTarget(t)
+			}
 			captured := captureSelectedResetSupervisor(t)
 			proof := startServedControlProofRuntime(t, backend)
 			supervisor := <-captured

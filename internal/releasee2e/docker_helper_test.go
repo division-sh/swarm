@@ -82,6 +82,7 @@ type fakeDockerContainer struct {
 	ExtraHosts      []string          `json:"extra_hosts,omitempty"`
 	AdmissionKind   string            `json:"admission_kind,omitempty"`
 	AdmissionExited bool              `json:"admission_exited,omitempty"`
+	AdmissionWorker string            `json:"admission_worker,omitempty"`
 	Workdir         string            `json:"workdir,omitempty"`
 }
 
@@ -1485,6 +1486,11 @@ func fakeDockerWorker(root string, args []string) int {
 	if err != nil {
 		return fakeDockerUnexpected(root, args, err.Error())
 	}
+	disposableProbe := mode == "probe" && container.AdmissionKind == "startup"
+	attached := "attached:" + invocation
+	if disposableProbe && !moveFakeAdmissionWorker(root, container.ID, "", attached) {
+		return fakeDockerUnexpected(root, args, "disposable worker already attached or container changed")
+	}
 	recordFakeDocker(root, fakeDockerRecord{Class: "workspace_worker", ContainerID: container.ID, WorkerMode: mode})
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -1512,6 +1518,13 @@ func fakeDockerWorker(root string, args []string) int {
 	<-joined
 	if err != nil {
 		return fakeDockerUnexpected(root, args, "native worker process failed")
+	}
+	if disposableProbe {
+		// Publish absence evidence only after both the native wait and input join.
+		if !moveFakeAdmissionWorker(root, container.ID, attached, "joined:"+invocation) {
+			return fakeDockerUnexpected(root, args, "disposable worker join lost its container")
+		}
+		recordFakeDocker(root, fakeDockerRecord{Class: "admission_worker_joined", ContainerID: container.ID, WorkerMode: mode})
 	}
 	return 0
 }

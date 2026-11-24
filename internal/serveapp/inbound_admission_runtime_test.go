@@ -57,7 +57,11 @@ func TestInboundAdmissionSupportedSurfaceStartupFailuresSQLiteAndPostgres(t *tes
 				t.Cleanup(cleanup)
 				oldBuildStores := buildStoresForServe
 				oldWorkspace := cliapp.ConfiguredWorkspaceLifecycleForServe
-				buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config, bootCheck ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {
+				buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config, bootCheck ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {
+					if firstBootCheckInput(bootCheck) != nil {
+						// Return the authored refusal through serve's ordinary error path.
+						return buildStores(ctx, selection, cfg, bootCheck...)
+					}
 					owner := openSelectedPostgresOwner(t, postgresDSN, storetest.DatabaseForTest(postgresStore), cfg, bootCheck...)
 					storetest.BootstrapPostgresRuntimeStore(t, postgresStore)
 					return owner, nil
@@ -193,7 +197,11 @@ func runInboundAdmissionSupportedSurfacePolicyMatrix(t *testing.T, backend strin
 		oldBuildStores := buildStoresForServe
 		oldWorkspace := cliapp.ConfiguredWorkspaceLifecycleForServe
 		buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config, bootCheck ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {
-			owner := openSelectedPostgresOwner(t, dsn, storetest.DatabaseForTest(postgresStore), cfg, bootCheck...)
+			openDSN, err := checkedPostgresFixtureDSN(ctx, cfg, dsn, true, bootCheck)
+			if err != nil {
+				return nil, err
+			}
+			owner := openSelectedPostgresOwner(t, openDSN, storetest.DatabaseForTest(postgresStore), cfg, bootCheck...)
 			storetest.BootstrapPostgresRuntimeStore(t, postgresStore)
 			return owner, nil
 		}
