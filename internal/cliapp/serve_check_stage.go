@@ -10,6 +10,8 @@ import (
 	"io"
 	"net"
 	"reflect"
+	"slices"
+	"strings"
 	"syscall"
 	"time"
 
@@ -382,6 +384,46 @@ func (r ServeCheckStageResult) Decision() bootverify.AdmissionDecision {
 }
 
 func (r ServeCheckStageResult) ExitCode() int { return verifyAdmissionExitCode(r.Decision()) }
+
+func (r ServeCheckStageResult) strictConsumerRefusal() error {
+	report := r.Validation.BootReport
+	decision := r.Decision()
+	if decision.Interrupted || decision.FailureClass != failures.ClassSchemaInvalid || !r.onlyFatalConsumerWarnings() {
+		return nil
+	}
+	if hard := report.Errors(); len(hard) != 1 || hard[0].CheckID != "check_stage_completion" {
+		return nil
+	}
+	var summary error
+	for _, observation := range report.Observations {
+		if observation.CheckID == "check_stage_completion" && summary == nil &&
+			runtime.IsSoleWorkflowAdmissionReportRefusal(observation.Cause) {
+			summary = observation.Cause
+		} else if observation.Cause != nil || observation.Status == bootverify.AdmissionFailed || observation.Status == bootverify.AdmissionUnavailable {
+			return nil
+		}
+	}
+	return summary
+}
+
+func (r ServeCheckStageResult) onlyFatalConsumerWarnings() bool {
+	if !r.Options.FatalBootWarnings {
+		return false
+	}
+	found := false
+	for _, warning := range r.Validation.BootReport.Warnings() {
+		if slices.ContainsFunc(r.Options.ExcludedFatalBootWarningChecks, func(id string) bool {
+			return strings.TrimSpace(id) == warning.CheckID
+		}) {
+			continue
+		}
+		if warning.CheckID != "event_consumer_exists" || warning.FailureClass != "" {
+			return false
+		}
+		found = true
+	}
+	return found
+}
 
 func (r ServeCheckStageResult) Failure() (failure error) {
 	defer func() {
