@@ -2,6 +2,7 @@ package runforkadmission
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -181,24 +182,12 @@ func AdmitContractFrontier(req ContractFrontierRequest) (runfork.RunForkContract
 				return runfork.RunForkContractFrontierAdmission{}, err
 			}
 		}
-		if _, ok := req.Plan.ExecutionInputPublication(frontier[i].SourceEventID); ok {
-			pendingRecipients := frontier[i].DerivedRecipients[:0]
-			for _, recipient := range frontier[i].DerivedRecipients {
-				completed := false
-				for _, item := range req.Plan.PendingWork {
-					if item.EventID == frontier[i].SourceEventID && item.Classification == runfork.RunForkPendingClassificationDeliveredCompleted &&
-						matchesHistoricalRecipient(req.Plan.SourceRunID, item.DeliveryRoute, recipient) {
-						completed = true
-					}
-				}
-				if !completed {
-					pendingRecipients = append(pendingRecipients, recipient)
-				}
-			}
-			frontier[i].DerivedRecipients = pendingRecipients
-		}
 		_, inputPublication := req.Plan.ExecutionInputPublication(frontier[i].SourceEventID)
-		if inputPublication || continuingFanOut || continuingRequest {
+		var removedCompletedNode bool
+		if inputPublication || (!continuingFanOut && !continuingRequest) {
+			frontier[i].DerivedRecipients, removedCompletedNode = excludeCompletedFrontierRecipients(req.Plan, frontier[i])
+		}
+		if inputPublication || continuingFanOut || continuingRequest || removedCompletedNode {
 			for _, recipient := range frontier[i].DerivedRecipients {
 				if recipient.Recipient.IsNode() {
 					frontier[i].WorkflowNodeSubscribers = append(frontier[i].WorkflowNodeSubscribers, recipient.HandlerNode().Key())
@@ -252,6 +241,30 @@ func AdmitContractFrontier(req ContractFrontierRequest) (runfork.RunForkContract
 		LineageOnlyEvents:            lineageOnly,
 		UnsupportedBlockers:          blockers,
 	}, nil
+}
+
+func excludeCompletedFrontierRecipients(plan runfork.RunForkPlan, event runfork.RunForkContractFrontierEvent) ([]forkrecipient.Evidence, bool) {
+	var completed []events.DeliveryRoute
+	for _, item := range plan.PendingWork {
+		if item.EventID == event.SourceEventID && item.Classification == runfork.RunForkPendingClassificationDeliveredCompleted {
+			completed = append(completed, item.DeliveryRoute)
+		}
+	}
+	if len(completed) == 0 {
+		return event.DerivedRecipients, false
+	}
+	removedNode := false
+	pending := event.DerivedRecipients[:0]
+	for _, recipient := range event.DerivedRecipients {
+		if slices.ContainsFunc(completed, func(route events.DeliveryRoute) bool {
+			return matchesHistoricalRecipient(plan.SourceRunID, route, recipient)
+		}) {
+			removedNode = removedNode || recipient.Recipient.IsNode()
+			continue
+		}
+		pending = append(pending, recipient)
+	}
+	return pending, removedNode
 }
 
 // Historical slots narrow selected recipients; they grant no route authority.
