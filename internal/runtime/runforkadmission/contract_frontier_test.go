@@ -89,6 +89,24 @@ func TestAdmitContractFrontier_SelectedContractChangesRecipients(t *testing.T) {
 	if gotA != identitytest.FlowNode(t, "consumer", "consumer-a").Key() || gotB != identitytest.FlowNode(t, "consumer", "consumer-b").Key() {
 		t.Fatalf("selected contract recipients = %q/%q, want consumer-a/consumer-b", gotA, gotB)
 	}
+	completed := plan.PendingWork[0]
+	completed.DeliveryID = uuid.NewString()
+	completed.SubscriberID = gotA
+	completed.Classification, completed.Status = runfork.RunForkPendingClassificationDeliveredCompleted, "delivered"
+	completed.DeliveryRoute = events.DeliveryRoute{
+		Recipient: events.MustNodeDeliveryRecipient(identitytest.FlowNode(t, "consumer", "consumer-a")),
+		Target:    events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer", EntityID: uuid.NewString()}),
+	}
+	plan.PendingWork = append(plan.PendingWork, completed)
+	plan.PendingWorkCount++
+	admission, err := AdmitContractFrontier(ContractFrontierRequest{Plan: plan, Source: sourceB, ContractSelection: SelectedContractSelection(sourceB)})
+	if err != nil || len(admission.FrontierEvents) != 1 {
+		t.Fatalf("completed source slot changed an unmatched selected recipient's frontier: %+v / %v", admission, err)
+	}
+	recipients := admission.FrontierEvents[0].DerivedRecipients
+	if len(recipients) != 1 || recipients[0].Recipient.ID() != gotB {
+		t.Fatalf("completed source slot excluded an unmatched selected recipient: %+v", recipients)
+	}
 }
 
 func TestAdmitContractFrontier_ConnectMatchesConcreteTemplateSourceEndpoint(t *testing.T) {

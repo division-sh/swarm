@@ -304,6 +304,7 @@ func planRunForkSnapshotWithActivityOrigins(
 	}
 	plan.PendingWork = pending
 	plan.PendingWorkCount = len(pending)
+	plan = retainPendingProducerWitnessReaders(plan, snapshot)
 	requests, err := requestPendingPublications(ctx, tx, snapshot)
 	if err != nil {
 		return runfork.RunForkPlan{}, err

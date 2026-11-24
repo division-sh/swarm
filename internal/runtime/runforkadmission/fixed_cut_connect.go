@@ -332,7 +332,7 @@ func fixedCutConstructorRouteEvidence(source semanticview.Source, routeTable *ru
 		})
 	}
 	if !found {
-		if constructor.instance.InstancePath == cut.ForkPoint.RoutingSource.Route().FlowInstance && evidence.InstanceKey != "" && len(evidence.Lineage) != 0 {
+		if evidence.InstanceKey != "" && len(evidence.Lineage) != 0 {
 			return inheritedKeyedConstructorEvidence(source, routeTable, graph, cut, frontier, constructor)
 		}
 		return absent, false, nil
