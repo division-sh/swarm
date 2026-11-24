@@ -60,7 +60,7 @@ func AdmitSelectedContractRouteHistory(req SelectedContractRouteHistoryRequest) 
 	if err != nil {
 		return runfork.RunForkSelectedContractRouteAdmission{}, err
 	}
-	constructedEvidence, err := fixedCutConstructedRouteEvidence(req.Source, req.Plan, constructors, connectGraph, req.FrontierAdmission, dynamicFlowInstances, routeEvents)
+	constructedEvidence, err := fixedCutConstructedRouteEvidence(req.Source, routeTable, req.Plan, constructors, connectGraph, req.FrontierAdmission, dynamicFlowInstances, routeEvents)
 	if err != nil {
 		return runfork.RunForkSelectedContractRouteAdmission{}, err
 	}
@@ -97,6 +97,104 @@ func AdmitSelectedContractRouteHistory(req SelectedContractRouteHistoryRequest) 
 		InvalidPaths:                   selectedRouteHistoryInvalidPaths(),
 		UnsupportedBlockers:            blockers,
 	}, nil
+}
+
+func inheritedKeyedConstructorEvidence(source semanticview.Source, routes *runtimebus.RouteTable, graph runtimepinrouting.CompiledConnectGraph, cut runfork.RunForkPlan, frontier runfork.RunForkContractFrontierAdmission, child fixedCutConstructor) (runfork.ConstructedRouteEvidence, bool, error) {
+	var absent runfork.ConstructedRouteEvidence
+	w, found := cut.InheritedConstructionWitness()
+	if !found {
+		return absent, false, nil
+	}
+	e := child.evidence
+	original := e.Original.Identity
+	if e.Original.BundleHash != frontier.ContractSelection.BundleHash || w.CreatingEventID != e.Original.CreatingInput.EventID ||
+		w.OriginalEntityID != original.EntityID || w.ProjectedEntityID != child.instance.EntityID || len(w.Lineage) != len(e.Lineage) {
+		return absent, false, nil
+	}
+	projected := original
+	for i, hop := range e.Lineage {
+		recorded := w.Lineage[len(w.Lineage)-1-i]
+		if hop.RunID != recorded.ChildRunID || hop.SourceRunID != recorded.SourceRunID || hop.SourceRevision != recorded.SourceCut.Revision {
+			return absent, false, nil
+		}
+		var err error
+		projected, err = runfork.ProjectCapturedConstructionIdentity(hop.SourceRunID, hop.RunID, projected)
+		if err != nil {
+			return absent, false, err
+		}
+	}
+	if projected != child.instance || projected.InstancePath != original.InstancePath {
+		return absent, false, nil
+	}
+	selector, found, err := w.Ancestor.HistoricalRouteSelector(w.CreatingEventID)
+	if err != nil || !found {
+		return absent, false, err
+	}
+	if err := requireFixedCutConstructorSelector(graph, e, selector); err != nil {
+		return absent, false, err
+	}
+	event, found, err := deriveAncestorConstructorRecipient(source, routes, graph, w.Ancestor, original, selector)
+	if err != nil || !found {
+		return absent, false, err
+	}
+	bound, err := cut.BindInheritedConstructedRouteEvidence(event, frontier)
+	return bound, err == nil, err
+}
+
+func deriveAncestorConstructorRecipient(source semanticview.Source, routes *runtimebus.RouteTable, graph runtimepinrouting.CompiledConnectGraph, ancestor runfork.RunForkPlan, original runtimeflowidentity.Instance, selector events.Event) (runfork.RunForkSelectedContractRouteEvent, bool, error) {
+	var absent runfork.RunForkSelectedContractRouteEvent
+	constructors, err := indexFixedCutConstructions(source, ancestor)
+	if err != nil {
+		return absent, false, err
+	}
+	entry, found := constructors.byPath[original.InstancePath]
+	if !found || entry.instance != original {
+		return absent, false, nil
+	}
+	instances, err := ConstructedInstances(source, ancestor)
+	if err != nil {
+		return absent, false, err
+	}
+	history := selectedRouteHistoryEvent{sourceEventID: selector.ID(), eventName: string(selector.Type()), routingSource: selector.RoutingSource()}
+	target := events.RouteIdentity{FlowID: original.TemplateID, FlowInstance: original.InstancePath, EntityID: original.EntityID}
+	for _, work := range ancestor.PendingWork {
+		if work.EventID == selector.ID() && work.Classification == runfork.RunForkPendingClassificationDeliveredCompleted {
+			if work.DeliveryRoute.Target.Route() != target {
+				return absent, false, nil
+			}
+			history.deliveryRoutes = append(history.deliveryRoutes, work.DeliveryRoute)
+		}
+	}
+	if len(history.deliveryRoutes) == 0 {
+		return absent, false, nil
+	}
+	eventsAtCut, incomplete, err := selectedRouteHistoryEvents(routes, source, graph, ancestor, constructors, []selectedRouteHistoryEvent{history}, instances)
+	if err != nil || incomplete || len(eventsAtCut) != 1 {
+		return absent, false, err
+	}
+	event := eventsAtCut[0]
+	recipients := event.DerivedRecipients[:0]
+	for _, recipient := range event.DerivedRecipients {
+		if recipient.Path == original.InstancePath {
+			recipients = append(recipients, recipient)
+		}
+	}
+	if len(recipients) == 0 || len(recipients) != len(history.deliveryRoutes) {
+		return absent, false, nil
+	}
+	edges := make(map[events.ConnectPlanIdentity]runtimepinrouting.ConnectRoutePlan)
+	for _, edge := range graph.Plans() {
+		id, err := runtimepinrouting.ConnectPlanIdentity(edge)
+		if err != nil {
+			return absent, false, err
+		}
+		edges[id] = edge
+	}
+	if !matchFixedCutEagerChildDeliveries(ancestor.SourceRunID, recipients, history.deliveryRoutes, edges) {
+		return absent, false, nil
+	}
+	event.DerivedRecipients = recipients
+	return event, true, nil
 }
 
 type selectedRouteHistoryEvent struct {

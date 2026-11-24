@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
@@ -287,7 +288,7 @@ func fixedCutKeylessDescendants(source semanticview.Source, constructors fixedCu
 	return owner, nil
 }
 
-func fixedCutConstructedRouteEvidence(source semanticview.Source, cut runfork.RunForkPlan, constructors fixedCutConstructionIndex, graph pinrouting.CompiledConnectGraph, frontier runfork.RunForkContractFrontierAdmission, dynamic []string, history []runfork.RunForkSelectedContractRouteEvent) ([]runfork.ConstructedRouteEvidence, error) {
+func fixedCutConstructedRouteEvidence(source semanticview.Source, routeTable *runtimebus.RouteTable, cut runfork.RunForkPlan, constructors fixedCutConstructionIndex, graph pinrouting.CompiledConnectGraph, frontier runfork.RunForkContractFrontierAdmission, dynamic []string, history []runfork.RunForkSelectedContractRouteEvent) ([]runfork.ConstructedRouteEvidence, error) {
 	var out []runfork.ConstructedRouteEvidence
 	eventsByID := make(map[string]runfork.RunForkSelectedContractRouteEvent, len(history))
 	for _, event := range history {
@@ -319,6 +320,15 @@ func fixedCutConstructedRouteEvidence(source semanticview.Source, cut runfork.Ru
 			continue
 		}
 		if !found {
+			if path == cut.ForkPoint.RoutingSource.Route().FlowInstance && evidence.InstanceKey != "" && len(evidence.Lineage) != 0 {
+				bound, found, err := inheritedKeyedConstructorEvidence(source, routeTable, graph, cut, frontier, constructor)
+				if err != nil {
+					return nil, err
+				}
+				if found {
+					out = append(out, bound)
+				}
+			}
 			continue
 		}
 		if err := requireFixedCutConstructorSelector(graph, evidence, selector); err != nil {

@@ -1,16 +1,41 @@
 package runfork
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/google/uuid"
 )
+
+func TestSelectedPreparationFingerprintWithoutInheritedWitness(t *testing.T) {
+	plan := RunForkPlan{SourceRunID: uuid.NewString(), ForkPoint: RunForkPoint{Kind: RunForkPointEvent, Revision: 1, EventID: uuid.NewString()}}
+	history := []string{plan.ForkPoint.EventID}
+	plan = plan.WithHistoricalEvents(1, history)
+	frontier := RunForkContractFrontierAdmission{}
+	planning := RunForkSelectedContractRecipientPlanning{}
+	const declarations = "unchanged"
+	old, err := canonicaljson.Bytes(map[string]any{
+		"Plan": plan, "History": history, "Inputs": plan.HistoricalInputCoordinates(), "Arrivals": plan.HistoricalJoinCoordinates(),
+		"FirstTurn": nil, "Replies": plan.ReplyContexts, "Timers": plan.WorkflowTimers, "JoinSchedules": []string{}, "Transferred": []string{},
+		"Frontier": frontier, "Recipients": planning, "Declarations": declarations,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256(old)
+	got, err := SelectedPreparationPlanFingerprint(plan, frontier, planning, declarations)
+	if err != nil || got != hex.EncodeToString(digest[:]) {
+		t.Fatalf("absent inherited witness changed the prior preparation encoding: %s %v", got, err)
+	}
+}
 
 func preparedBindingFixture(t *testing.T) (SelectedForkPreparationBinding, managedcapabilities.Surface) {
 	t.Helper()

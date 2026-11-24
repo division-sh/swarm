@@ -174,21 +174,26 @@ func SelectedPreparationPlanFingerprint(plan RunForkPlan, frontier RunForkContra
 		}
 		oneShots = append(oneShots, digest)
 	}
+	inherited, err := plan.inheritedConstructionDigest()
+	if err != nil {
+		return "", err
+	}
 	raw, err := canonicaljson.Bytes(struct {
-		Plan          RunForkPlan
-		History       []string
-		Inputs        []InputPublicationCoordinates
-		Arrivals      []InputPublicationCoordinates
-		FirstTurn     *InputPublicationCoordinates
-		Replies       []replycontext.Record
-		Timers        []timerobligation.WorkflowTimerActivationRecord
-		JoinSchedules []string
-		Transferred   []string
-		Frontier      RunForkContractFrontierAdmission
-		Recipients    RunForkSelectedContractRecipientPlanning
-		Declarations  string
-		OneShots      []string `json:",omitempty"`
-	}{plan, history, plan.HistoricalInputCoordinates(), plan.HistoricalJoinCoordinates(), firstTurn, plan.ReplyContexts, plan.WorkflowTimers, joinSchedules, transferred, frontier, planning, declarationRevision, oneShots})
+		Plan                  RunForkPlan
+		History               []string
+		Inputs                []InputPublicationCoordinates
+		Arrivals              []InputPublicationCoordinates
+		FirstTurn             *InputPublicationCoordinates
+		Replies               []replycontext.Record
+		Timers                []timerobligation.WorkflowTimerActivationRecord
+		JoinSchedules         []string
+		Transferred           []string
+		Frontier              RunForkContractFrontierAdmission
+		Recipients            RunForkSelectedContractRecipientPlanning
+		Declarations          string
+		OneShots              []string `json:",omitempty"`
+		InheritedConstruction string   `json:",omitempty"`
+	}{plan, history, plan.HistoricalInputCoordinates(), plan.HistoricalJoinCoordinates(), firstTurn, plan.ReplyContexts, plan.WorkflowTimers, joinSchedules, transferred, frontier, planning, declarationRevision, oneShots, inherited})
 	if err != nil {
 		return "", err
 	}

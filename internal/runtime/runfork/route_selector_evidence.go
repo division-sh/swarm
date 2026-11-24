@@ -13,9 +13,88 @@ import (
 )
 
 type historicalRouteSelectors struct {
-	runID  string
-	point  RunForkPoint
-	events map[string]events.Event
+	runID     string
+	point     RunForkPoint
+	events    map[string]events.Event
+	inherited *InheritedConstructionWitness
+}
+
+// InheritedConstructionWitness is not physical membership in the child's cut.
+// The native planner detaches the exact ancestor snapshot before deriving routes.
+type InheritedConstructionWitness struct {
+	Ancestor                                             RunForkPlan
+	Lineage                                              []InheritedConstructionHop
+	CreatingEventID, OriginalEntityID, ProjectedEntityID string
+}
+
+type InheritedConstructionHop struct {
+	ChildRunID, SourceRunID string
+	SourceCut               RunForkPoint
+}
+
+func (p RunForkPlan) WithInheritedConstructionWitness(w InheritedConstructionWitness) (RunForkPlan, error) {
+	bound := p.historicalRouteSelectors
+	if bound == nil || bound.inherited != nil || bound.runID != p.SourceRunID || bound.point != p.ForkPoint ||
+		len(w.Lineage) == 0 || p.ForkPoint.RoutingSource.Route().EntityID != w.ProjectedEntityID {
+		return p, fmt.Errorf("inherited constructor witness is outside its fixed producer cut")
+	}
+	current := p.SourceRunID
+	seen := map[string]bool{current: true}
+	for _, hop := range w.Lineage {
+		if hop.ChildRunID != current || hop.SourceRunID == "" || seen[hop.SourceRunID] || hop.SourceCut.Validate() != nil {
+			return p, fmt.Errorf("inherited constructor witness crosses its fixed lineage")
+		}
+		current = hop.SourceRunID
+		seen[current] = true
+	}
+	if current != w.Ancestor.SourceRunID || w.Lineage[len(w.Lineage)-1].SourceCut != w.Ancestor.ForkPoint {
+		return p, fmt.Errorf("inherited constructor witness lacks its exact ancestor cut")
+	}
+	w.Lineage = slices.Clone(w.Lineage)
+	copy := *bound
+	copy.inherited = &w
+	p.historicalRouteSelectors = &copy
+	return p, nil
+}
+
+func (p RunForkPlan) InheritedConstructionWitness() (InheritedConstructionWitness, bool) {
+	bound := p.historicalRouteSelectors
+	if bound == nil || bound.inherited == nil || bound.runID != p.SourceRunID || bound.point != p.ForkPoint {
+		return InheritedConstructionWitness{}, false
+	}
+	w := *bound.inherited
+	w.Lineage = slices.Clone(w.Lineage)
+	w.Ancestor.Entities = slices.Clone(w.Ancestor.Entities)
+	w.Ancestor.PendingWork = slices.Clone(w.Ancestor.PendingWork)
+	return w, true
+}
+
+func (p RunForkPlan) inheritedConstructionDigest() (string, error) {
+	w, found := p.InheritedConstructionWitness()
+	if !found {
+		return "", nil
+	}
+	event, found, err := w.Ancestor.HistoricalRouteSelector(w.CreatingEventID)
+	if err != nil || !found {
+		return "", fmt.Errorf("inherited constructor witness lacks its admitted ancestor publication: %v", err)
+	}
+	admission, _ := event.PayloadAdmission()
+	binding := admission.Binding()
+	raw, err := json.Marshal(struct {
+		ChildRun string
+		ChildCut RunForkPoint
+		Witness  InheritedConstructionWitness
+		Event    events.Event
+		Source   events.RoutingSource
+		Schema   events.PayloadSchemaBindingInput
+	}{p.SourceRunID, p.ForkPoint, w, event, event.RoutingSource(), events.PayloadSchemaBindingInput{
+		BundleHash: binding.BundleHash(), FlowID: binding.FlowID(), EventKey: binding.EventKey(), SchemaDigest: binding.SchemaDigest(), SchemaClass: binding.SchemaClass(),
+	}})
+	if err != nil {
+		return "", err
+	}
+	digest := sha256.Sum256(raw)
+	return hex.EncodeToString(digest[:]), nil
 }
 
 // HistoricalRouteSelectorRequired narrows this optional projection using the
@@ -94,6 +173,65 @@ type ConstructedRouteEvidence struct {
 	frontierFingerprint string
 	selection           RunForkContractSelection
 	completedRoutes     []string
+	inherited           *inheritedConstructedRouteBinding
+}
+
+type inheritedConstructedRouteBinding struct {
+	witnessDigest string
+	event         RunForkSelectedContractRouteEvent
+}
+
+// BindInheritedConstructedRouteEvidence seals only the ancestor result derived
+// by the fixed-cut owner, after it has matched the retained completed routes.
+func (p RunForkPlan) BindInheritedConstructedRouteEvidence(event RunForkSelectedContractRouteEvent, frontier RunForkContractFrontierAdmission) (ConstructedRouteEvidence, error) {
+	w, found := p.InheritedConstructionWitness()
+	selector, selected, err := w.Ancestor.HistoricalRouteSelector(w.CreatingEventID)
+	if !found || err != nil || !selected || event.SourceEventID != selector.ID() ||
+		event.EventName != string(selector.Type()) || event.Disposition != RunForkSelectedContractDispositionEvidenceOnly {
+		return ConstructedRouteEvidence{}, fmt.Errorf("inherited construction binding lacks its exact ancestor event: %v", err)
+	}
+	_, _, frontierFingerprint, err := RunForkContractFrontierEvidenceBinding(frontier)
+	if err != nil {
+		return ConstructedRouteEvidence{}, err
+	}
+	producer := p.ForkPoint.RoutingSource.Route()
+	recipients, err := forkrecipient.CanonicalSet(event.DerivedRecipients)
+	if err != nil || len(recipients) == 0 {
+		return ConstructedRouteEvidence{}, fmt.Errorf("inherited construction binding lacks exact recipients: %v", err)
+	}
+	for _, recipient := range recipients {
+		if recipient.Path != producer.FlowInstance {
+			return ConstructedRouteEvidence{}, fmt.Errorf("inherited construction binding crosses the producer path")
+		}
+	}
+	digest, err := p.inheritedConstructionDigest()
+	if err != nil {
+		return ConstructedRouteEvidence{}, err
+	}
+	event.DerivedRecipients = slices.Clone(recipients)
+	event.HistoricalDeliveryRoutes = slices.Clone(event.HistoricalDeliveryRoutes)
+	bound := &inheritedConstructedRouteBinding{witnessDigest: digest, event: event}
+	fingerprint, err := bound.fingerprint(frontierFingerprint, frontier.ContractSelection)
+	if err != nil {
+		return ConstructedRouteEvidence{}, err
+	}
+	return ConstructedRouteEvidence{proof: RunForkSelectedContractDynamicTopologyProof{
+		FlowInstance: producer.FlowInstance, SourceEventIDs: []string{event.SourceEventID}, EventNames: []string{event.EventName},
+		DerivedRecipients: recipients, FixedCutEvidenceFingerprint: fingerprint, Disposition: RunForkSelectedContractDispositionForkLocalTruth,
+	}, frontierFingerprint: frontierFingerprint, selection: frontier.ContractSelection, inherited: bound}, nil
+}
+
+func (b *inheritedConstructedRouteBinding) fingerprint(frontier string, selection RunForkContractSelection) (string, error) {
+	raw, err := json.Marshal(struct {
+		Witness, Frontier string
+		Event             RunForkSelectedContractRouteEvent
+		Selection         RunForkContractSelection
+	}{b.witnessDigest, frontier, b.event, selection})
+	if err != nil {
+		return "", err
+	}
+	digest := sha256.Sum256(raw)
+	return hex.EncodeToString(digest[:]), nil
 }
 
 // BindEagerChildRouteEvidence seals the completed edge checked by the fixed-cut
@@ -236,6 +374,19 @@ func (e ConstructedRouteEvidence) ProofFor(instance string, admission RunForkSel
 	}
 	if len(proof.SourceEventIDs) != 1 || len(proof.EventNames) != 1 {
 		return RunForkSelectedContractDynamicTopologyProof{}, false, fmt.Errorf("invalid constructed route binding")
+	}
+	if e.inherited != nil {
+		witness := e.inherited
+		fingerprint, err := witness.fingerprint(admission.FrontierEvidenceFingerprint, admission.ContractSelection)
+		if err != nil || fingerprint != proof.FixedCutEvidenceFingerprint ||
+			witness.event.SourceEventID != proof.SourceEventIDs[0] || witness.event.EventName != proof.EventNames[0] ||
+			!slices.Equal(witness.event.DerivedRecipients, proof.DerivedRecipients) {
+			return RunForkSelectedContractDynamicTopologyProof{}, false, fmt.Errorf("inherited construction proof differs from its bound ancestor witness: %v", err)
+		}
+		proof.SourceEventIDs = slices.Clone(proof.SourceEventIDs)
+		proof.EventNames = slices.Clone(proof.EventNames)
+		proof.DerivedRecipients = slices.Clone(proof.DerivedRecipients)
+		return proof, true, nil
 	}
 	for _, event := range admission.SelectedRouteEvents {
 		if event.SourceEventID != proof.SourceEventIDs[0] || event.EventName != proof.EventNames[0] || event.Disposition == RunForkSelectedContractDispositionFailClosed {

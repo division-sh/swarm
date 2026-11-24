@@ -293,6 +293,10 @@ func planRunForkSnapshotWithActivityOrigins(
 	}
 	plan.Entities = entities
 	plan.ReconstructedEntityCount = len(entities)
+	plan, err = retainInheritedCreatingWitness(plan, snapshot)
+	if err != nil {
+		return runfork.RunForkPlan{}, err
+	}
 
 	pending, err := loadRunForkPendingWorkFromRevision(snapshot)
 	if err != nil {
