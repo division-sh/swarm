@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -39,6 +40,7 @@ import (
 	storeselected "github.com/division-sh/swarm/internal/store/selected"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/tests/support/testutil"
+	"github.com/division-sh/swarm/tests/support/testutil/llmapi"
 	"github.com/google/uuid"
 )
 
@@ -54,10 +56,11 @@ type servedWorkspaceProofRuntime struct {
 	Inbound                       interface {
 		LoadInboundPublicationByIdentity(context.Context, inboundpublication.Identity) (inboundpublication.Record, bool, error)
 	}
-	FlowRuns    runlifecycle.LandingRunReader
-	ForkRuntime selectedForkRuntimeProofOptions
-	Restart     func() servedWorkspaceProofRuntime
-	Telegram    *channelOnboardingTelegramProvider
+	FlowRuns      runlifecycle.LandingRunReader
+	ForkRuntime   selectedForkRuntimeProofOptions
+	Restart       func() servedWorkspaceProofRuntime
+	Telegram      *channelOnboardingTelegramProvider
+	providerCalls func() (startup, total int32)
 }
 
 func requireServedLandingRun(t testing.TB, rt *runtimepkg.Runtime, flow string) runlifecycle.LandingRun {
@@ -191,6 +194,8 @@ func startWorkspaceGatewayProofRuntimeWithPosture(t *testing.T, backend servedpa
 		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 	}
 	if posture == executionposture.Live {
+		var startup, total atomic.Int32
+		proof.providerCalls = func() (int32, int32) { return startup.Load(), total.Load() }
 		provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 			if request.URL.Path != "/v1/messages" || request.Header.Get("x-api-key") != "workspace-live-proof-key" {
 				http.Error(w, "unexpected controlled provider request", http.StatusBadRequest)
@@ -208,9 +213,19 @@ func startWorkspaceGatewayProofRuntimeWithPosture(t *testing.T, backend servedpa
 					Content json.RawMessage `json:"content"`
 				} `json:"messages"`
 			}
-			if err := json.NewDecoder(request.Body).Decode(&turn); err != nil {
+			var raw json.RawMessage
+			err := json.NewDecoder(request.Body).Decode(&raw)
+			if err == nil {
+				err = json.Unmarshal(raw, &turn)
+			}
+			if err != nil {
 				t.Errorf("decode controlled provider turn: %v", err)
 				http.Error(w, "invalid provider turn", http.StatusBadRequest)
+				return
+			}
+			n := total.Add(1)
+			if replyToFixtureStartup(t, w, llmapi.Anthropic, llmapi.Request{Number: int(n), Body: raw}) {
+				startup.Add(1)
 				return
 			}
 			w.Header().Set("Content-Type", "application/json")

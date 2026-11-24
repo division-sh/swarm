@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -38,6 +39,7 @@ import (
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/tests/support/testutil/llmapi"
 	"github.com/google/uuid"
 )
 
@@ -45,6 +47,8 @@ type completion2270Transport struct {
 	t        *testing.T
 	profile  string
 	requests *atomic.Int32
+	startup  *atomic.Int32
+	total    *atomic.Int32
 	base     http.RoundTripper
 	emit     bool
 }
@@ -117,7 +121,7 @@ func TestServedCompletion2270RunServePublicReadbackBothStores(t *testing.T) {
 						storeConfig = fmt.Sprintf("store:\n  backend: sqlite\n  sqlite:\n    path: %s\n", filepath.Join(t.TempDir(), "store.db"))
 					} else {
 						rt.Backend = "postgres"
-						configureCompletion2270PostgresFixture(t)
+						allocateCompletion2270PostgresFixture(t)
 						stubServeRuntimeWorkspaceLifecycle(t)
 						opts.StoreMode, opts.StoreModeSet = "postgres", true
 					}
@@ -148,6 +152,9 @@ func TestServedCompletion2270RunServePublicReadbackBothStores(t *testing.T) {
 						configureHostWorkspaceProofLifecycle(t)
 					}
 					text = withTestProviderTriggerPlatformInventory(t, text)
+					if backend == servedparity.BackendExplicitPostgres {
+						text = withInstalledServePostgresConfig(t, text, "")
+					}
 					if err := os.WriteFile(configPath, []byte(text), 0o600); err != nil {
 						t.Fatal(err)
 					}
@@ -165,10 +172,17 @@ func TestServedCompletion2270RunServePublicReadbackBothStores(t *testing.T) {
 					if err := credentials.Set(context.Background(), profile.Credential.EnvVar, "test-key"); err != nil {
 						t.Fatal(err)
 					}
-					var requests atomic.Int32
+					var requests, startup, total atomic.Int32
 					previous := http.DefaultTransport
-					http.DefaultTransport = completion2270Transport{t: t, profile: profileID, requests: &requests, base: previous, emit: kind == "ordinary_emit" || kind == "siblings"}
+					http.DefaultTransport = completion2270Transport{t: t, profile: profileID, requests: &requests, startup: &startup, total: &total, base: previous, emit: kind == "ordinary_emit" || kind == "siblings"}
 					t.Cleanup(func() { http.DefaultTransport = previous })
+					requireTraffic := func(wantBoot, wantBusiness int32) {
+						if profileID != llmselection.BackendClaudeCLI &&
+							(startup.Load() != wantBoot || requests.Load() != wantBusiness || total.Load() != wantBoot+wantBusiness) {
+							t.Fatalf("completion provider counts: startup=%d business=%d total=%d; want %d/%d/%d",
+								startup.Load(), requests.Load(), total.Load(), wantBoot, wantBusiness, wantBoot+wantBusiness)
+						}
+					}
 					started := time.Now()
 					t.Logf("completion startup phase=initial-start at=%s", started.UTC().Format(time.RFC3339Nano))
 					process := startServeRuntimeTestProcess(t, opts)
@@ -178,6 +192,7 @@ func TestServedCompletion2270RunServePublicReadbackBothStores(t *testing.T) {
 						cancelInitial()
 					}
 					process.waitForReadyLine()
+					requireTraffic(1, 0)
 					t.Logf("completion startup phase=initial-ready at=%s elapsed=%s", time.Now().UTC().Format(time.RFC3339Nano), time.Since(started))
 					rt.Endpoint = "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc"
 					rt.AuthorContext = servedRuntimeProofAuthorActivityContext(t, servedTestProcessRuntime(t, process), rt.BundleHash)
@@ -186,6 +201,7 @@ func TestServedCompletion2270RunServePublicReadbackBothStores(t *testing.T) {
 					}
 					if kind == "selected" {
 						proveCompletion2270ServedSelected(t, rt, selected, profileID, &requests, &invocationProof)
+						requireTraffic(1, 1)
 						return
 					}
 					var runID string
@@ -248,6 +264,11 @@ func TestServedCompletion2270RunServePublicReadbackBothStores(t *testing.T) {
 					} else if want := int32(1); requests.Load() != want && !(kind == "siblings" && requests.Load() == 2) {
 						t.Fatalf("restart re-prompted completed agent: calls=%d", requests.Load())
 					}
+					wantBusiness := int32(1)
+					if kind == "siblings" {
+						wantBusiness = 2
+					}
+					requireTraffic(2, wantBusiness)
 				})
 			}
 		}
@@ -593,8 +614,21 @@ func (p completion2270Transport) RoundTrip(request *http.Request) (*http.Respons
 		return p.base.RoundTrip(request)
 	}
 	var body map[string]any
-	if err := json.NewDecoder(request.Body).Decode(&body); err != nil || body["model"] != "request-A" {
+	var raw json.RawMessage
+	err := json.NewDecoder(request.Body).Decode(&raw)
+	if err == nil {
+		err = json.Unmarshal(raw, &body)
+	}
+	if err != nil || body["model"] != "request-A" {
 		return nil, fmt.Errorf("provider primitive did not consume admitted request: body=%v error=%v", body, err)
+	}
+	if p.startup != nil {
+		n := p.total.Add(1)
+		w := httptest.NewRecorder()
+		if replyToFixtureStartup(p.t, w, llmapi.Protocol(p.profile), llmapi.Request{Number: int(n), Body: raw}) {
+			p.startup.Add(1)
+			return w.Result(), nil
+		}
 	}
 	ordinal := p.requests.Add(1)
 	var response string

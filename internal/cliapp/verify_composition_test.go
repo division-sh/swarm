@@ -24,6 +24,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/backendselection"
 	"github.com/division-sh/swarm/internal/store/construction"
@@ -523,7 +524,17 @@ func TestVerifyPublicExistingStoreReportsDeploymentPreparationBothStores(t *test
 					}
 					artifact := bundle.SourceArtifact
 					if survivor == "invalid_kept_source" {
-						artifact = sourceartifactfixture.New("manifest.yaml", []byte("invalid: ["))
+						invalidRoot := canonicalrouting.CopyExample(t, canonicalrouting.RootIngress)
+						nodes := filepath.Join(invalidRoot, "nodes.yaml")
+						validNodes, err := os.ReadFile(nodes)
+						if err != nil {
+							t.Fatal(err)
+						}
+						writeRuntimeConfigText(t, nodes, string(validNodes)+"\ninvalid-survivor:\n  item.received:\n    logic: retired\n")
+						artifact, err = sourceartifact.AdmitDirectory(invalidRoot)
+						if err != nil {
+							t.Fatalf("admit canonical survivor bytes: %v", err)
+						}
 					}
 					// Reuse a member of P after cleanup. Its current row must not be
 					// discarded by the old cleanup receipt's membership list.
@@ -577,7 +588,7 @@ func TestVerifyPublicExistingStoreReportsDeploymentPreparationBothStores(t *test
 							if selected == nil || !reflect.DeepEqual(kept, sources) || selected.SourceArtifact.BundleHash() != coordinate.BundleHash {
 								t.Fatal("kept reset selected a source outside its captured set")
 							}
-							selectedRoot, err := selected.SourceArtifact.RootedSource()
+							selectedRoot, err := selected.RootedSource()
 							if err != nil || selectedRoot.Admission().Reference() != coordinate.RootReference() {
 								t.Fatalf("kept source changed the captured root: %v", err)
 							}
@@ -601,7 +612,8 @@ func TestVerifyPublicExistingStoreReportsDeploymentPreparationBothStores(t *test
 						failed = failed || observation.Status == bootverify.AdmissionFailed || observation.Status == bootverify.AdmissionUnavailable
 						seen[observation.CheckID] = observation.Status == bootverify.AdmissionPassed
 						if observation.Status == bootverify.AdmissionFailed {
-							if survivor == "invalid_kept_source" && observation.CheckID == "retained_source_integrity" && strings.HasPrefix(observation.Subject, "run:"+runID+"/source:") {
+							if survivor == "invalid_kept_source" && observation.CheckID == "retained_source_integrity" &&
+								observation.Subject == "run:"+runID+"/source:"+artifact.BundleHash() && strings.Contains(observation.Reason, `handler field "logic" is not supported`) {
 								exactRefusal = true
 							}
 							if survivor == "clear_to_empty" && observation.CheckID == "pinned_source_admission" && strings.Contains(observation.Reason, "surviving runs or deliveries") {
