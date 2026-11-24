@@ -54,7 +54,7 @@ func (s *RunForkSQLiteOwner) RequireMaterializedRunFork(ctx context.Context, for
 }
 
 func requireMaterializedRunForkSnapshot(ctx context.Context, tx *sql.Tx, postgres bool, forkRunID string, req runfork.RunForkMaterializeRequest, data *storedurabledata.Owner, replies runForkReplyContextOwner, loadSnapshot runForkLifecycleSnapshotLoader) (runfork.RunForkMaterialization, error) {
-	plan, err := loadRequiredRunForkPlan(ctx, tx, postgres, forkRunID, req, loadSnapshot)
+	plan, err := loadRequiredRunForkPlan(ctx, tx, postgres, forkRunID, req, loadSnapshot, data)
 	if err != nil {
 		return runfork.RunForkMaterialization{}, err
 	}
@@ -133,7 +133,7 @@ func requireMaterializedRunForkSnapshot(ctx context.Context, tx *sql.Tx, postgre
 	return materialization, nil
 }
 
-func loadRequiredRunForkPlan(ctx context.Context, tx *sql.Tx, postgres bool, forkRunID string, req runfork.RunForkMaterializeRequest, loadSnapshot runForkLifecycleSnapshotLoader) (runfork.RunForkPlan, error) {
+func loadRequiredRunForkPlan(ctx context.Context, tx *sql.Tx, postgres bool, forkRunID string, req runfork.RunForkMaterializeRequest, loadSnapshot runForkLifecycleSnapshotLoader, data *storedurabledata.Owner) (runfork.RunForkPlan, error) {
 	id, err := uuid.Parse(forkRunID)
 	if err != nil || id == uuid.Nil || id.String() != forkRunID {
 		return runfork.RunForkPlan{}, fmt.Errorf("required fork materialization needs a canonical child UUID")
@@ -163,7 +163,7 @@ func loadRequiredRunForkPlan(ctx context.Context, tx *sql.Tx, postgres bool, for
 	if point.Kind == runfork.RunForkPointStateRevision {
 		planRequest.ResolvedPoint = &point
 	}
-	plan, err := planRunForkSnapshot(ctx, tx, planRequest, validate, resolve, postgres)
+	plan, err := planRunForkSnapshot(ctx, tx, planRequest, validate, resolve, postgres, data)
 	if err != nil {
 		return runfork.RunForkPlan{}, err
 	}

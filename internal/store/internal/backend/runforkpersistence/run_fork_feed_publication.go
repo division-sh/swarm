@@ -58,6 +58,9 @@ func selectRunForkDeploymentFeed(ctx context.Context, tx *sql.Tx, data *storedur
 		return err
 	}
 	selection := &runfork.RunForkDeploymentFeedSelection{Named: named}
+	if plan.DeploymentFeedSelection != nil {
+		selection.Inherited = plan.DeploymentFeedSelection.Inherited
+	}
 	retained := make([]runfork.RunForkFanOutObligation, 0, len(plan.FanOutObligations))
 	parkedDeliveries := make(map[string]bool)
 	found := false
@@ -176,14 +179,8 @@ func projectRunForkDeploymentFeeds(ctx context.Context, tx *sql.Tx, data *stored
 		if publicationDeclarations[pin.Declaration] && legacy[pin.Declaration] == nil {
 			continue
 		}
-		if legacy[pin.Declaration] == nil {
-			parked, err := isParkedForkPinTx(ctx, tx, data, plan, pin)
-			if err != nil {
-				return nil, err
-			}
-			if parked {
-				continue
-			}
+		if legacy[pin.Declaration] == nil && plan.IsParkedDeploymentPin(pin) {
+			continue
 		}
 		target, err := storedurabledata.RequirePinnedSourceTx(ctx, data, tx, forkRunID, targetBundle, pin.Declaration)
 		if err != nil || target.VersionID != pin.VersionID || target.SchemaDigest != pin.SchemaDigest {

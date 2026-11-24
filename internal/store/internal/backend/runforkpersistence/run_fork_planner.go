@@ -330,6 +330,11 @@ func planRunForkSnapshotWithActivityOrigins(
 	if err := runfork.ValidateFanOutPendingReplayAdmission(plan); err != nil {
 		return runfork.RunForkPlan{}, fmt.Errorf("fixed-revision fan-out admission: %w", err)
 	}
+	if len(data) == 1 && data[0] != nil {
+		if err := retainInheritedParkedPinsTx(ctx, tx, data[0], &plan); err != nil {
+			return runfork.RunForkPlan{}, err
+		}
+	}
 	if member {
 		if err := selectRunForkDeploymentFeed(ctx, tx, data[0], &plan, req.PublicationID); err != nil {
 			return runfork.RunForkPlan{}, err

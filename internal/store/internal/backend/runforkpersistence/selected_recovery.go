@@ -750,11 +750,7 @@ func requireParkedRecoveryPinsTx(ctx context.Context, tx *sql.Tx, record selecte
 		return err
 	}
 	for _, pin := range missing {
-		parked, err := isParkedForkPinTx(ctx, tx, record.data, plan, pin)
-		if err != nil {
-			return err
-		}
-		if !parked {
+		if !plan.IsParkedDeploymentPin(pin) {
 			return fmt.Errorf("selected recovery pin conflicts with fork run")
 		}
 	}

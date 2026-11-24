@@ -13,25 +13,39 @@ import (
 	storedurabledata "github.com/division-sh/swarm/internal/store/internal/durabledata"
 )
 
-func isParkedForkPinTx(ctx context.Context, tx *sql.Tx, data *storedurabledata.Owner, plan runfork.RunForkPlan, pin runtimedata.Pin) (bool, error) {
-	if plan.IsParkedDeploymentPin(pin) {
-		return true, nil
+func retainInheritedParkedPinsTx(ctx context.Context, tx *sql.Tx, data *storedurabledata.Owner, plan *runfork.RunForkPlan) error {
+	op, err := loadParkedPinLineageOperationTx(ctx, tx, plan.SourceRunID)
+	if err != nil || op == nil || op.Status != runfork.ForkOperationActivated {
+		return err
 	}
-	if pin.Selection != "fork_inherited" {
-		return false, nil
+	var inherited []runtimedata.Pin
+	for _, pin := range op.Result.DataPins {
+		if hasDeploymentDeclaration(*plan, pin.Declaration) {
+			continue
+		}
+		parked, err := proveParkedForkPinTx(ctx, tx, data, op, pin)
+		if err != nil {
+			return err
+		}
+		if parked {
+			inherited = append(inherited, pin)
+		}
 	}
+	if len(inherited) != 0 {
+		plan.DeploymentFeedSelection = &runfork.RunForkDeploymentFeedSelection{Inherited: inherited}
+	}
+	return nil
+}
+
+func proveParkedForkPinTx(ctx context.Context, tx *sql.Tx, data *storedurabledata.Owner, op *runfork.ForkOperationRecord, pin runtimedata.Pin) (bool, error) {
 	// A missing intent is not a parking fact. Follow only unchanged pins in
 	// acknowledged fork operations until an exact named cut proves parking.
 	seen := make(map[string]bool)
-	for runID := plan.SourceRunID; ; {
-		if seen[runID] {
+	for op != nil && op.Status == runfork.ForkOperationActivated {
+		if seen[op.ForkRunID] {
 			return false, fmt.Errorf("parked pin has cyclic fork lineage")
 		}
-		seen[runID] = true
-		op, err := loadParkedPinLineageOperationTx(ctx, tx, runID)
-		if err != nil || op == nil || op.Status != runfork.ForkOperationActivated {
-			return false, err
-		}
+		seen[op.ForkRunID] = true
 		retained := findUnchangedForkPin(op.Result.DataPins, pin)
 		if retained.Selection == "" {
 			return false, nil
@@ -43,16 +57,24 @@ func isParkedForkPinTx(ctx context.Context, tx *sql.Tx, data *storedurabledata.O
 		if parent.IsParkedDeploymentPin(retained) {
 			return true, nil
 		}
-		for _, obligation := range parent.FanOutObligations {
-			if d := obligation.Intent.Request.Deployment; d != nil && d.Declaration == pin.Declaration {
-				return false, nil
-			}
-		}
-		if retained.Selection != "fork_inherited" {
+		if retained.Selection != "fork_inherited" || hasDeploymentDeclaration(parent, pin.Declaration) {
 			return false, nil
 		}
-		runID = op.Request.SourceRunID
+		op, err = loadParkedPinLineageOperationTx(ctx, tx, op.Request.SourceRunID)
+		if err != nil {
+			return false, err
+		}
 	}
+	return false, nil
+}
+
+func hasDeploymentDeclaration(plan runfork.RunForkPlan, declaration runtimedata.DeclarationRef) bool {
+	for _, obligation := range plan.FanOutObligations {
+		if d := obligation.Intent.Request.Deployment; d != nil && d.Declaration == declaration {
+			return true
+		}
+	}
+	return false
 }
 
 func findUnchangedForkPin(pins []runtimedata.Pin, want runtimedata.Pin) runtimedata.Pin {

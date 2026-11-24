@@ -774,8 +774,9 @@ type RunForkEntityState struct {
 }
 
 type RunForkDeploymentFeedSelection struct {
-	Named  string
-	Parked []RunForkFanOutObligation
+	Named     string
+	Parked    []RunForkFanOutObligation
+	Inherited []durabledata.Pin `json:",omitempty"`
 }
 
 func (p RunForkPlan) IsParkedDeploymentPin(pin durabledata.Pin) bool {
@@ -795,6 +796,13 @@ func (p RunForkPlan) IsParkedDeploymentPin(pin durabledata.Pin) bool {
 	for _, obligation := range p.DeploymentFeedSelection.Parked {
 		if matches(obligation) {
 			return true
+		}
+	}
+	if pin.Selection == "fork_inherited" {
+		for _, inherited := range p.DeploymentFeedSelection.Inherited {
+			if inherited.Declaration == pin.Declaration && inherited.VersionID == pin.VersionID && inherited.SchemaDigest == pin.SchemaDigest {
+				return true
+			}
 		}
 	}
 	return false
