@@ -196,6 +196,8 @@ type runForkRevisionFanOutFact struct {
 }
 
 type runForkRevisionSnapshot struct {
+	constructionAncestor  *runForkRevisionSnapshot
+	constructionCut       runfork.RunForkPoint
 	connectPlans          []pinrouting.ConnectRoutePlan
 	StartProjection       *runforkrevision.StartProjection
 	RunID                 string

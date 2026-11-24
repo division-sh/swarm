@@ -5,7 +5,9 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"slices"
 
+	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -80,6 +82,10 @@ func (r *capturedConstructionResolver) resolve(ctx context.Context, snapshot *ru
 				if err != nil {
 					return nil, err
 				}
+				snapshot.constructionAncestor = original
+				snapshot.constructionCut = runfork.RunForkPoint{
+					Kind: origin.ForkPointKind(), Revision: origin.ForkRevision(), EventID: origin.SourceEventID(),
+				}
 			}
 			witness, found, err := findProjectedFlowInstanceMetadata(original, snapshot.RunID, metadata.FlowInstance)
 			if err != nil {
@@ -108,6 +114,97 @@ func (r *capturedConstructionResolver) resolve(ctx context.Context, snapshot *ru
 	}
 	r.snapshots[cut] = snapshot
 	return snapshot, nil
+}
+
+func retainInheritedCreatingWitness(plan runfork.RunForkPlan, snapshot *runForkRevisionSnapshot) (runfork.RunForkPlan, error) {
+	producer := plan.ForkPoint.RoutingSource.Route()
+	if plan.ForkPoint.Kind != runfork.RunForkPointEvent || producer.EntityID == "" || snapshot.constructionAncestor == nil {
+		return plan, nil
+	}
+	for _, entity := range plan.Entities {
+		meta := entity.MaterializationMetadata
+		if entity.EntityID == producer.EntityID && meta != nil && meta.FlowInstance == producer.FlowInstance &&
+			meta.FlowTemplate == producer.FlowID && meta.InstanceKey != "" && meta.HistoricalConstruction != nil {
+			return bindInheritedCreatingWitness(plan, snapshot, entity)
+		}
+	}
+	return plan, nil
+}
+
+func bindInheritedCreatingWitness(plan runfork.RunForkPlan, snapshot *runForkRevisionSnapshot, entity runfork.RunForkEntityState) (runfork.RunForkPlan, error) {
+	projected := entity.EntityID
+	var lineage []runfork.InheritedConstructionHop
+	var point runfork.RunForkPoint
+	for entity.MaterializationMetadata.HistoricalConstruction != nil {
+		h := entity.MaterializationMetadata.HistoricalConstruction
+		point = snapshot.constructionCut
+		ancestor := snapshot.constructionAncestor
+		if ancestor == nil || ancestor.RunID != h.SourceRunID || ancestor.Revision != h.SourceRevision || point.Validate() != nil {
+			return plan, fmt.Errorf("inherited creating evidence contradicts immutable origin cut")
+		}
+		lineage = append(lineage, runfork.InheritedConstructionHop{ChildRunID: snapshot.RunID, SourceRunID: ancestor.RunID, SourceCut: point})
+		snapshot, entity = ancestor, h.SourceEntity
+	}
+	meta := entity.MaterializationMetadata
+	receipt, err := pipeline.DecodeStoredFlowConstructionReceipt(meta.InitialMaterialization, snapshot.RunID, entity.EntityID, meta.FlowInstance, meta.FlowTemplate)
+	if err != nil {
+		return plan, err
+	}
+	id := receipt.CreatingInput.EventID
+	if id == "" || receipt.CreatingInput.Input == "" {
+		return plan, nil
+	}
+	projectedID := id
+	for i := len(lineage) - 1; i >= 0; i-- {
+		projectedID = runfork.ProjectReplayEventID(lineage[i].ChildRunID, projectedID)
+	}
+	if ids, known := plan.HistoricalEventIDs(plan.ForkPoint.Revision); !known || slices.Contains(ids, projectedID) {
+		return plan, nil
+	}
+	return retainCreatingEventAtAncestor(plan, snapshot, point, lineage, entity, projected, id)
+}
+
+func retainCreatingEventAtAncestor(plan runfork.RunForkPlan, snapshot *runForkRevisionSnapshot, point runfork.RunForkPoint, lineage []runfork.InheritedConstructionHop, entity runfork.RunForkEntityState, projected, id string) (runfork.RunForkPlan, error) {
+	ancestor, err := constructionPlanAtSnapshot(snapshot)
+	if err != nil {
+		return plan, err
+	}
+	ancestor.ForkPoint = point
+	cut, err := newRunForkReplayCut(snapshot)
+	if err != nil {
+		return plan, err
+	}
+	var publication events.Event
+	for _, row := range snapshot.Events {
+		if row.EventID != id {
+			continue
+		}
+		publication, err = cut.event(id)
+		if err != nil {
+			return plan, err
+		}
+	}
+	if publication.ID() == "" {
+		return plan, nil
+	}
+	ancestor = ancestor.WithHistoricalEvents(point.Revision, []string{id})
+	ancestor, err = ancestor.WithHistoricalRouteSelectors(point.Revision, []events.Event{publication})
+	if err != nil {
+		return plan, err
+	}
+	pending, err := loadRunForkPendingWorkFromRevision(snapshot)
+	if err != nil {
+		return plan, err
+	}
+	for _, work := range pending {
+		if work.EventID == id && work.Classification == runfork.RunForkPendingClassificationDeliveredCompleted &&
+			work.DeliveryRoute.Target.Route().EntityID == entity.EntityID {
+			ancestor.PendingWork = append(ancestor.PendingWork, work)
+		}
+	}
+	return plan.WithInheritedConstructionWitness(runfork.InheritedConstructionWitness{
+		Ancestor: ancestor, Lineage: lineage, CreatingEventID: id, OriginalEntityID: entity.EntityID, ProjectedEntityID: projected,
+	})
 }
 
 func (r *capturedConstructionResolver) sourceCut(ctx context.Context, origin runlifecycle.RunOrigin) (*runForkRevisionSnapshot, error) {

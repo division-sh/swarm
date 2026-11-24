@@ -29,7 +29,11 @@ func TestSelectedContractRouteRecoveryActivationEqualityBothStores(t *testing.T)
 		t.Run(backend, func(t *testing.T) {
 			db := activationEqualityDatabase(t, backend)
 			for _, carrier := range []string{"static", "dynamic", "planning"} {
-				for _, change := range []string{"unchanged", "diagnostic", "set_order_duplicates", "plan_owner", "handler_node", "handler_event", "connect_edge", "receiver_pin", "local_authority", "metadata", "malformed", "unknown_aggregate", "unknown_event", "corrupt_payload"} {
+				changes := []string{"unchanged", "diagnostic", "set_order_duplicates", "plan_owner", "handler_node", "handler_event", "connect_edge", "receiver_pin", "local_authority", "metadata", "malformed", "unknown_aggregate", "unknown_event", "corrupt_payload"}
+				if carrier == "dynamic" {
+					changes = append(changes, "crossed_witness")
+				}
+				for _, change := range changes {
 					t.Run(carrier+"/"+change, func(t *testing.T) {
 						expected := activationEqualityRecord(t, evidence)
 						actual := expected
@@ -57,6 +61,8 @@ func TestSelectedContractRouteRecoveryActivationEqualityBothStores(t *testing.T)
 							*recipients = append(*recipients, (*recipients)[0])
 						case "metadata":
 							*metadata += "/different"
+						case "crossed_witness":
+							topology.DynamicTopologyProofs[0].FixedCutEvidenceFingerprint = strings.Repeat("7", 64)
 						case "unchanged", "malformed", "unknown_aggregate", "unknown_event":
 						default:
 							index := 0
