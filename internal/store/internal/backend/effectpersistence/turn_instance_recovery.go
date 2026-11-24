@@ -90,14 +90,14 @@ func (scope *turnOwnershipObservation) validateRetainedTurnSet(peeks []retainedT
 
 // Peeks choose locks only. No decoder or anchor can acquire a missing prefix.
 func prepareRetainedTurnOwnershipTx(ctx context.Context, tx *sql.Tx, postgres bool, owner providerDrainDirectiveOwner, ids []string, extraActors ...agentidentity.Identity) (context.Context, error) {
-	return prepareRetainedTurnOwnershipWithSourcesTx(ctx, tx, postgres, owner, ids, nil, extraActors)
-}
-
-func prepareRetainedTurnOwnershipWithSourcesTx(ctx context.Context, tx *sql.Tx, postgres bool, owner providerDrainDirectiveOwner, ids []string, extraSources []retainedTurnActorSource, extraActors []agentidentity.Identity) (context.Context, error) {
 	peeks, actors, err := peekRetainedTurnSetTx(ctx, tx, ids, extraActors)
 	if err != nil {
 		return nil, err
 	}
+	return bindRetainedTurnOwnershipTx(ctx, tx, postgres, owner, peeks, actors, nil)
+}
+
+func bindRetainedTurnOwnershipTx(ctx context.Context, tx *sql.Tx, postgres bool, owner providerDrainDirectiveOwner, peeks []retainedTurnCoordinate, actors []agentidentity.Identity, extraSources []retainedTurnActorSource) (context.Context, error) {
 	for _, source := range extraSources {
 		actors = append(actors, source.actor)
 	}
@@ -337,7 +337,7 @@ func peekProviderRecoveryIDsTx(ctx context.Context, tx *sql.Tx, runID string, ac
 	return ids, nil
 }
 
-func prepareProviderRecoveryOwnershipTx(ctx context.Context, tx *sql.Tx, postgres bool, owner providerDrainDirectiveOwner, runID string, actor *agentidentity.Identity, extraSources ...retainedTurnActorSource) (context.Context, error) {
+func prepareProviderRecoveryOwnershipTx(ctx context.Context, tx *sql.Tx, postgres bool, owner providerDrainDirectiveOwner, runID string, actor *agentidentity.Identity) (context.Context, error) {
 	ids, err := peekProviderRecoveryIDsTx(ctx, tx, runID, actor)
 	if err != nil {
 		return nil, err
@@ -364,7 +364,7 @@ func prepareProviderRecoveryOwnershipTx(ctx context.Context, tx *sql.Tx, postgre
 		}
 		extra = append(extra, *actor)
 	}
-	ctx, err = prepareRetainedTurnOwnershipWithSourcesTx(ctx, tx, postgres, owner, ids, extraSources, extra)
+	ctx, err = prepareRetainedTurnOwnershipTx(ctx, tx, postgres, owner, ids, extra...)
 	if err != nil {
 		return nil, err
 	}

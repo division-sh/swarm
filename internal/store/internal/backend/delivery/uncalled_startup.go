@@ -9,6 +9,8 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runstate"
 )
 
@@ -18,12 +20,29 @@ type UncalledStartupClaim struct {
 	BundleHash string
 }
 
-func (s *DeliveryPostgresOwner) UncalledStartupClaimsTx(ctx context.Context, tx *sql.Tx, processID string, lock bool) ([]UncalledStartupClaim, error) {
-	return postgresDeliveryAdapter.uncalledStartupClaimsTx(ctx, tx, processID, lock)
+func (s *DeliveryPostgresOwner) UncalledStartupClaims(ctx context.Context, attempt *mutationprotocol.Attempt, lock bool) ([]UncalledStartupClaim, error) {
+	return postgresDeliveryAdapter.uncalledStartupClaims(ctx, attempt, lock)
 }
 
-func (s *DeliverySQLiteOwner) UncalledStartupClaimsTx(ctx context.Context, tx *sql.Tx, processID string, lock bool) ([]UncalledStartupClaim, error) {
-	return sqliteDeliveryAdapter.uncalledStartupClaimsTx(ctx, tx, processID, lock)
+func (s *DeliverySQLiteOwner) UncalledStartupClaims(ctx context.Context, attempt *mutationprotocol.Attempt, lock bool) ([]UncalledStartupClaim, error) {
+	return sqliteDeliveryAdapter.uncalledStartupClaims(ctx, attempt, lock)
+}
+
+func (a *Adapter) uncalledStartupClaims(ctx context.Context, attempt *mutationprotocol.Attempt, lock bool) ([]UncalledStartupClaim, error) {
+	if err := attempt.RequireExistingSQLFrame(ctx); err != nil {
+		return nil, err
+	}
+	authority, err := startupownership.CaptureMutationAuthority(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if authority.HasRuntimeGrant() && authority.GrantEvidence().SelectedFork != nil {
+		return nil, nil
+	}
+	processID := authority.ProcessAuthority().LeaseStamp().LeaseID
+	return withDeliverySQL(ctx, attempt, func(ctx context.Context, tx *sql.Tx) ([]UncalledStartupClaim, error) {
+		return a.uncalledStartupClaimsTx(ctx, tx, processID, lock)
+	})
 }
 
 func (a *Adapter) uncalledStartupClaimsTx(ctx context.Context, tx *sql.Tx, processID string, lock bool) ([]UncalledStartupClaim, error) {
