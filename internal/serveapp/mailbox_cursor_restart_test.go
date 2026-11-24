@@ -43,9 +43,8 @@ func TestServedMailboxCursorRetainedRestartParity(t *testing.T) {
 				recordServePostgresFixture(t, dsn)
 				t.Cleanup(cleanup)
 				original := buildStoresForServe
-				firstChecked := true
 				buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config, bootCheck ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {
-					target, err := firstCheckedPostgresFixtureDSN(ctx, cfg, dsn, &firstChecked, bootCheck)
+					target, err := checkedPostgresFixtureDSN(ctx, cfg, dsn, true, bootCheck)
 					if err != nil {
 						return nil, err
 					}
