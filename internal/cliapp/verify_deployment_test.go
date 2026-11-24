@@ -21,7 +21,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/failures"
-	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/tests/support/testpostgres"
 	"github.com/division-sh/swarm/tests/support/testutil"
@@ -174,6 +173,10 @@ func testVerifyStageCompletionFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	_, admitted, err := NewSwarmWorkflowModuleForBundle(bundle)
+	if err != nil {
+		t.Fatal(err)
+	}
 	empty, err := credentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -182,7 +185,7 @@ func testVerifyStageCompletionFailure(t *testing.T) {
 	opts.CheckMCPReachable = false
 	opts.FatalBootWarnings = true
 	opts.ExcludedFatalBootWarningChecks = []string{"tool_resolution", "inbound_unsigned_webhook"}
-	validation, summary := runtime.ValidateWorkflowContractSurface(t.Context(), semanticview.Wrap(bundle), opts)
+	validation, summary := runtime.ValidateWorkflowContractSurface(t.Context(), admitted, opts)
 	if !runtime.IsSoleWorkflowAdmissionReportRefusal(summary) {
 		t.Fatalf("fixture did not reach a runtime-owned report summary: %v", summary)
 	}
