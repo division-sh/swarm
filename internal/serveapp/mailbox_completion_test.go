@@ -190,7 +190,7 @@ func gateCompletionAssertResponse(t *testing.T, result gateCompletionHTTPResult,
 	}
 }
 
-func gateCompletionHarness(t *testing.T, backend, root string, useDeclaration bool) (*cliapp.ServeOptions, func() (*serveRuntimeTestProcess, servedControlProofRuntime)) {
+func gateCompletionHarness(t *testing.T, backend, root string) (*cliapp.ServeOptions, func() (*serveRuntimeTestProcess, servedControlProofRuntime)) {
 	t.Helper()
 	if _, err := packartifact.ImportEmbeddedPack(root, "telegram", packfixture.EmbeddedBase(t)); err != nil {
 		t.Fatal(err)
@@ -214,6 +214,7 @@ func gateCompletionHarness(t *testing.T, backend, root string, useDeclaration bo
 		recordServePostgresFixture(t, dsn)
 		t.Cleanup(cleanup)
 		original := buildStoresForServe
+		_, useDeclaration := declaredServePostgresTargets.Load(t)
 		buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config, bootCheck ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {
 			target, err := checkedPostgresFixtureDSN(ctx, cfg, dsn, useDeclaration, bootCheck)
 			if err != nil {
@@ -244,7 +245,10 @@ func TestServedMailboxCompletionInsertRollbackAndRestartBothStores(t *testing.T)
 	requireMailboxCompletionFaultFunction(t)
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			opts, start := gateCompletionHarness(t, backend, canonicalrouting.CopyGateCompletionDiagnostic(t), true)
+			if backend == "postgres" {
+				useDeclaredServePostgresTarget(t)
+			}
+			opts, start := gateCompletionHarness(t, backend, canonicalrouting.CopyGateCompletionDiagnostic(t))
 			first, rt := start()
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "completion-seed"})
 			entityID := requireServedEventPublishEntityState(t, rt.DB, backend, seed.RunID, "", "review")
