@@ -41,13 +41,18 @@ func TestReceiverCompositionRestartBothStores(t *testing.T) {
 				recordServePostgresFixture(t, dsn)
 				t.Cleanup(cleanup)
 				original := buildStoresForServe
-				buildStoresForServe = func(_ context.Context, _ storebackend.Selection, cfg *config.Config, bootCheck ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {
+				firstChecked := true
+				buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config, bootCheck ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {
+					target, err := firstCheckedPostgresFixtureDSN(ctx, cfg, dsn, &firstChecked, bootCheck)
+					if err != nil {
+						return nil, err
+					}
 					pg, err := store.NewPostgresStore(dsn)
 					if err != nil {
 						return nil, err
 					}
 					db = storetest.DatabaseForTest(pg)
-					owner := openSelectedPostgresOwner(t, dsn, db, cfg, bootCheck...)
+					owner := openSelectedPostgresOwner(t, target, db, cfg, bootCheck...)
 					storetest.BootstrapPostgresRuntimeStore(t, pg)
 					return owner, nil
 				}

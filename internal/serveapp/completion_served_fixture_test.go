@@ -30,13 +30,18 @@ func allocateCompletion2270PostgresFixture(t *testing.T) string {
 	return location
 }
 
-func configureCompletion2270PostgresFixture(t *testing.T) {
+func configureCompletion2270PostgresFixture(t *testing.T, declaredFirst ...bool) {
 	t.Helper()
 	location := allocateCompletion2270PostgresFixture(t)
+	firstChecked := len(declaredFirst) == 1 && declaredFirst[0]
 	previous := buildStoresForServe
 	buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config, bootCheck ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {
+		target, err := firstCheckedPostgresFixtureDSN(ctx, cfg, location, &firstChecked, bootCheck)
+		if err != nil {
+			return nil, err
+		}
 		return storeselected.OpenRuntime(ctx, storeselected.RuntimeRequest{
-			Selection: selection, PostgresDSN: location, SessionLockTTL: runtimeSessionLockTTL(cfg), BootCheckInput: firstBootCheckInput(bootCheck),
+			Selection: selection, PostgresDSN: target, SessionLockTTL: runtimeSessionLockTTL(cfg), BootCheckInput: firstBootCheckInput(bootCheck),
 		})
 	}
 	t.Cleanup(func() { buildStoresForServe = previous })

@@ -190,7 +190,7 @@ func gateCompletionAssertResponse(t *testing.T, result gateCompletionHTTPResult,
 	}
 }
 
-func gateCompletionHarness(t *testing.T, backend, root string) (*cliapp.ServeOptions, func() (*serveRuntimeTestProcess, servedControlProofRuntime)) {
+func gateCompletionHarness(t *testing.T, backend, root string, firstChecked bool) (*cliapp.ServeOptions, func() (*serveRuntimeTestProcess, servedControlProofRuntime)) {
 	t.Helper()
 	if _, err := packartifact.ImportEmbeddedPack(root, "telegram", packfixture.EmbeddedBase(t)); err != nil {
 		t.Fatal(err)
@@ -214,14 +214,18 @@ func gateCompletionHarness(t *testing.T, backend, root string) (*cliapp.ServeOpt
 		recordServePostgresFixture(t, dsn)
 		t.Cleanup(cleanup)
 		original := buildStoresForServe
-		buildStoresForServe = func(_ context.Context, _ storebackend.Selection, cfg *config.Config, bootCheck ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {
+		buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config, bootCheck ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {
+			target, err := firstCheckedPostgresFixtureDSN(ctx, cfg, dsn, &firstChecked, bootCheck)
+			if err != nil {
+				return nil, err
+			}
 			pg, err := store.NewPostgresStore(dsn)
 			if err != nil {
 				return nil, err
 			}
 			db = storetest.DatabaseForTest(pg)
 			selectedPG = pg
-			owner := openSelectedPostgresOwner(t, dsn, db, cfg, bootCheck...)
+			owner := openSelectedPostgresOwner(t, target, db, cfg, bootCheck...)
 			storetest.BootstrapPostgresRuntimeStore(t, pg)
 			return owner, nil
 		}
@@ -240,7 +244,7 @@ func TestServedMailboxCompletionInsertRollbackAndRestartBothStores(t *testing.T)
 	requireMailboxCompletionFaultFunction(t)
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			opts, start := gateCompletionHarness(t, backend, canonicalrouting.CopyGateCompletionDiagnostic(t))
+			opts, start := gateCompletionHarness(t, backend, canonicalrouting.CopyGateCompletionDiagnostic(t), true)
 			first, rt := start()
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "completion-seed"})
 			entityID := requireServedEventPublishEntityState(t, rt.DB, backend, seed.RunID, "", "review")

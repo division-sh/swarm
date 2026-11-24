@@ -23,6 +23,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/servedparity"
@@ -32,7 +33,7 @@ import (
 
 func TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores(t *testing.T) {
 	for _, scenario := range []providerAliasScenario{
-		{name: "raw-connected", rawConnected: true, rootObserver: true, alphaReceiver: "alpha-receiver"},
+		{name: "raw-connected", rawConnected: true, rootObserver: true, alphaReceiver: "alpha-receiver", firstChecked: true},
 		{name: "raw-connected-only", rawConnected: true, noLocalConsumers: true, alphaReceiver: "alpha-receiver"},
 		{name: "consumerless-raw", noLocalConsumers: true, alphaReceiver: "alpha-receiver"},
 		{name: "consumerless-ack-loss", noLocalConsumers: true, ackLoss: true, alphaReceiver: "alpha-receiver"},
@@ -72,7 +73,7 @@ func runProviderAliasAuthorityScenario(t *testing.T, scenario providerAliasScena
 				t.Cleanup(func() { projectRuntimePersistenceForServe = previous })
 			}
 			root := writeProviderAliasAuthorityFixture(t, scenario)
-			rt := startWorkspaceLiveGatewayProofRuntime(t, backend, root, "", nil, "127.0.0.1:0")
+			rt := startWorkspaceGatewayProofRuntimeWithPosture(t, backend, root, "", nil, "127.0.0.1:0", executionposture.Live, scenario.firstChecked)
 			var wantStartup, wantBusiness int32
 			if scenario.agents {
 				wantStartup, wantBusiness = 1, 4 // Two raw and two normalized text deliveries.
@@ -271,6 +272,7 @@ func requireIndependentStandingRootTrees(t *testing.T, rt servedWorkspaceProofRu
 
 type providerAliasScenario struct {
 	name                  string
+	firstChecked          bool
 	rawConnected          bool
 	rootObserver          bool
 	rootProvider          bool

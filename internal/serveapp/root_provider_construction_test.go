@@ -6,6 +6,6 @@ import "testing"
 // canonical keyless standing form. The retired singleton flag is not a variant.
 func TestProviderSelectedRootStandingBootBothStores(t *testing.T) {
 	runProviderAliasAuthorityScenario(t, providerAliasScenario{
-		name: "root-provider", rootProvider: true, alphaReceiver: "alpha-receiver",
+		name: "root-provider", rootProvider: true, alphaReceiver: "alpha-receiver", firstChecked: true,
 	})
 }
