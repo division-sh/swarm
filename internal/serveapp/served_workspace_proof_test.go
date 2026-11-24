@@ -116,15 +116,15 @@ func configureHostWorkspaceProofLifecycle(t *testing.T) {
 
 func startWorkspaceGatewayProofRuntime(t *testing.T, backend servedparity.Backend, sourceRoot, targetBackend string, factory func(*sourceartifact.RuntimeProjection, semanticview.Source) (cliapp.ServeWorkspaceLifecycle, error), mcpListen string, hooks ...pipeline.WorkflowNodeHandlerStartHook) servedWorkspaceProofRuntime {
 	t.Helper()
-	return startWorkspaceGatewayProofRuntimeWithPosture(t, backend, sourceRoot, targetBackend, factory, mcpListen, executionposture.MockOnly, hooks...)
+	return startWorkspaceGatewayProofRuntimeWithPosture(t, backend, sourceRoot, targetBackend, factory, mcpListen, executionposture.MockOnly, false, hooks...)
 }
 
 func startWorkspaceLiveGatewayProofRuntime(t *testing.T, backend servedparity.Backend, sourceRoot, targetBackend string, factory func(*sourceartifact.RuntimeProjection, semanticview.Source) (cliapp.ServeWorkspaceLifecycle, error), mcpListen string, hooks ...pipeline.WorkflowNodeHandlerStartHook) servedWorkspaceProofRuntime {
 	t.Helper()
-	return startWorkspaceGatewayProofRuntimeWithPosture(t, backend, sourceRoot, targetBackend, factory, mcpListen, executionposture.Live, hooks...)
+	return startWorkspaceGatewayProofRuntimeWithPosture(t, backend, sourceRoot, targetBackend, factory, mcpListen, executionposture.Live, false, hooks...)
 }
 
-func startWorkspaceGatewayProofRuntimeWithPosture(t *testing.T, backend servedparity.Backend, sourceRoot, targetBackend string, factory func(*sourceartifact.RuntimeProjection, semanticview.Source) (cliapp.ServeWorkspaceLifecycle, error), mcpListen string, posture executionposture.Posture, hooks ...pipeline.WorkflowNodeHandlerStartHook) servedWorkspaceProofRuntime {
+func startWorkspaceGatewayProofRuntimeWithPosture(t *testing.T, backend servedparity.Backend, sourceRoot, targetBackend string, factory func(*sourceartifact.RuntimeProjection, semanticview.Source) (cliapp.ServeWorkspaceLifecycle, error), mcpListen string, posture executionposture.Posture, firstChecked bool, hooks ...pipeline.WorkflowNodeHandlerStartHook) servedWorkspaceProofRuntime {
 	t.Helper()
 	if len(hooks) > 1 {
 		t.Fatal("at most one handler-start barrier is supported")
@@ -291,13 +291,18 @@ func startWorkspaceGatewayProofRuntimeWithPosture(t *testing.T, backend servedpa
 	case servedparity.BackendExplicitPostgres:
 		proof.Backend = "postgres"
 		dsn := testutil.StartEmptyPostgresDSN(t)
+		firstChecked = firstChecked && len(accounts) > 0
 		previous := buildStoresForServe
 		buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config, bootCheck ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {
 			if selection.Backend != storebackend.BackendPostgres {
 				t.Fatal("native workspace fixture selected another backend")
 			}
+			target, err := firstCheckedPostgresFixtureDSN(ctx, cfg, dsn, &firstChecked, bootCheck)
+			if err != nil {
+				return nil, err
+			}
 			return storeselected.OpenRuntime(ctx, storeselected.RuntimeRequest{
-				Selection: selection, PostgresDSN: dsn, SessionLockTTL: runtimeSessionLockTTL(cfg), BootCheckInput: firstBootCheckInput(bootCheck),
+				Selection: selection, PostgresDSN: target, SessionLockTTL: runtimeSessionLockTTL(cfg), BootCheckInput: firstBootCheckInput(bootCheck),
 			})
 		}
 		t.Cleanup(func() { buildStoresForServe = previous })
