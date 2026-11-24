@@ -6621,6 +6621,7 @@ func TestPostgresIdleSessionLossStopsServe(t *testing.T) {
 
 func TestPostgresIdleSessionLossReturnsFailureFromRun(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
+	useDeclaredServePostgresTarget(t)
 	_, db, _ := installServeRuntimePostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
 	})
@@ -6832,6 +6833,7 @@ func TestLocalRunStaleContextAndAbandonedStoreRecovers(t *testing.T) {
 		run(t, base(writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), path), storebackend.BackendSQLite.String(), t.TempDir()), path)
 	})
 	t.Run("postgres", func(t *testing.T) {
+		useDeclaredServePostgresTarget(t)
 		_, _, selected := installServeRuntimePostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle { return serveRuntimeWorkspaceStub{} })
 		storetest.BootstrapPostgresRuntimeStore(t, selected)
 		seedServeRuntimeReleasedProcess(t, selected)
@@ -7086,7 +7088,6 @@ func TestRunServeRuntimeRejectsPresentZeroBeforeContextPublication(t *testing.T)
 }
 
 func TestRunServeRuntimeUnavailableBundleStartupRecoveryFailsPersistedMissingBeforeCleanup(t *testing.T) {
-	useDeclaredServePostgresTarget(t)
 	_, db, pg := installServeRuntimePostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
 	})
@@ -7105,6 +7106,7 @@ func TestRunServeRuntimeUnavailableBundleStartupRecoveryFailsPersistedMissingBef
 		BundleHash: missingRoot.Admission().BundleHash(), RootDirectory: missingRoot.Admission().RootDirectory(),
 	})
 
+	buildStoresForServe = buildStores
 	var out lockedBuffer
 	code := runFrom(context.Background(), repoRootForTest(), cliapp.ServeOptions{
 		ConfigPath:    writeServeRuntimeTestConfig(t),

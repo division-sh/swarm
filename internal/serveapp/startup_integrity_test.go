@@ -146,6 +146,9 @@ func TestRunServeSourceArtifactIntegrityRejectsBeforeReadinessBothStores(t *test
 				}
 				var out lockedBuffer
 				published := false
+				if backend == "postgres" {
+					buildStoresForServe = buildStores
+				}
 				code := runFrom(ctx, repo, cliapp.ServeOptions{
 					ConfigPath: configPath, SourceRoot: sourceRoot,
 					StoreMode: backend, StoreModeSet: true,

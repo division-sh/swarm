@@ -521,7 +521,7 @@ func TestRunServeTerminalAccountDoesNotStarveRecoveryBothStores(t *testing.T) {
 			if !t.Run(string(backend)+"/"+kind, func(t *testing.T) {
 				h := prepareChannelAnchorPublicJourney(t, backend, "bot-token", false, 0, func(opts *cliapp.ServeOptions) {
 					opts.SourceRoot = filepath.Join(repoRootForTest(), "internal/serveapp/testdata/whatsapp-session-reply")
-					if backend == servedparity.BackendDefaultSQLite && kind == "replacement" {
+					if backend == servedparity.BackendDefaultSQLite {
 						declarePrivateRegistrationState(t, opts.ConfigPath)
 					}
 				})
