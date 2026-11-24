@@ -16,6 +16,7 @@ import (
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
@@ -79,6 +80,7 @@ type deploymentResourceFixture struct {
 	liveContexts                *runtimepkg.RuntimeContextManager
 	config                      *config.Config
 	ordinaryProviderCredentials runtimecredentials.Store
+	ordinaryDeliveryLifecycle   runtimedelivery.Store
 	forkAgents                  runforkexecution.SelectedContractAgentRuntimeOptions
 	forkRequest                 atomic.Pointer[runfork.ForkOperationRequest]
 }
@@ -124,6 +126,9 @@ func newDeploymentResourceFixtureWithSource(t *testing.T, backend string, source
 	default:
 		t.Fatalf("unknown selected backend %q", backend)
 	}
+	if opts.wrapDeploymentDelivery != nil {
+		f.ordinaryDeliveryLifecycle = opts.wrapDeploymentDelivery(f.selected)
+	}
 	fact := conformanceSourceArtifactFact(t, f.source)
 	f.ctx = testAuthorActivityContextForBundle(context.Background(), fact)
 	f.ctx = originalConformanceFixtureContext(t, f.ctx, f.selected)
@@ -139,6 +144,7 @@ func (f *deploymentResourceFixture) boot(t *testing.T) {
 		ordinaryContext:             true,
 		ordinaryConfig:              f.config,
 		ordinaryProviderCredentials: f.ordinaryProviderCredentials,
+		deliveryLifecycle:           f.ordinaryDeliveryLifecycle,
 		processTopology:             f.topology,
 		fanOutExecutor: func(coordinator *pipeline.PipelineCoordinator) startupownership.FanOutExecutor {
 			return deploymentFanOutDiagnostic{FanOutExecutor: coordinator, t: t}

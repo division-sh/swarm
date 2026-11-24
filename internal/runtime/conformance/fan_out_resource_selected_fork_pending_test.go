@@ -34,11 +34,12 @@ import (
 // defers only that normal receiver claim using its real persisted snapshot.
 type selectedDeploymentClaimGate struct {
 	runtimedelivery.Store
-	allow    func(events.Event) bool
-	held     atomic.Bool
-	deferred atomic.Int64
-	kind     runtimedelivery.ExecutionAuthorityKind
-	entered  chan string
+	allow     func(events.Event) bool
+	eventName string
+	held      atomic.Bool
+	deferred  atomic.Int64
+	kind      runtimedelivery.ExecutionAuthorityKind
+	entered   chan string
 }
 
 type selectedDeploymentRollbackPublication struct {
@@ -156,7 +157,11 @@ func (g *selectedDeploymentClaimGate) ClaimDelivery(ctx context.Context, authori
 	if kind == "" {
 		kind = runtimedelivery.ExecutionAuthorityNormalRuntime
 	}
-	if !g.held.Load() || authority.Kind() != kind || event.Type() != selectedDeploymentEvent || g.allow != nil && g.allow(event) {
+	eventName := g.eventName
+	if eventName == "" {
+		eventName = selectedDeploymentEvent
+	}
+	if !g.held.Load() || authority.Kind() != kind || string(event.Type()) != eventName || g.allow != nil && g.allow(event) {
 		return g.Store.ClaimDelivery(ctx, authority, event, route)
 	}
 	id, err := runtimedelivery.DeliveryID(event.ID(), route)

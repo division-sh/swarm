@@ -47,9 +47,13 @@ func requireSelectedSuccessorWorkflowTimers(ctx context.Context, attempt *mutati
 		// full resolved selector and event evidence. Do not reconstruct one from
 		// the other during successor admission.
 		point := *operation.Request.ResolvedPoint
-		plan, err := port.plan(ctx, tx, runfork.RunForkPlanRequest{
+		planRequest := runfork.RunForkPlanRequest{
 			SourceRunID: binding.SourceRunID, AtStart: point.Kind == runfork.RunForkPointRunStart, ResolvedPoint: &point,
-		})
+		}
+		if point.Kind == runfork.RunForkPointStateRevision {
+			planRequest.PublicationID = operation.Request.PublicationID
+		}
+		plan, err := port.plan(ctx, tx, planRequest)
 		if err != nil {
 			return err
 		}
@@ -86,7 +90,7 @@ func postgresRunForkWorkflowTimerReadbackPort(s *RunForkPostgresOwner) runForkWo
 			return s.RunLifecyclePostgresOwner.LoadSnapshotTx(ctx, tx, runID, true)
 		},
 		plan: func(ctx context.Context, tx *sql.Tx, req runfork.RunForkPlanRequest) (runfork.RunForkPlan, error) {
-			return planRunForkSnapshot(ctx, tx, req, runforkrevision.ValidateCompletePostgres, resolveRunForkRevisionPoint, true)
+			return planRunForkSnapshot(ctx, tx, req, runforkrevision.ValidateCompletePostgres, resolveRunForkRevisionPoint, true, s.durableData)
 		},
 		timers: s.PipelinePostgresOwner, arrivalSchedules: s.PipelinePostgresOwner, replies: s.replies,
 	}
@@ -98,7 +102,7 @@ func sqliteRunForkWorkflowTimerReadbackPort(s *RunForkSQLiteOwner) runForkWorkfl
 			return s.RunLifecycleSQLiteOwner.LoadSnapshotTx(ctx, tx, runID)
 		},
 		plan: func(ctx context.Context, tx *sql.Tx, req runfork.RunForkPlanRequest) (runfork.RunForkPlan, error) {
-			return planRunForkSnapshot(ctx, tx, req, runforkrevision.ValidateCompleteSQLite, resolveSQLiteRunForkRevisionPoint, false)
+			return planRunForkSnapshot(ctx, tx, req, runforkrevision.ValidateCompleteSQLite, resolveSQLiteRunForkRevisionPoint, false, s.durableData)
 		},
 		timers: s.PipelineSQLiteOwner, arrivalSchedules: s.PipelineSQLiteOwner, replies: s.replies,
 	}

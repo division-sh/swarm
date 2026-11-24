@@ -277,6 +277,7 @@ type RunForkPlanRequest struct {
 }
 
 type RunForkPlan struct {
+	DeploymentFeedSelection   *RunForkDeploymentFeedSelection                 `json:"-"`
 	OriginalConnectPlans      []pinrouting.ConnectRoutePlan                   `json:"-"`
 	SourceRunID               string                                          `json:"source_run_id"`
 	SourceRunStatus           string                                          `json:"source_run_status,omitempty"`
@@ -770,6 +771,41 @@ type RunForkEntityState struct {
 	PublishedArrivals       []PublishedJoinOccurrence                   `json:"-"`
 	TransferredJoins        []genericschedule.TransferredJoinOccurrence `json:"-"`
 	MaterializationMetadata *RunForkMaterializedEntitySnapshotMetadata  `json:"materialization_metadata,omitempty"`
+}
+
+type RunForkDeploymentFeedSelection struct {
+	Named     string
+	Parked    []RunForkFanOutObligation
+	Inherited []durabledata.Pin `json:",omitempty"`
+}
+
+func (p RunForkPlan) IsParkedDeploymentPin(pin durabledata.Pin) bool {
+	if p.DeploymentFeedSelection == nil {
+		return false
+	}
+	matches := func(o RunForkFanOutObligation) bool {
+		d := o.Intent.Request.Deployment
+		return d != nil && d.Declaration == pin.Declaration && d.SchemaDigest == pin.SchemaDigest &&
+			(d.VersionID == pin.VersionID || pin.Selection == "fork_override")
+	}
+	for _, obligation := range p.FanOutObligations {
+		if matches(obligation) {
+			return false
+		}
+	}
+	for _, obligation := range p.DeploymentFeedSelection.Parked {
+		if matches(obligation) {
+			return true
+		}
+	}
+	if pin.Selection == "fork_inherited" {
+		for _, inherited := range p.DeploymentFeedSelection.Inherited {
+			if inherited.Declaration == pin.Declaration && inherited.VersionID == pin.VersionID && inherited.SchemaDigest == pin.SchemaDigest {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 type RunForkPendingWork struct {

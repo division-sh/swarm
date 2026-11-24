@@ -187,8 +187,9 @@ func SelectedPreparationPlanFingerprint(plan RunForkPlan, frontier RunForkContra
 		Frontier      RunForkContractFrontierAdmission
 		Recipients    RunForkSelectedContractRecipientPlanning
 		Declarations  string
-		OneShots      []string `json:",omitempty"`
-	}{plan, history, plan.HistoricalInputCoordinates(), plan.HistoricalJoinCoordinates(), firstTurn, plan.ReplyContexts, plan.WorkflowTimers, joinSchedules, transferred, frontier, planning, declarationRevision, oneShots})
+		OneShots      []string                        `json:",omitempty"`
+		FeedSelection *RunForkDeploymentFeedSelection `json:",omitempty"`
+	}{plan, history, plan.HistoricalInputCoordinates(), plan.HistoricalJoinCoordinates(), firstTurn, plan.ReplyContexts, plan.WorkflowTimers, joinSchedules, transferred, frontier, planning, declarationRevision, oneShots, plan.DeploymentFeedSelection})
 	if err != nil {
 		return "", err
 	}

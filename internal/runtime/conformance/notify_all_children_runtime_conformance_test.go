@@ -121,6 +121,7 @@ type notifyAllChildrenRuntimeOptions struct {
 	nestedPublications          *nestedPublicationLifetime
 	testLifecycleProbe          runtimelifecycleprobe.Observer
 	deliveryLifecycle           runtimedelivery.Store
+	wrapDeploymentDelivery      func(runtimedelivery.Store) runtimedelivery.Store
 	deferContinuationStart      bool
 }
 

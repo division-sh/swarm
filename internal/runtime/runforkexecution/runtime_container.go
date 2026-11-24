@@ -1020,6 +1020,9 @@ func (c selectedContractForkLocalRuntimeContainer) selectedDeploymentPinnedSourc
 		sources = append(sources, source)
 	}
 	for _, pin := range c.req.DataPins {
+		if c.req.SourcePlan.IsParkedDeploymentPin(pin) {
+			continue
+		}
 		matched := false
 		for _, source := range sources {
 			matched = matched || pin.Declaration == source.Declaration && pin.VersionID == source.VersionID && pin.SchemaDigest == source.SchemaDigest

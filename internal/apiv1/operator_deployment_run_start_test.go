@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/durabledata"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -227,6 +228,62 @@ func TestDeploymentRunStartFeedOnlyAcrossSelectedStores(t *testing.T) {
 				t.Fatalf("event-plus-feed intents = %d, want 1", got)
 			}
 		})
+	})
+}
+
+func TestRunForkPublicationSelectsOnePendingFeedAcrossSelectedStores(t *testing.T) {
+	forEachDataRunLifecycleStore(t, func(t *testing.T, fixture dataRunLifecycleFixture) {
+		ctx := context.Background()
+		source, catalog, first, second, _ := deploymentRunStartTestSource(t)
+		bundle := runStartTestBundleHashForSource(source)
+		bus, err := newScopedAPITestEventBusWithDataCatalog(t, fixture.primary, &catalog, runStartTestEventBusOptions(source))
+		if err != nil {
+			t.Fatal(err)
+		}
+		handler := eventPublishTestHandlerWithStores(t, fixture.primary, fixture.primary, fixture.primary, bus, source)
+		runID := uuid.NewString()
+		seedEventPublishLiveRunID(t, fixture.primary, bus, source, runID)
+		data := map[string]any{"imports": []any{
+			dataRunFusedImport(uuid.NewString(), first, durabledata.AbsentHead(), []byte("{\"topic\":\"named\"}\n")),
+			dataRunFusedImport(uuid.NewString(), second, durabledata.AbsentHead(), []byte("{\"label\":\"other\"}\n")),
+		}, "pins": []any{}}
+		started := rpcCall(t, handler, deploymentRunStartBody(runID, uuid.NewString(), bundle, data))
+		if started.Error != nil {
+			t.Fatalf("two-feed start: %+v", started.Error)
+		}
+		batch := asMap(t, started.Result)["publication_id"].(string)
+		named := (durabledata.DeploymentFeed{RunID: runID, Publication: batch, Declaration: first}).PublicationID()
+		other := (durabledata.DeploymentFeed{RunID: runID, Publication: batch, Declaration: second}).PublicationID()
+		planner := fixture.reconstructed.(interface {
+			PlanRunFork(context.Context, runfork.RunForkPlanRequest) (runfork.RunForkPlan, error)
+		})
+		planAt := func(id string) (runfork.RunForkPlan, error) {
+			return planner.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: runID, PublicationID: id})
+		}
+		all, err := planAt(batch)
+		if err != nil || all.ForkPoint.Kind != runfork.RunForkPointStateRevision || all.ForkPoint.Revision <= 0 ||
+			len(all.FanOutObligations) != 2 || all.EventCountAtFork != 0 {
+			t.Fatalf("batch must select a committed cut with two unissued feeds: %+v err=%v", all, err)
+		}
+		open := make(map[string]bool)
+		for _, obligation := range all.FanOutObligations {
+			open[obligation.Intent.Request.Key.DeploymentFeedID] = obligation.Intent.Cursor == 0 && obligation.Intent.Request.Cardinality == 1
+		}
+		if !open[named] || !open[other] || named == other {
+			t.Fatalf("fixture did not commit both exact pending members: %v", open)
+		}
+		single, err := planAt(named)
+		if err != nil {
+			t.Fatalf("named feed %s did not select its committed cut: %v", named, err)
+		}
+		if single.ForkPoint != all.ForkPoint || len(single.FanOutObligations) != 1 ||
+			single.FanOutObligations[0].Intent.Request.Key.DeploymentFeedID != named {
+			t.Fatalf("member selection did not keep the cut and park %s: %+v", other, single)
+		}
+		unchanged, err := planAt(batch)
+		if err != nil || !reflect.DeepEqual(unchanged.FanOutObligations, all.FanOutObligations) {
+			t.Fatalf("member planning changed the source's batch custody: %+v err=%v", unchanged.FanOutObligations, err)
+		}
 	})
 }
 

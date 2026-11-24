@@ -12,7 +12,7 @@ import (
 
 // MaterializeForkFeedPublicationsTx retains each fixed-cut feed's own version.
 // Several publications of one declaration never collapse into a default pin.
-func MaterializeForkFeedPublicationsTx(o *Owner, ctx context.Context, tx *sql.Tx, sourceRunID, forkRunID, targetBundle string, sources map[string]runtimedata.DeploymentFeed, overrides []runtimedata.ExplicitPin, replay bool) (map[string]runtimedata.DeploymentFeed, error) {
+func MaterializeForkFeedPublicationsTx(o *Owner, ctx context.Context, tx *sql.Tx, sourceRunID, forkRunID, targetBundle string, sources map[string]runtimedata.DeploymentFeed, parked map[string]bool, overrides []runtimedata.ExplicitPin, replay bool) (map[string]runtimedata.DeploymentFeed, error) {
 	if len(sources) != 0 && (o == nil || tx == nil) {
 		return nil, fmt.Errorf("fork publications require their native data transaction")
 	}
@@ -45,7 +45,7 @@ func MaterializeForkFeedPublicationsTx(o *Owner, ctx context.Context, tx *sql.Tx
 	sort.Strings(keys)
 	projected := make(map[string]runtimedata.DeploymentFeed, len(sources))
 	for _, key := range keys {
-		group, err := o.materializeForkFeedPublicationGroupTx(ctx, tx, sourceRunID, forkRunID, targetBundle, key, groups[key], overrides, replay)
+		group, err := o.materializeForkFeedPublicationGroupTx(ctx, tx, sourceRunID, forkRunID, targetBundle, key, groups[key], parked, overrides, replay)
 		if err != nil {
 			return nil, err
 		}
@@ -56,7 +56,7 @@ func MaterializeForkFeedPublicationsTx(o *Owner, ctx context.Context, tx *sql.Tx
 	return projected, nil
 }
 
-func (o *Owner) materializeForkFeedPublicationGroupTx(ctx context.Context, tx *sql.Tx, sourceRunID, forkRunID, targetBundle, key string, sources map[string]runtimedata.DeploymentFeed, overrides []runtimedata.ExplicitPin, replay bool) (map[string]runtimedata.DeploymentFeed, error) {
+func (o *Owner) materializeForkFeedPublicationGroupTx(ctx context.Context, tx *sql.Tx, sourceRunID, forkRunID, targetBundle, key string, sources map[string]runtimedata.DeploymentFeed, parked map[string]bool, overrides []runtimedata.ExplicitPin, replay bool) (map[string]runtimedata.DeploymentFeed, error) {
 	original, found, err := ReadFeedPublicationTx(o, ctx, tx, key)
 	if err != nil || !found || original.Summary.RunID != sourceRunID || len(original.DeploymentFeedIDs()) != len(sources) {
 		return nil, fmt.Errorf("fork publication does not contain its complete source member set: %w", err)
@@ -64,7 +64,10 @@ func (o *Owner) materializeForkFeedPublicationGroupTx(ctx context.Context, tx *s
 	group := runtimedata.ForkRowsPublicationID(forkRunID, key)
 	command := runtimedata.RunCreationCommand{RunID: forkRunID, BundleHash: targetBundle, Actor: "run.fork", PublicationID: group}
 	seen := make(map[runtimedata.DeclarationRef]bool)
-	for _, source := range sources {
+	for feedID, source := range sources {
+		if parked[feedID] {
+			continue
+		}
 		if seen[source.Declaration] {
 			return nil, fmt.Errorf("fork publication repeats a declaration")
 		}
@@ -76,6 +79,9 @@ func (o *Owner) materializeForkFeedPublicationGroupTx(ctx context.Context, tx *s
 			}
 		}
 		command.Data.Pins = append(command.Data.Pins, pin)
+	}
+	if len(command.Data.Pins) == 0 {
+		return nil, nil
 	}
 	plan, err := PrepareFeedPublicationTx(o, ctx, tx, command, group)
 	if err != nil || plan.Failed() || plan.Replay() != replay {
@@ -93,7 +99,10 @@ func (o *Owner) materializeForkFeedPublicationGroupTx(ctx context.Context, tx *s
 		}
 	}
 	projected := make(map[string]runtimedata.DeploymentFeed, len(sources))
-	for _, source := range sources {
+	for feedID, source := range sources {
+		if parked[feedID] {
+			continue
+		}
 		feed := runtimedata.DeploymentFeed{RunID: forkRunID, BundleHash: targetBundle, Declaration: source.Declaration, Publication: group}
 		target, err := RequireFeedSourceTx(ctx, o, tx, forkRunID, targetBundle, feed.PublicationID(), feed.Declaration)
 		if err != nil {
