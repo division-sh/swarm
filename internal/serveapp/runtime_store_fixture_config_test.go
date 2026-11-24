@@ -12,8 +12,6 @@ import (
 
 var installedServePostgresFixtures sync.Map
 
-const serveFixturePostgresPasswordEnv = "TEST_SERVE_FIXTURE_PASSWORD"
-
 func recordServePostgresFixture(t *testing.T, dsn string) {
 	t.Helper()
 	installedServePostgresFixtures.Store(t.Name(), dsn)
@@ -47,13 +45,13 @@ func withInstalledServePostgresConfig(t *testing.T, body, backend string) string
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv(serveFixturePostgresPasswordEnv, parameters.Password)
+	t.Setenv("TEST_SERVE_FIXTURE_PASSWORD", parameters.Password)
 	var document map[string]any
 	if err := yaml.Unmarshal([]byte(body), &document); err != nil {
 		t.Fatal(err)
 	}
 	document["database"] = map[string]any{"host": parameters.Host, "port": parameters.Port, "name": parameters.Database,
-		"user": parameters.User, "sslmode": parameters.SSLMode, "password_env": serveFixturePostgresPasswordEnv, "pool_size": 5}
+		"user": parameters.User, "sslmode": parameters.SSLMode, "password_env": "TEST_SERVE_FIXTURE_PASSWORD", "pool_size": 5}
 	if backend == "" {
 		document["store"] = map[string]any{"backend": "postgres"}
 	}
