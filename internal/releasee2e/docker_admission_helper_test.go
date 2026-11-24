@@ -75,6 +75,15 @@ func fakeAdmissionDocker(root string, args []string) (bool, int) {
 	case equalStrings(args, []string{"inspect", "--format", "{{json .State}}", name}) && probe.AdmissionKind == "version" && probe.AdmissionExited:
 		fmt.Fprintln(os.Stdout, `{"Status":"exited","Running":false,"ExitCode":0,"OOMKilled":false}`)
 		return true, 0
+	case args[0] == "top":
+		if !equalStrings(args, []string{"top", probe.ID, "-eo", "pid,args"}) ||
+			!strings.HasPrefix(probe.AdmissionWorker, "joined:") ||
+			!moveFakeAdmissionWorker(root, probe.ID, probe.AdmissionWorker, "") {
+			return true, fakeDockerUnexpected(root, args, "disposable worker join is not proven")
+		}
+		recordFakeDocker(root, fakeDockerRecord{Class: "admission_worker_absent", ContainerID: probe.ID, WorkerMode: "probe"})
+		fmt.Fprintln(os.Stdout, "PID COMMAND")
+		return true, 0
 	case args[0] == "rm":
 		if !equalStrings(args, []string{"rm", "--force", name}) && !equalStrings(args, []string{"rm", "--force", probe.ID}) {
 			return true, fakeDockerUnexpected(root, args, "invalid disposable removal")
@@ -89,6 +98,22 @@ func fakeAdmissionDocker(root string, args []string) (bool, int) {
 	default:
 		return true, fakeDockerUnexpected(root, args, "unsupported disposable command")
 	}
+}
+
+func moveFakeAdmissionWorker(root, id, from, to string) bool {
+	matched := false
+	withFakeDockerState(root, func(state *fakeDockerState) {
+		name := releaseDockerTargetName(state, id)
+		probe, ok := state.Containers[name]
+		if !ok || probe.ID != id || !probe.Running || probe.AdmissionKind != "startup" ||
+			probe.Labels["sh.swarm.admission-probe"] == "" || probe.AdmissionWorker != from {
+			return
+		}
+		probe.AdmissionWorker = to
+		state.Containers[name] = probe
+		matched = true
+	})
+	return matched
 }
 
 func fakeAdmissionCreate(root string, args []string) int {

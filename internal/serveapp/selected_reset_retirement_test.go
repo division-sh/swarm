@@ -192,6 +192,9 @@ func TestSelectedResetRepeatedEmptyTopologyStaysFencedBothStores(t *testing.T) {
 func TestSelectedResetFailedCandidateRemainsOwnedBothStores(t *testing.T) {
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
+			if backend == servedparity.BackendExplicitPostgres {
+				useDeclaredServePostgresTarget(t)
+			}
 			captured := captureSelectedResetSupervisor(t)
 			rt := startServedControlProofRuntime(t, backend)
 			supervisor := <-captured
@@ -252,6 +255,9 @@ func TestSelectedResetFailedCandidateRemainsOwnedBothStores(t *testing.T) {
 func TestSelectedResetFinalRetirementJoinsCurrentOwnerBothStores(t *testing.T) {
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
+			if backend == servedparity.BackendExplicitPostgres {
+				useDeclaredServePostgresTarget(t)
+			}
 			captured := captureSelectedResetSupervisor(t)
 			rt := startServedControlProofRuntime(t, backend)
 			supervisor := <-captured

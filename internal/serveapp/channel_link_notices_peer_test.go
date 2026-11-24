@@ -24,6 +24,7 @@ func TestChannelNoticeLinkRegisteredBothStores(t *testing.T) {
 		t.Run(string(backend), func(t *testing.T) {
 			h := prepareChannelAnchorPublicJourney(t, backend, "link-notice-token", false, 0, func(opts *cliapp.ServeOptions) {
 				opts.SourceRoot = filepath.Join(repoRootForTest(), "internal/serveapp/testdata/whatsapp-session-reply")
+				declarePrivateRegistrationState(t, opts.ConfigPath)
 			})
 			mux := http.NewServeMux()
 			mux.Handle("/", h.provider)

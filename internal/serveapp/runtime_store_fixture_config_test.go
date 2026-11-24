@@ -2,6 +2,7 @@ package serveapp
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -24,6 +25,21 @@ func recordServePostgresFixture(t *testing.T, dsn string) {
 	t.Helper()
 	installedServePostgresFixtures.Store(t.Name(), dsn)
 	t.Cleanup(func() { installedServePostgresFixtures.Delete(t.Name()) })
+}
+
+func declarePrivateRegistrationState(t *testing.T, configPath string) {
+	t.Helper()
+	directory, err := os.MkdirTemp(t.TempDir(), "deployment-state-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	config, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(configPath, []byte(withServeFixtureStateDirectory(t, string(config), directory)), 0o600); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // The injected constructor and the independent boot reader must inspect the
