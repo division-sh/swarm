@@ -176,8 +176,14 @@ func projectRunForkDeploymentFeeds(ctx context.Context, tx *sql.Tx, data *stored
 		if publicationDeclarations[pin.Declaration] && legacy[pin.Declaration] == nil {
 			continue
 		}
-		if legacy[pin.Declaration] == nil && plan.IsParkedDeploymentPin(pin) {
-			continue
+		if legacy[pin.Declaration] == nil {
+			parked, err := isParkedForkPinTx(ctx, tx, data, plan, pin)
+			if err != nil {
+				return nil, err
+			}
+			if parked {
+				continue
+			}
 		}
 		target, err := storedurabledata.RequirePinnedSourceTx(ctx, data, tx, forkRunID, targetBundle, pin.Declaration)
 		if err != nil || target.VersionID != pin.VersionID || target.SchemaDigest != pin.SchemaDigest {

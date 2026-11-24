@@ -736,8 +736,7 @@ func selectedRecoveryContinuationDisposition(state runlifecycle.State, record se
 }
 
 func requireParkedRecoveryPinsTx(ctx context.Context, tx *sql.Tx, record selectedRecoveryRecord, bundleHash string, sqlite bool, missing []durabledata.Pin) error {
-	if record.data == nil || record.Operation == nil || record.Operation.Request.PublicationID == "" ||
-		record.binding.ForkPoint.Kind != runfork.RunForkPointStateRevision {
+	if record.data == nil || record.Operation == nil {
 		return fmt.Errorf("selected recovery pin conflicts with fork run")
 	}
 	op := record.Operation.Request
@@ -745,13 +744,17 @@ func requireParkedRecoveryPinsTx(ctx context.Context, tx *sql.Tx, record selecte
 	if sqlite {
 		validate, resolve = runforkrevision.ValidateCompleteSQLite, resolveSQLiteRunForkRevisionPoint
 	}
-	req := runfork.RunForkPlanRequest{SourceRunID: op.SourceRunID, PublicationID: op.PublicationID, ResolvedPoint: op.ResolvedPoint}
+	req := runfork.RunForkPlanRequest{SourceRunID: op.SourceRunID, PublicationID: op.PublicationID, ResolvedPoint: op.ResolvedPoint, AtStart: op.AtStart}
 	plan, err := planRunForkSnapshot(ctx, tx, req, validate, resolve, !sqlite, record.data)
 	if err != nil {
 		return err
 	}
 	for _, pin := range missing {
-		if !plan.IsParkedDeploymentPin(pin) {
+		parked, err := isParkedForkPinTx(ctx, tx, record.data, plan, pin)
+		if err != nil {
+			return err
+		}
+		if !parked {
 			return fmt.Errorf("selected recovery pin conflicts with fork run")
 		}
 	}
@@ -963,6 +966,10 @@ func selectedForkOperationForRecoveryTx(ctx context.Context, tx *sql.Tx, binding
 }
 
 func loadSelectedForkRecoveryOperationTx(ctx context.Context, tx *sql.Tx, binding runfork.RunForkSelectedContractBinding, bundleHash string, postgres bool) (*runfork.ForkOperationRecord, error) {
+	return loadBoundSelectedForkOperationTx(ctx, tx, binding, &bundleHash, postgres)
+}
+
+func loadBoundSelectedForkOperationTx(ctx context.Context, tx *sql.Tx, binding runfork.RunForkSelectedContractBinding, currentBundle *string, lock bool) (*runfork.ForkOperationRecord, error) {
 	var operationID string
 	var currentHash sql.NullString
 	err := tx.QueryRowContext(ctx, `SELECT CAST(operation.operation_id AS TEXT), run.bundle_hash
@@ -974,10 +981,10 @@ func loadSelectedForkRecoveryOperationTx(ctx context.Context, tx *sql.Tx, bindin
 	if err != nil {
 		return nil, fmt.Errorf("load permanent selected fork operation: %w", err)
 	}
-	if !currentHash.Valid || currentHash.String != bundleHash {
+	if !currentHash.Valid || currentBundle != nil && currentHash.String != *currentBundle {
 		return nil, fmt.Errorf("selected fork recovery source differs from its current run")
 	}
-	record, found, err := loadForkOperationByIDTx(ctx, tx, operationID, postgres)
+	record, found, err := loadForkOperationByIDTx(ctx, tx, operationID, lock)
 	if err != nil {
 		return nil, err
 	}
