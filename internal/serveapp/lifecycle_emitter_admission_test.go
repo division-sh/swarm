@@ -45,6 +45,7 @@ func testServedLifecycleEmitterDanglingAdmission(t *testing.T, backend servedpar
 			unsetStoreSelectorEnv(t)
 			config := ""
 			if backend == servedparity.BackendExplicitPostgres {
+				useDeclaredServePostgresTarget(t)
 				installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle { return serveRuntimeWorkspaceStub{} })
 				config = writeServeRuntimeTestConfig(t)
 			} else {

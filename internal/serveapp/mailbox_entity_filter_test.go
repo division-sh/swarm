@@ -30,6 +30,9 @@ type servedEntityFilterList struct {
 
 func startServedMailboxEntityFilterProof(t *testing.T, backend servedparity.Backend) (servedControlProofRuntime, []string, []string, func(map[string]any) servedEntityFilterList, map[string]bool) {
 	t.Helper()
+	if backend == servedparity.BackendExplicitPostgres {
+		useDeclaredServePostgresTarget(t)
+	}
 	rt := startServedControlProofRuntimeWithFixture(t, backend, func(t *testing.T) string {
 		credentialPath := filepath.Join(t.TempDir(), "credentials.json")
 		t.Setenv("SWARM_CREDENTIALS_FILE", credentialPath)
