@@ -45,7 +45,7 @@ func issue642RecurringTimerSource(t *testing.T) string {
 
 func issue642RetainedRecurringTimerFork(t *testing.T, backend string) {
 	t.Helper()
-	_, start := issue2564ServeHarness(t, backend, issue642RecurringTimerSource(t), false)
+	_, start := issue2564ServeHarnessAtLocation(t, backend, issue642RecurringTimerSource(t), false, "", true)
 	process, rt := start()
 	t.Cleanup(func() {
 		if code := process.stop(); code != 0 {

@@ -66,7 +66,7 @@ func TestIssue2564H2SynchronizedBranchesBothStores(t *testing.T) {
 			root := issue2564H2Source(t)
 			keys := issue2564H2DeclarationKeys(t, root)
 			gate := newIssue2564H2BranchGate()
-			opts, start := issue2564ServeHarness(t, backend, root, false)
+			opts, start := issue2564ServeHarnessAtLocation(t, backend, root, false, "", true)
 			opts.TestLifecycleProbe = gate
 			process, served := start()
 			t.Cleanup(func() {

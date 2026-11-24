@@ -33,7 +33,7 @@ import (
 
 func TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores(t *testing.T) {
 	for _, scenario := range []providerAliasScenario{
-		{name: "raw-connected", rawConnected: true, rootObserver: true, alphaReceiver: "alpha-receiver", declaredTarget: true},
+		{name: "raw-connected", rawConnected: true, rootObserver: true, alphaReceiver: "alpha-receiver"},
 		{name: "raw-connected-only", rawConnected: true, noLocalConsumers: true, alphaReceiver: "alpha-receiver"},
 		{name: "consumerless-raw", noLocalConsumers: true, alphaReceiver: "alpha-receiver"},
 		{name: "consumerless-ack-loss", noLocalConsumers: true, ackLoss: true, alphaReceiver: "alpha-receiver"},
@@ -73,7 +73,7 @@ func runProviderAliasAuthorityScenario(t *testing.T, scenario providerAliasScena
 				t.Cleanup(func() { projectRuntimePersistenceForServe = previous })
 			}
 			root := writeProviderAliasAuthorityFixture(t, scenario)
-			rt := startWorkspaceGatewayProofRuntimeWithPosture(t, backend, root, "", nil, "127.0.0.1:0", executionposture.Live, scenario.declaredTarget)
+			rt := startWorkspaceGatewayProofRuntimeWithPosture(t, backend, root, "", nil, "127.0.0.1:0", executionposture.Live, true)
 			var wantStartup, wantBusiness int32
 			if scenario.agents {
 				wantStartup, wantBusiness = 1, 4 // Two raw and two normalized text deliveries.
@@ -272,7 +272,6 @@ func requireIndependentStandingRootTrees(t *testing.T, rt servedWorkspaceProofRu
 
 type providerAliasScenario struct {
 	name                  string
-	declaredTarget        bool
 	rawConnected          bool
 	rootObserver          bool
 	rootProvider          bool

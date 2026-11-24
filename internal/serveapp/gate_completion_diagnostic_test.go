@@ -17,7 +17,7 @@ func TestServedGateCompletionInterruptionDiagnosticOnBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, cut := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/interrupted_%t", backend, cut), func(t *testing.T) {
-				if backend == "postgres" && cut {
+				if backend == "postgres" {
 					useDeclaredServePostgresTarget(t)
 				}
 				opts, start := gateCompletionHarness(t, backend, canonicalrouting.CopyGateCompletionDiagnostic(t))

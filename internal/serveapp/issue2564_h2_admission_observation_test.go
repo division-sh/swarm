@@ -42,7 +42,7 @@ func TestIssue2564H2AcknowledgmentPrecedesAdmissionObservationBothStores(t *test
 			}
 			unblock := sync.OnceFunc(func() { close(gate.release) })
 			defer unblock()
-			opts, start := issue2564ServeHarness(t, backend, issue2564H2Source(t), false)
+			opts, start := issue2564ServeHarnessAtLocation(t, backend, issue2564H2Source(t), false, "", true)
 			opts.TestLifecycleProbe = gate
 			var owner *worklifetime.Process
 			opts.TestRuntimeReadyHook = func(rt *runtimepkg.Runtime) { owner = rt.Options.ProcessWorkOwner }

@@ -76,7 +76,7 @@ outputs:
 
 func issue642SustainedRecurringTimerFork(t *testing.T, backend string) {
 	t.Helper()
-	_, start := issue2564ServeHarness(t, backend, issue642SustainedTimerSource(t), false)
+	_, start := issue2564ServeHarnessAtLocation(t, backend, issue642SustainedTimerSource(t), false, "", true)
 	process, rt := start()
 	runtime := servedTestProcessRuntime(t, process)
 	t.Cleanup(func() {
