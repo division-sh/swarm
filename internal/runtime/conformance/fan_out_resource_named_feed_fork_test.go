@@ -218,6 +218,40 @@ func proveSelectedNamedFeedFork(t *testing.T, backend, variant string) {
 		t.Fatalf("named-only work or source custody changed: child feeds=%d named settled=%d other events=%d source feeds=%d children=%v", len(childIntents), namedRows, otherEvents, sourceFeeds, children)
 	}
 	requireNamedFeedDelivery(t, f, result.ForkRunID, childMemberID)
+	if variant == "legacy_recovery" {
+		requireDefaultDescendantRetainsParking(t, f, owner, result.ForkRunID, named, other)
+	}
+}
+
+func requireDefaultDescendantRetainsParking(t *testing.T, f *deploymentResourceFixture, owner runforkexecution.SelectedContractExecutionOwner, sourceID string, named, other runfork.RunForkFanOutObligation) {
+	t.Helper()
+	bundleHash := f.runtime.sourceArtifactFact.BundleHash()
+	data := f.selected.(interface {
+		LoadPinnedSource(context.Context, string, string, durabledata.DeclarationRef) (durabledata.PinnedSource, error)
+	})
+	for depth := 0; depth < 2; depth++ {
+		pin, err := data.LoadPinnedSource(f.ctx, sourceID, bundleHash, other.Intent.Source.Declaration)
+		if err != nil || pin.VersionID != other.Intent.Source.VersionID || pin.RowCount != 1 {
+			t.Fatalf("descendant source must retain the real parked legacy pin: %+v err=%v", pin, err)
+		}
+		pauseDeploymentFixtureRun(t, f, sourceID)
+		result, refused := deploymentForkRPC(t, f.ctx, deploymentForkServer(t, f, owner), map[string]any{
+			"source_run_id": sourceID, "idempotency_key": uuid.NewString(),
+		})
+		if len(refused) != 0 || result.ForkRunID == "" {
+			t.Fatalf("default descendant at depth %d: %+v refusal=%s", depth, result, refused)
+		}
+		feedID := func(declaration durabledata.DeclarationRef) string {
+			return (durabledata.DeploymentFeed{RunID: result.ForkRunID, Declaration: declaration}).PublicationID()
+		}
+		intents := namedFeedInventory(t, f, result.ForkRunID)
+		kept := intents[feedID(named.Intent.Source.Declaration)]
+		if _, resurrected := intents[feedID(other.Intent.Source.Declaration)]; resurrected || len(intents) != 1 ||
+			kept.Cursor != 1 || kept.Status != fanoutobligation.StatusClosed {
+			t.Fatalf("default descendant must retain the settled legacy feed, not resurrect the parked one: depth=%d feeds=%+v", depth, intents)
+		}
+		sourceID = result.ForkRunID
+	}
 }
 
 func namedFeedInventory(t *testing.T, f *deploymentResourceFixture, runID string) map[string]fanoutobligation.IntentReadback {
