@@ -34,6 +34,7 @@ const (
 	fakeDockerHelperEnv            = "RELEASE_E2E_DOCKER_HELPER"
 	fakeDockerRootEnv              = "RELEASE_E2E_DOCKER_ROOT"
 	fakeDockerMCPEmitGateEnv       = "RELEASE_E2E_MCP_EMIT_GATE"
+	releaseDisposableReadStateEnv  = "RELEASE_E2E_DISPOSABLE_READ_STATE"
 	releaseE2EOAuthToken           = "release-e2e-oauth-value"
 	releaseE2ERawMCPURL            = "http://host.docker.internal:8082/mcp"
 	releaseE2EHostMCPURL           = "http://127.0.0.1:8082/mcp"
@@ -1319,11 +1320,11 @@ func validateReleaseClaudeArgs(args []string, startup, disposable bool) error {
 	wantTools := releaseE2ELiveAllowedTools()
 	if startup {
 		wantTools = releaseE2EStartupAllowedTools()
+		if disposable && (os.Getenv(releaseDisposableReadStateEnv) == "1" || os.Getenv(releaseResourceReadEnv) == "1") {
+			wantTools = releaseE2EDisposableReadStateTools()
+		}
 	}
 	if os.Getenv(releaseResourceReadEnv) == "1" {
-		if startup && disposable {
-			wantTools = append(wantTools, "mcp__runtime-tools__read_state")
-		}
 		if resumed {
 			// A directive has no triggering state-read bindings. Resource and
 			// explicitly granted emit/notification tools remain admitted.
