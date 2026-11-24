@@ -921,6 +921,12 @@ func requireChangedStandingColdStartMatrix(t *testing.T, opts cliapp.ServeOption
 			mutation.apply(t)
 			before := prepare(t)
 			if len(mutation.wantStrand) != 0 {
+				if opts.StoreMode == "postgres" {
+					// Keep the declaration's native refusal on the Run return path.
+					original := buildStoresForServe
+					buildStoresForServe = buildStores
+					t.Cleanup(func() { buildStoresForServe = original })
+				}
 				ready := make(chan struct{}, 1)
 				refused := opts
 				refused.TestRuntimeReadyHook = func(*runtimepkg.Runtime) { ready <- struct{}{} }

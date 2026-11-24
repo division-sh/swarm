@@ -1463,7 +1463,15 @@ func fakeDockerWorker(root string, args []string) int {
 		return fakeDockerUnexpected(root, args, "invalid native worker gateway")
 	}
 	if gateway.URL != "" {
-		endpoint, err := hostReachableMCPURL(gateway.URL, container.Labels["sh.swarm.admission-probe"] != "")
+		observation := container.Labels["sh.swarm.admission-probe"] != ""
+		if observation && mode == "probe" {
+			// The disposable worker receives an origin, before MCP path resolution.
+			if origin, err := url.Parse(gateway.URL); err == nil && origin.Path == "" && origin.RawPath == "" {
+				origin.Path = "/mcp"
+				gateway.URL = origin.String()
+			}
+		}
+		endpoint, err := hostReachableMCPURL(gateway.URL, observation)
 		if err != nil {
 			return fakeDockerUnexpected(root, args, err.Error())
 		}
