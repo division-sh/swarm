@@ -743,9 +743,10 @@ func TestRunServeRuntimeEventPublishTargetRouteServedPathDefaultSQLite(t *testin
 }
 
 func TestRunServeRuntimeEventPublishTargetRouteServedPathPostgres(t *testing.T) {
-	_, db, _ := installServeRuntimePostgresTestStoresForDatabase(t, func(cliapp.WorkspaceMountSources) cliapp.ServeWorkspaceLifecycle {
+	useDeclaredServePostgresTarget(t)
+	_, db, _ := installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
-	}, servePostgresFixtureOptions{openFromDeclaration: true})
+	})
 	sourceRoot := writeServedEventPublishTargetRouteFixture(t)
 	bundleHash := servedEventPublishFixtureBundleHash(t, sourceRoot)
 	probe := lifecycletest.New(t, lifecycletest.WithTimeout(servedEventPublishLifecycleProbeWaitTimeout))
@@ -6914,9 +6915,10 @@ func Test2376DirectoryBootUsesExactSelectedStoreSource(t *testing.T) {
 					t.Fatalf("close seeded SQLite selected store: %v", err)
 				}
 			case storebackend.BackendPostgres:
-				_, _, selected := installServeRuntimePostgresTestStoresForDatabase(t, func(cliapp.WorkspaceMountSources) cliapp.ServeWorkspaceLifecycle {
+				useDeclaredServePostgresTarget(t)
+				_, _, selected := installServeRuntimePostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 					return serveRuntimeWorkspaceStub{bundleScopes: &workspaceBundleScopes}
-				}, servePostgresFixtureOptions{useTemplate: true, openFromDeclaration: true})
+				})
 				storetest.BootstrapPostgresRuntimeStore(t, selected)
 				opts.ConfigPath = writeStoreBackendRuntimeConfig(t, backend.String(), "")
 				if _, err := selected.EnsureSourceArtifactWithData(serveFixtureProcessContext(t, context.Background(), selected), bundle.SourceArtifact, catalog); err != nil {
@@ -7092,7 +7094,7 @@ func installServeRuntimeEmptyPostgresTestStores(t *testing.T, workspaceFactory f
 			return workspaceFactory()
 		}
 	}
-	return installServeRuntimePostgresTestStoresForDatabase(t, configured, servePostgresFixtureOptions{})
+	return installServeRuntimePostgresTestStoresForDatabase(t, configured, false)
 }
 
 func stubServeRuntimeWorkspaceLifecycle(t *testing.T) {
@@ -7112,22 +7114,17 @@ func stubServeRuntimeWorkspaceLifecycleWithBundleScopes(t *testing.T, bundleScop
 
 func installServeRuntimePostgresTestStoresWithWorkspaceFactory(t *testing.T, workspaceFactory func(cliapp.WorkspaceMountSources) cliapp.ServeWorkspaceLifecycle) (string, *sql.DB, *store.PostgresStore) {
 	t.Helper()
-	return installServeRuntimePostgresTestStoresForDatabase(t, workspaceFactory, servePostgresFixtureOptions{useTemplate: true})
+	return installServeRuntimePostgresTestStoresForDatabase(t, workspaceFactory, true)
 }
 
-type servePostgresFixtureOptions struct {
-	useTemplate         bool
-	openFromDeclaration bool
-}
-
-func installServeRuntimePostgresTestStoresForDatabase(t *testing.T, workspaceFactory func(cliapp.WorkspaceMountSources) cliapp.ServeWorkspaceLifecycle, opts servePostgresFixtureOptions) (string, *sql.DB, *store.PostgresStore) {
+func installServeRuntimePostgresTestStoresForDatabase(t *testing.T, workspaceFactory func(cliapp.WorkspaceMountSources) cliapp.ServeWorkspaceLifecycle, useTemplate bool) (string, *sql.DB, *store.PostgresStore) {
 	t.Helper()
 	oldBuildStores := buildStoresForServe
 	oldWorkspaceLifecycle := cliapp.ConfiguredWorkspaceLifecycleForServe
 	var dsn string
 	var db *sql.DB
 	var cleanup func()
-	if opts.useTemplate {
+	if useTemplate {
 		dsn, db, cleanup = testutil.StartPostgres(t)
 	} else {
 		dsn, db, cleanup = testutil.StartEmptyPostgres(t)
@@ -7139,14 +7136,11 @@ func installServeRuntimePostgresTestStoresForDatabase(t *testing.T, workspaceFac
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
 	t.Cleanup(func() { _ = storetest.DatabaseForTest(runtimePG).Close() })
+	_, useDeclaration := declaredServePostgresTargets.Load(t)
 	buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config, bootCheck ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {
-		openDSN := dsn
-		if opts.openFromDeclaration && selection.Backend == storebackend.BackendPostgres && firstBootCheckInput(bootCheck) != nil {
-			var err error
-			openDSN, err = postgresDSNFromConfig(ctx, cfg.Database)
-			if err != nil {
-				return nil, err
-			}
+		openDSN, err := checkedPostgresFixtureDSN(ctx, cfg, dsn, useDeclaration && selection.Backend == storebackend.BackendPostgres, bootCheck)
+		if err != nil {
+			return nil, err
 		}
 		owner := openSelectedPostgresOwner(t, openDSN, storetest.DatabaseForTest(runtimePG), cfg, bootCheck...)
 		storetest.BootstrapPostgresRuntimeStore(t, runtimePG)
