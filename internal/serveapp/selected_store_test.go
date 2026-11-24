@@ -60,6 +60,15 @@ func firstBootCheckInput(input []*selectedStoreBootCheck) *selectedStoreBootChec
 	return input[0]
 }
 
+// Only the checked open consumes the opt-in; unchecked opens keep the allocated DSN.
+func firstCheckedPostgresFixtureDSN(ctx context.Context, cfg *config.Config, allocated string, first *bool, checks []*selectedStoreBootCheck) (string, error) {
+	if !*first || firstBootCheckInput(checks) == nil {
+		return allocated, nil
+	}
+	*first = false
+	return postgresDSNFromConfig(ctx, cfg.Database)
+}
+
 func registerSelectedStoreTestDatabase(t testing.TB, owner *selectedStoreOwner, db *sql.DB) {
 	t.Helper()
 	if owner == nil || db == nil {

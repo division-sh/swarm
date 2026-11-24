@@ -102,7 +102,7 @@ func TestContextCompactionPreservesMemoryAcrossRestartBothStores(t *testing.T) {
 					APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", TestLifecycleProbe: probe}
 				storeConfig := fmt.Sprintf("store:\n  backend: sqlite\n  sqlite:\n    path: %s\n", filepath.Join(t.TempDir(), "store.db"))
 				if backend != servedparity.BackendDefaultSQLite {
-					configureCompletion2270PostgresFixture(t)
+					configureCompletion2270PostgresFixture(t, scenario.name == "summary")
 					opts.StoreMode, opts.StoreModeSet = "postgres", true
 					storeConfig = ""
 				}
