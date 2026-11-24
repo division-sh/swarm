@@ -41,6 +41,11 @@ import (
 // This entry exists only in a go test -c binary. The parent owns retained roots
 // and credentials across children; production swarm cannot parse this input.
 func TestOwnedMockLifecycleProcessEntry(t *testing.T) {
+	runOwnedMockLifecycleProcessEntry(t, nil)
+}
+
+func runOwnedMockLifecycleProcessEntry(t *testing.T, observer lifecycleprobe.Observer) {
+	t.Helper()
 	if raw := os.Getenv("SWARM_TEST_INTERNAL_GOLDEN_CRASH_OBSERVATION"); raw != "" {
 		if err := observeGoldenCrashCut(t.Context(), raw, os.Stdout); err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -89,6 +94,7 @@ func TestOwnedMockLifecycleProcessEntry(t *testing.T) {
 	opts.Output, opts.ErrorOutput = os.Stdout, os.Stderr
 	opts.NoColor, opts.SelfCheck = true, true
 	opts.ShutdownGrace = request.ShutdownGrace
+	opts.TestLifecycleProbe = observer
 	opts.PublicWebhookBaseURL, opts.PublicWebhookListen = request.PublicWebhookBaseURL, request.PublicWebhookListen
 	if request.PublicWebhookFD != 0 {
 		if request.PublicWebhookFD != 3 || !request.Live || request.PublicWebhookListen == "" {

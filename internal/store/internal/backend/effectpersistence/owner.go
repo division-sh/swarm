@@ -38,6 +38,7 @@ type providerDrainDeliveryOwner interface {
 	ValidateSelectedProviderOriginTx(context.Context, *sql.Tx, runtimedelivery.Claim, runtimeagentidentity.Identity, runtimedelivery.ExecutionAuthority) error
 	ValidateSelectedOriginExecutionTx(context.Context, *sql.Tx, runtimedelivery.Claim, string) error
 	ClaimedAgentFlowOriginsTx(context.Context, *sql.Tx, runtimeflowidentity.RunScopedFlowInstance) ([]storedelivery.ClaimedFlowTurn, error)
+	UncalledStartupClaimsTx(context.Context, *sql.Tx, string, bool) ([]storedelivery.UncalledStartupClaim, error)
 	ValidateUnstartedClaimOwnerTx(context.Context, *sql.Tx, runtimedelivery.Claim, runtimeflowidentity.RunScopedFlowInstance, string) error
 	QueuedAgentFlowSnapshotsTx(context.Context, *sql.Tx, runtimeflowidentity.RunScopedFlowInstance) ([]runtimedelivery.Snapshot, error)
 	CancelQueuedAgentTx(context.Context, *mutationprotocol.Attempt, runtimedelivery.Snapshot) (runtimedelivery.Snapshot, error)
