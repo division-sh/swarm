@@ -75,6 +75,9 @@ func TestServedConstructedDecisionCardDeferralBothStores(t *testing.T) {
 	for _, backend := range servedparity.RequiredBackends {
 		t.Run(string(backend), func(t *testing.T) {
 			configureStandingLifecycleCredentials(t)
+			if backend == servedparity.BackendExplicitPostgres {
+				useDeclaredServePostgresTarget(t)
+			}
 			rt := startServedControlProofRuntimeWithFixture(t, backend, func(t *testing.T) string {
 				root := canonicalrouting.CopyRootIngressServedDecisionControl(t)
 				if _, err := packartifact.ImportEmbeddedPack(root, "telegram", packfixture.EmbeddedBase(t)); err != nil {

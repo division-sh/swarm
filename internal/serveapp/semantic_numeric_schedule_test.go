@@ -36,6 +36,7 @@ func TestGenericScheduleSemanticPayloadExecutionParity(t *testing.T) {
 			dialect := "sqlite"
 			if backend == servedparity.BackendExplicitPostgres {
 				dialect = "postgres"
+				useDeclaredServePostgresTarget(t)
 				_, db, _ = installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle { return serveRuntimeWorkspaceStub{} })
 				opts.ConfigPath = writeServeRuntimeTestConfig(t)
 				opts.StoreMode, opts.StoreModeSet = "postgres", true
