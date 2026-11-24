@@ -42,7 +42,7 @@ func TestIssue642ArmedTimerKeepsDueAcrossSelectedDelayChangeBothStores(t *testin
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, delay := range []string{"1ms", "1h"} {
 			t.Run(backend+"/"+delay, func(t *testing.T) {
-				issue642RetainedOrdinaryTimerFork(t, backend, false, delay)
+				issue642RetainedOrdinaryTimerFork(t, backend, true, delay)
 			})
 		}
 	}

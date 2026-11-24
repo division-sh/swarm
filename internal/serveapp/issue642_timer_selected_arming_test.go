@@ -97,7 +97,7 @@ func issue642NewlyArmedSelectedTimer(t *testing.T, backend, delay string) {
 		t.Fatalf("new-arm proof requires a changed positive selected delay: %v", err)
 	}
 	sourceRoot, targetRoot := issue642TimerContinuationSource(t), issue642NewArmTarget(t, delay)
-	opts, start := issue2564ServeHarness(t, backend, sourceRoot, false)
+	opts, start := issue2564ServeHarnessAtLocation(t, backend, sourceRoot, false, "", true)
 	opts.SourceRoot = targetRoot
 	targetProcess, target := start()
 	if code := targetProcess.stop(); code != 0 {

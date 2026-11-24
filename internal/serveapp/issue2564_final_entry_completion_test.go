@@ -41,7 +41,7 @@ func TestIssue2564H2FinalEntryCompletionOrderingBothStores(t *testing.T) {
 
 func issue2564H2FinalEntryCompletion(t *testing.T, backend string, acceptedTimer bool) {
 	t.Helper()
-	opts, start := issue2564ServeHarness(t, backend, canonicalrouting.CopyIssue2564FinalEntryCompletion(t), false)
+	opts, start := issue2564ServeHarnessAtLocation(t, backend, canonicalrouting.CopyIssue2564FinalEntryCompletion(t), false, "", true)
 	probe := lifecycleprobe.New()
 	held := make(chan string, 1)
 	release := make(chan struct{})

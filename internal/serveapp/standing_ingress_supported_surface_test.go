@@ -427,7 +427,11 @@ func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndRepl
 	oldBuildStores := buildStoresForServe
 	oldWorkspace := cliapp.ConfiguredWorkspaceLifecycleForServe
 	buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config, bootCheck ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {
-		owner := openSelectedPostgresOwner(t, dsn, storetest.DatabaseForTest(runtimePG), cfg, bootCheck...)
+		target, err := checkedPostgresFixtureDSN(ctx, cfg, dsn, true, bootCheck)
+		if err != nil {
+			return nil, err
+		}
+		owner := openSelectedPostgresOwner(t, target, storetest.DatabaseForTest(runtimePG), cfg, bootCheck...)
 		storetest.BootstrapPostgresRuntimeStore(t, runtimePG)
 		return owner, nil
 	}
