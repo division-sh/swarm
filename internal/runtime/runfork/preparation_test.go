@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/llm/selection"
@@ -38,6 +39,47 @@ func TestSelectedPreparationFingerprintWithoutInheritedWitness(t *testing.T) {
 	got, err := SelectedPreparationPlanFingerprint(plan, frontier, planning, declarations)
 	if err != nil || got != hex.EncodeToString(digest[:]) {
 		t.Fatalf("absent inherited witness changed the prior preparation encoding: %s %v", got, err)
+	}
+}
+
+func TestOrdinaryReplayCompletionPreparationBindsOnlyFrontierEvidence(t *testing.T) {
+	event := inheritedWitnessSelector(t, uuid.NewString(), eventtest.ConcreteTemplateRoutingSource("worker", "worker/one", uuid.NewString()))
+	plan := inheritedWitnessPlan(t, event.RunID(), event)
+	frontier := RunForkContractFrontierAdmission{FrontierEvents: []RunForkContractFrontierEvent{{SourceEventID: event.ID()}}}
+	row := AncestorDeliveryCompletion{
+		SourceRunID: uuid.NewString(), Point: RunForkPoint{Kind: RunForkPointEvent, Revision: 3, EventID: uuid.NewString()},
+		EventID: uuid.NewString(), DeliveryID: uuid.NewString(), Route: events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(identitytest.RootNode(t, "consumer"))},
+	}
+	with := func(rows ...AncestorDeliveryCompletion) RunForkPlan {
+		return plan.WithOrdinaryReplayAncestorCompletions(map[string]func() ([]AncestorDeliveryCompletion, error){
+			event.ID(): func() ([]AncestorDeliveryCompletion, error) { return rows, nil },
+		})
+	}
+	digest := func(p RunForkPlan, f RunForkContractFrontierAdmission) string {
+		t.Helper()
+		value, err := SelectedPreparationPlanFingerprint(p, f, RunForkSelectedContractRecipientPlanning{}, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return value
+	}
+	other := row
+	other.DeliveryID = uuid.NewString()
+	if digest(plan, frontier) != digest(with(), frontier) || digest(plan, RunForkContractFrontierAdmission{}) != digest(with(row), RunForkContractFrontierAdmission{}) {
+		t.Fatal("no applicable completion changed the selected preparation identity")
+	}
+	if digest(plan, frontier) == digest(with(row), frontier) || digest(with(row, other), frontier) != digest(with(other, row), frontier) {
+		t.Fatal("selected preparation did not bind the canonical exact completion set")
+	}
+	other.Point.Revision++
+	other.DeliveryID = row.DeliveryID
+	if digest(with(row), frontier) == digest(with(other), frontier) {
+		t.Fatal("crossed ancestor revision did not change the preparation identity")
+	}
+	changed := with(row)
+	changed.ForkPoint.Revision++
+	if _, err := changed.OrdinaryReplayAncestorCompletions(event.ID()); err == nil {
+		t.Fatal("completion reader accepted a different immediate cut")
 	}
 }
 

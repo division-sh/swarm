@@ -8,13 +8,16 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/mutationlog"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
+	lifecycleowner "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
 	storedurabledata "github.com/division-sh/swarm/internal/store/internal/durabledata"
 	"github.com/google/uuid"
 )
@@ -357,7 +360,155 @@ func planRunForkSnapshotWithActivityOrigins(
 	plan.UnsupportedBlockers = plan.ReplayResumeAdmission.UnsupportedBlockers
 	plan.UnsupportedBlockerCount = len(plan.UnsupportedBlockers)
 	plan.ExecutionReady = plan.ReplayResumeAdmission.StateOnlyExecutionReady || plan.ReplayResumeAdmission.DeliveryEventReplayReady
-	return plan, nil
+	return retainOrdinaryReplayAncestorCompletions(ctx, tx, plan, snapshot), nil
+}
+
+func retainOrdinaryReplayAncestorCompletions(ctx context.Context, tx *sql.Tx, plan runfork.RunForkPlan, snapshot *runForkRevisionSnapshot) runfork.RunForkPlan {
+	selected := make(map[string]bool)
+	for _, row := range snapshot.Events {
+		if row.EventClass == string(events.EventAdmissionSelectedForkReplay) {
+			selected[row.EventID] = true
+		}
+	}
+	if len(selected) == 0 {
+		return plan
+	}
+	readers := make(map[string]func() ([]runfork.AncestorDeliveryCompletion, error))
+	cut, cutErr := newRunForkReplayCut(snapshot)
+	parents := make(map[string]ordinaryReplayParent)
+	for _, work := range plan.PendingWork {
+		id := work.EventID
+		if !selected[id] || readers[id] != nil || work.DeliveryID == "" || !ordinaryReplayCompletionCandidate(plan, work) {
+			continue
+		}
+		rows, err := readOrdinaryReplayAncestorCompletions(ctx, tx, cut, cutErr, id, parents)
+		// The admission consumer, not the public plan, owns use of this read.
+		readers[id] = func() ([]runfork.AncestorDeliveryCompletion, error) { return rows, err }
+	}
+	return plan.WithOrdinaryReplayAncestorCompletions(readers)
+}
+
+func ordinaryReplayCompletionCandidate(plan runfork.RunForkPlan, work runfork.RunForkPendingWork) bool {
+	switch work.Classification {
+	case runfork.RunForkPendingClassificationPending, runfork.RunForkPendingClassificationInProgress, runfork.RunForkPendingClassificationFailedRetryable:
+	default:
+		return false
+	}
+	id := work.EventID
+	if _, named := runfork.RunForkSelectedContractPlatformRuntimeOwner(work.EventName); named || work.RetainsTerminalBarrierHistory() {
+		return false
+	}
+	if _, named := plan.ExecutionInputPublication(id); named {
+		return false
+	}
+	if _, named := plan.HistoricalJoinPublication(id); named {
+		return false
+	}
+	if _, named, err := plan.PendingJoinOccurrence(id); named || err != nil {
+		return false
+	}
+	if _, named, err := plan.FanOutPendingRecipientPartition(id); named || err != nil {
+		return false
+	}
+	if _, named, err := plan.RequestPendingRecipientPartition(id); named || err != nil {
+		return false
+	}
+	reply, err := plan.HistoricalReplyReturn(id)
+	return reply == nil && err == nil
+}
+
+type ordinaryReplayParent struct {
+	binding runfork.RunForkSelectedContractBinding
+	cut     runForkReplayCut
+	pending []runfork.RunForkPendingWork
+}
+
+func loadOrdinaryReplayParent(ctx context.Context, tx *sql.Tx, child string) (ordinaryReplayParent, error) {
+	var out ordinaryReplayParent
+	binding, err := loadRunForkSelectedContractBinding(ctx, tx, child)
+	if err != nil {
+		return out, err
+	}
+	if err := binding.ValidateExecutionBinding(child); err != nil {
+		return out, err
+	}
+	out.binding = binding
+	if binding.ForkPoint.Kind == runfork.RunForkPointRunStart {
+		return out, nil // The exclusive-start first input is a named path.
+	}
+	origin, err := lifecycleowner.ReadImmutableRunOriginTx(ctx, tx, child)
+	if err != nil {
+		return out, err
+	}
+	point := binding.ForkPoint
+	if origin.Kind() != runlifecycle.OriginForkMaterialization || origin.SourceRunID() != binding.SourceRunID ||
+		origin.ForkRevision() != point.Revision || origin.SourceEventID() != point.EventID || origin.ForkPointKind() != point.Kind {
+		return out, fmt.Errorf("selected input lineage differs from exact source/child/event binding")
+	}
+	parent, err := loadRunForkPointSnapshot(ctx, tx, binding.SourceRunID, point)
+	if err != nil {
+		return out, err
+	}
+	if err := validateCapturedOriginBoundary(origin, parent); err != nil {
+		return out, err
+	}
+	out.cut, err = newRunForkReplayCut(parent)
+	if err != nil {
+		return out, err
+	}
+	out.pending, err = loadRunForkPendingWorkFromRevision(parent)
+	return out, err
+}
+
+func readOrdinaryReplayAncestorCompletions(ctx context.Context, tx *sql.Tx, cut runForkReplayCut, cutErr error, id string, parents map[string]ordinaryReplayParent) ([]runfork.AncestorDeliveryCompletion, error) {
+	if cutErr != nil {
+		return nil, cutErr
+	}
+	event, err := cut.event(id)
+	if err != nil {
+		return nil, err
+	}
+	seen := make(map[string]bool)
+	var rows []runfork.AncestorDeliveryCompletion
+	for {
+		lineage, selected := event.SelectedForkLineage()
+		if !selected {
+			return rows, nil
+		}
+		child := event.RunID()
+		if seen[child] {
+			return nil, fmt.Errorf("captured construction has cyclic immutable lineage")
+		}
+		seen[child] = true
+		parent, ok := parents[child]
+		if !ok {
+			parent, err = loadOrdinaryReplayParent(ctx, tx, child)
+			if err != nil {
+				return nil, err
+			}
+			parents[child] = parent
+		}
+		if parent.binding.ForkPoint.Kind == runfork.RunForkPointRunStart {
+			return nil, nil
+		}
+		previous, err := parent.cut.event(lineage.SourceEventID())
+		if err != nil {
+			return nil, err
+		}
+		input, err := runfork.InputPublicationFromEvent(previous)
+		if _, named := input.Event(); err != nil || named {
+			return nil, err
+		}
+		if err := requireSelectedPublicationCutLineage(ctx, tx, parent.binding, event, previous, nil); err != nil {
+			return nil, err
+		}
+		for _, work := range parent.pending {
+			if work.EventID == previous.ID() && work.DeliveryID != "" && work.Classification == runfork.RunForkPendingClassificationDeliveredCompleted {
+				rows = append(rows, runfork.AncestorDeliveryCompletion{SourceRunID: parent.cut.runID, Point: parent.binding.ForkPoint, EventID: work.EventID, DeliveryID: work.DeliveryID, Route: work.DeliveryRoute})
+			}
+		}
+		event = previous
+	}
 }
 
 func (a runForkSourceStateAdmission) activityRequestOriginsAtCut(ctx context.Context, tx *sql.Tx) ([]semanticview.ActivityRequestOrigin, error) {

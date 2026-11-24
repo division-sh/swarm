@@ -107,6 +107,29 @@ func TestAdmitContractFrontier_SelectedContractChangesRecipients(t *testing.T) {
 	if len(recipients) != 1 || recipients[0].Recipient.ID() != gotB {
 		t.Fatalf("completed source slot excluded an unmatched selected recipient: %+v", recipients)
 	}
+	plan.PendingWork = plan.PendingWork[:1]
+	plan.PendingWorkCount--
+	plan.ForkPoint.Kind, plan.ForkPoint.Revision = runfork.RunForkPointEvent, 2
+	plan, err = plan.WithHistoricalEvents(2, []string{completed.EventID}).WithHistoricalRouteSelectors(2, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan = plan.WithOrdinaryReplayAncestorCompletions(map[string]func() ([]runfork.AncestorDeliveryCompletion, error){
+		completed.EventID: func() ([]runfork.AncestorDeliveryCompletion, error) {
+			return []runfork.AncestorDeliveryCompletion{{
+				SourceRunID: uuid.NewString(), Point: runfork.RunForkPoint{Kind: runfork.RunForkPointEvent, Revision: 3, EventID: uuid.NewString()},
+				EventID: uuid.NewString(), DeliveryID: completed.DeliveryID, Route: completed.DeliveryRoute,
+			}}, nil
+		},
+	})
+	admission, err = AdmitContractFrontier(ContractFrontierRequest{Plan: plan, Source: sourceB, ContractSelection: SelectedContractSelection(sourceB)})
+	if err != nil || len(admission.FrontierEvents) != 1 {
+		t.Fatalf("ancestor completion changed unmatched selected recipient's frontier: %+v / %v", admission, err)
+	}
+	recipients = admission.FrontierEvents[0].DerivedRecipients
+	if len(recipients) != 1 || recipients[0].Recipient.ID() != gotB {
+		t.Fatalf("ancestor completion excluded a selected-only recipient: %+v", recipients)
+	}
 }
 
 func TestAdmitContractFrontier_ConnectMatchesConcreteTemplateSourceEndpoint(t *testing.T) {

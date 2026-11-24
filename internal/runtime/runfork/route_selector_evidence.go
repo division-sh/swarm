@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strings"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/forkrecipient"
@@ -19,6 +20,52 @@ type historicalRouteSelectors struct {
 	events           map[string]events.Event
 	inherited        *InheritedConstructionWitness
 	pendingInherited map[events.RouteIdentity]func() (InheritedConstructionWitness, bool, error)
+	ordinaryAncestor map[string]func() ([]AncestorDeliveryCompletion, error)
+}
+
+// AncestorDeliveryCompletion is a negative fact for one replay publication,
+// not a delivery in the immediate source or authority to issue a new one.
+type AncestorDeliveryCompletion struct {
+	SourceRunID string
+	Point       RunForkPoint
+	EventID     string
+	DeliveryID  string
+	Route       events.DeliveryRoute
+}
+
+func (p RunForkPlan) WithOrdinaryReplayAncestorCompletions(readers map[string]func() ([]AncestorDeliveryCompletion, error)) RunForkPlan {
+	if len(readers) == 0 || p.historicalRouteSelectors == nil {
+		return p
+	}
+	copy := *p.historicalRouteSelectors
+	copy.ordinaryAncestor = maps.Clone(readers)
+	p.historicalRouteSelectors = &copy
+	return p
+}
+
+func (p RunForkPlan) OrdinaryReplayAncestorCompletions(eventID string) ([]AncestorDeliveryCompletion, error) {
+	bound := p.historicalRouteSelectors
+	if bound == nil || bound.ordinaryAncestor[eventID] == nil {
+		return nil, nil
+	}
+	ids, known := p.HistoricalEventIDs(p.ForkPoint.Revision)
+	if bound.runID != p.SourceRunID || bound.point != p.ForkPoint || !known || !slices.Contains(ids, eventID) {
+		return nil, fmt.Errorf("ancestor delivery evidence is outside its fixed replay publication")
+	}
+	rows, err := bound.ordinaryAncestor[eventID]()
+	if err != nil {
+		return nil, err
+	}
+	out := slices.Clone(rows)
+	for i := range out {
+		if out[i].SourceRunID == "" || out[i].SourceRunID == p.SourceRunID || out[i].Point.Validate() != nil ||
+			out[i].EventID == "" || out[i].DeliveryID == "" || out[i].Route.Recipient.Empty() {
+			return nil, fmt.Errorf("ancestor delivery evidence contradicts its fixed replay publication")
+		}
+		out[i].Route = out[i].Route.Normalized()
+	}
+	slices.SortFunc(out, func(a, b AncestorDeliveryCompletion) int { return strings.Compare(a.DeliveryID, b.DeliveryID) })
+	return out, nil
 }
 
 // InheritedConstructionWitness is not physical membership in the child's cut.
