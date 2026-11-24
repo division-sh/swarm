@@ -256,6 +256,7 @@ func TestInterruptedReadOnlyProviderTurnResumesOnlyInterruptedCallBothStores(t *
 		TestOwnedMockLifecycleProcessEntry(t)
 		return
 	}
+	t.Run("nested_receiver", requireNestedReceiverProviderResume)
 	for _, scenario := range []string{"openai_compatible", "openai_responses", "anthropic", "projected_initial"} {
 		profile := scenario
 		projected := scenario == "projected_initial"
