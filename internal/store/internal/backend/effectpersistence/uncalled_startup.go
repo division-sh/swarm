@@ -9,26 +9,28 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/failures"
-	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	storedelivery "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 )
 
-func prepareNormalStartupRecoveryTx(ctx context.Context, tx *sql.Tx, postgres bool, delivery providerDrainDeliveryOwner, directives providerDrainDirectiveOwner) (context.Context, []storedelivery.UncalledStartupClaim, error) {
-	if delivery == nil {
+func prepareNormalStartupRecoveryTx(ctx context.Context, tx *sql.Tx, mutation *mutationprotocol.Attempt, postgres bool, delivery providerDrainDeliveryOwner, directives providerDrainDirectiveOwner) (context.Context, []storedelivery.UncalledStartupClaim, error) {
+	var claims []storedelivery.UncalledStartupClaim
+	if delivery != nil {
+		var err error
+		claims, err = delivery.UncalledStartupClaims(ctx, mutation, false)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	if len(claims) == 0 {
 		ctx, err := prepareProviderRecoveryOwnershipTx(ctx, tx, postgres, directives, "", nil)
 		return ctx, nil, err
 	}
-	authority, err := startupownership.CaptureMutationAuthority(ctx)
+	ids, err := peekProviderRecoveryIDsTx(ctx, tx, "", nil)
 	if err != nil {
 		return nil, nil, err
 	}
-	if authority.HasRuntimeGrant() && authority.GrantEvidence().SelectedFork != nil {
-		ctx, err := prepareProviderRecoveryOwnershipTx(ctx, tx, postgres, directives, "", nil)
-		return ctx, nil, err
-	}
-	processID := authority.ProcessAuthority().LeaseStamp().LeaseID
-	claims, err := delivery.UncalledStartupClaimsTx(ctx, tx, processID, false)
+	peeks, actors, err := peekRetainedTurnSetTx(ctx, tx, ids, nil)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -36,11 +38,18 @@ func prepareNormalStartupRecoveryTx(ctx context.Context, tx *sql.Tx, postgres bo
 	for i, candidate := range claims {
 		sources[i] = retainedTurnActorSource{candidate.Actor, candidate.BundleHash}
 	}
-	ctx, err = prepareProviderRecoveryOwnershipTx(ctx, tx, postgres, directives, "", nil, sources...)
-	if err != nil || len(claims) == 0 {
-		return ctx, nil, err
+	ctx, err = bindRetainedTurnOwnershipTx(ctx, tx, postgres, directives, peeks, actors, sources)
+	if err != nil {
+		return nil, nil, err
 	}
-	locked, err := delivery.UncalledStartupClaimsTx(ctx, tx, processID, true)
+	current, err := peekProviderRecoveryIDsTx(ctx, tx, "", nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !slices.Equal(ids, current) {
+		return nil, nil, fmt.Errorf("provider recovery population changed under its ownership prefix")
+	}
+	locked, err := delivery.UncalledStartupClaims(ctx, mutation, true)
 	if err != nil {
 		return nil, nil, err
 	}
