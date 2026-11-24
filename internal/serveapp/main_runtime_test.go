@@ -767,6 +767,7 @@ func TestRunServeRuntimeEventPublishTargetRouteServedPathPostgres(t *testing.T) 
 
 func TestRunServeRuntimeEventPublishExistingRunActiveLoadServedPathDefaultSQLite(t *testing.T) {
 	unsetStoreSelectorEnv(t)
+	setDoctorProviderSecret(t, "ANTHROPIC_API_KEY", "active-load-provider-fixture")
 	stubServeRuntimeWorkspaceLifecycle(t)
 	sqlitePath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
 	sourceRoot := writeServedEventPublishActiveLoadFixture(t)
@@ -1568,12 +1569,18 @@ func runServedRunForkBackendProof(t *testing.T, backend servedparity.Backend) {
 
 func runServedLiveAgentEventReplayBackendProof(t *testing.T, backend servedparity.Backend) {
 	t.Helper()
+	if backend == servedparity.BackendDefaultSQLite {
+		setDoctorProviderSecret(t, "ANTHROPIC_API_KEY", "agent-replay-provider-fixture")
+	}
 	rt := startServedLiveAgentProofRuntime(t, backend)
 	runServedLiveAgentEventReplayLifecycleProof(t, rt)
 }
 
 func runServedAgentRestartBackendProof(t *testing.T, backend servedparity.Backend) {
 	t.Helper()
+	if backend == servedparity.BackendDefaultSQLite {
+		setDoctorProviderSecret(t, "ANTHROPIC_API_KEY", "agent-restart-provider-fixture")
+	}
 	rt := startServedLiveAgentProofRuntime(t, backend)
 	runServedAgentRestartLifecycleProof(t, rt)
 }

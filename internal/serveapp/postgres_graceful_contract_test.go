@@ -19,8 +19,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store"
-	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
-	storeselected "github.com/division-sh/swarm/internal/store/selected"
 	"github.com/division-sh/swarm/tests/support/testutil"
 )
 
@@ -48,6 +46,7 @@ func TestServePostgresGracefulContract(t *testing.T) {
 		t.Run(phase, func(t *testing.T) {
 			dsn, observer, cleanup := testutil.StartPostgres(t)
 			t.Cleanup(cleanup)
+			recordServePostgresFixture(t, dsn)
 			var active atomic.Bool
 			var released atomic.Int32
 			var cleanupErr error
@@ -59,11 +58,6 @@ func TestServePostgresGracefulContract(t *testing.T) {
 				return gracefulContractWorkspace{active: &active, released: &released, failure: cleanupErr}, nil
 			}
 			t.Cleanup(func() { cliapp.ConfiguredWorkspaceLifecycleForServe = oldWorkspace })
-			oldBuild := buildStoresForServe
-			buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config, bootCheck ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {
-				return storeselected.OpenRuntime(ctx, storeselected.RuntimeRequest{Selection: storebackend.Selection{Backend: storebackend.BackendPostgres}, PostgresDSN: dsn, SessionLockTTL: runtimeSessionLockTTL(cfg), BootCheckInput: firstBootCheckInput(bootCheck)})
-			}
-			t.Cleanup(func() { buildStoresForServe = oldBuild })
 			type selected struct {
 				db    *sql.DB
 				store *store.PostgresStore

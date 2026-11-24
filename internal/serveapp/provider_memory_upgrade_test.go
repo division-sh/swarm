@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/cliapp"
@@ -44,7 +45,7 @@ func TestProviderMemorySurvivesAdmittedBundleUpgradeBothStores(t *testing.T) {
 				if backend == servedparity.BackendDefaultSQLite {
 					storeConfig = fmt.Sprintf("store:\n  backend: sqlite\n  sqlite:\n    path: %s\n", filepath.Join(t.TempDir(), "store.db"))
 				} else {
-					configureCompletion2270PostgresFixture(t)
+					allocateCompletion2270PostgresFixture(t)
 					opts.StoreMode, opts.StoreModeSet = "postgres", true
 				}
 				text := fmt.Sprintf("runtime:\n  recovery_on_startup: true\n%sllm:\n  backend: %s\n  models:\n    memory-old: {%s: memory-old}\n    memory-new: {%s: memory-new}\n  session:\n    lock_ttl: 10s\n    rotate_on_parse_failures: 3\n", storeConfig, profile, profile, profile)
@@ -57,14 +58,28 @@ func TestProviderMemorySurvivesAdmittedBundleUpgradeBothStores(t *testing.T) {
 				} else {
 					configureHostWorkspaceProofLifecycle(t)
 					path := map[string]string{"anthropic": "/v1/messages", "openai_compatible": "/v1/chat/completions", "openai_responses": "/v1/responses"}[profile]
-					provider = llmapi.New(t, llmapi.Protocol(profile), path, "memory-key", upgradeMemoryReply)
+					var business atomic.Int32
+					provider = llmapi.New(t, llmapi.Protocol(profile), path, "memory-key", func(request llmapi.Request) (llmapi.Reply, error) {
+						if reply, ok := llmapi.StartupAnswer(request); ok {
+							if reply.Model != "memory-old" && reply.Model != "memory-new" {
+								return llmapi.Reply{}, fmt.Errorf("startup answer used an unconfigured memory model")
+							}
+							return reply, nil
+						}
+						request.Number = int(business.Add(1))
+						return upgradeMemoryReply(request)
+					})
 					if profile == "anthropic" {
 						redirectExternalHosts(t, map[string]string{"api.anthropic.com": provider.URL})
 					} else {
 						text += fmt.Sprintf("  %s:\n    base_url: %s/v1\n", profile, provider.URL)
 					}
 				}
-				if err := os.WriteFile(configPath, []byte(withTestProviderTriggerPlatformInventory(t, text)), 0o600); err != nil {
+				text = withTestProviderTriggerPlatformInventory(t, text)
+				if backend == servedparity.BackendExplicitPostgres {
+					text = withInstalledServePostgresConfig(t, text, "")
+				}
+				if err := os.WriteFile(configPath, []byte(text), 0o600); err != nil {
 					t.Fatal(err)
 				}
 				credentialPath := filepath.Join(t.TempDir(), "credentials.json")
@@ -87,6 +102,9 @@ func TestProviderMemorySurvivesAdmittedBundleUpgradeBothStores(t *testing.T) {
 					}
 				}()
 				process.waitForReadyLine()
+				if provider != nil {
+					requireFixtureLLMHistory(t, provider, 1, 0)
+				}
 				endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc"
 				lastEventID := ""
 				defer func() {
@@ -129,6 +147,9 @@ func TestProviderMemorySurvivesAdmittedBundleUpgradeBothStores(t *testing.T) {
 				setUpgradeMemoryAgent(t, root, "new", profile != "claude_cli")
 				process = startServeRuntimeTestProcess(t, opts)
 				process.waitForReadyLine()
+				if provider != nil {
+					requireFixtureLLMHistory(t, provider, 2, 1)
+				}
 				endpoint = "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc"
 				lastEventID = publishUpgradeMemoryTurn(t, endpoint, seed.RunID, seed.EventID, 2, probe)
 				if provider != nil {
@@ -137,8 +158,8 @@ func TestProviderMemorySurvivesAdmittedBundleUpgradeBothStores(t *testing.T) {
 				if current := requireProviderMemoryTurns(t, endpoint, seed.RunID, 2); current != session {
 					t.Fatalf("upgrade replaced memory session: before=%s after=%s", session, current)
 				}
-				if provider != nil && len(provider.Requests()) != 2 {
-					t.Fatalf("provider requests=%d, want exactly two turns", len(provider.Requests()))
+				if provider != nil {
+					requireFixtureLLMHistory(t, provider, 2, 2)
 				}
 				if profile == "claude_cli" {
 					lastEventID = publishUpgradeMemoryTurn(t, endpoint, seed.RunID, seed.EventID, 3, probe)

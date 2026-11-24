@@ -127,7 +127,7 @@ func TestPublicVerifyRetainedForkUsesConfiguredPackGeneration(t *testing.T) {
 	if err := os.WriteFile(configPath, []byte(config), 0600); err != nil {
 		t.Fatal(err)
 	}
-	command := exec.CommandContext(ctx, "go", "run", "./cmd/swarm", "verify", project, "--config", configPath, "--json")
+	command := exec.CommandContext(ctx, "go", "run", "./cmd/swarm", "serve", project, "--config", configPath, "--dry-run")
 	command.Dir = repo
 	// The public binary is not a test harness; do not forward test-only inputs.
 	for _, pair := range os.Environ() {
@@ -138,29 +138,19 @@ func TestPublicVerifyRetainedForkUsesConfiguredPackGeneration(t *testing.T) {
 	var out, diagnostic bytes.Buffer
 	command.Stdout, command.Stderr = &out, &diagnostic
 	err = command.Run()
-	var result struct {
-		OK           bool `json:"ok"`
-		Observations []struct {
-			CheckID string `json:"check_id"`
-			Status  string `json:"status"`
-			Subject string `json:"subject"`
-		} `json:"observations"`
-		ExecutionObligations []struct{ ID, Subject string } `json:"execution_obligations"`
-	}
-	if decodeErr := json.Unmarshal(out.Bytes(), &result); decodeErr != nil {
-		t.Fatalf("public verify: run=%v decode=%v stdout=%s stderr=%s", err, decodeErr, &out, &diagnostic)
-	}
-	passed := false
-	for _, observation := range result.Observations {
-		if observation.CheckID == "selected_fork_recovery_admission" {
-			passed = observation.Status == "passed"
+	const prefix = "startup not performed: selected_fork_recovery_settlement @ "
+	want := "fork:" + fork.Materialization.ForkRunID
+	var obligations []string
+	for _, line := range strings.Split(out.String(), "\n") {
+		if strings.Contains(line, " selected_fork_recovery_admission @ ") {
+			t.Fatalf("public dry run did not pass retained-fork admission: %s", line)
+		}
+		if value, found := strings.CutPrefix(line, prefix); found {
+			subject, _, _ := strings.Cut(value, " (")
+			obligations = append(obligations, subject)
 		}
 	}
-	settlement := false
-	for _, obligation := range result.ExecutionObligations {
-		settlement = settlement || obligation.ID == "selected_fork_recovery_settlement" && obligation.Subject == "fork:"+fork.Materialization.ForkRunID
-	}
-	if !passed || !settlement {
-		t.Fatalf("public retained fork lost configured generation: run=%v result=%+v stderr=%s", err, result, &diagnostic)
+	if err != nil || len(obligations) != 1 || obligations[0] != want {
+		t.Fatalf("public retained fork lost configured generation: run=%v want=%s stdout=%s stderr=%s", err, want, &out, &diagnostic)
 	}
 }

@@ -50,6 +50,12 @@ func TestProviderRootStateToolsOfferedBothStores(t *testing.T) {
 			h.opts.SourceRoot = writeTurnRenderingSource(t, "root_state")
 			h.opts.TestLLMRuntime = nil
 			provider := llmapi.New(t, llmapi.OpenAICompatible, "/v1/chat/completions", "synthetic-root-state-key", func(request llmapi.Request) (llmapi.Reply, error) {
+				if reply, ok := llmapi.StartupAnswer(request); ok {
+					if reply.Model != "synthetic-root-state" {
+						return llmapi.Reply{}, fmt.Errorf("startup answer used the wrong root-state model")
+					}
+					return reply, nil
+				}
 				return turnRenderingReply(request, "root_state")
 			})
 			credentials, err := runtimecredentials.NewFileStore(h.credentialPath)
@@ -62,12 +68,14 @@ func TestProviderRootStateToolsOfferedBothStores(t *testing.T) {
 			configureProviderJourneyLLM(t, h.opts.ConfigPath, "openai_compatible", provider.URL, "synthetic-root-state")
 			h.start(t)
 			defer h.stop(t)
+			requireFixtureLLMHistory(t, provider, 1, 0)
 			published := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
 				"bundle_hash": servedEventPublishFixtureBundleHash(t, h.opts.SourceRoot), "event_name": "evidence.started",
 				"payload": map[string]any{"conversation": "synthetic", "sequence": 1, "text": "synthetic turn 1"}, "idempotency_key": "root-state-tools",
 			})
 			inputID := waitRenderingInput(t, h, published.RunID, published.EventID)
 			waitTurnRenderingCompletion(t, h, published.RunID, inputID, &providerEvidenceObservation{})
+			requireFixtureLLMHistory(t, provider, 1, 3)
 		})
 	}
 }

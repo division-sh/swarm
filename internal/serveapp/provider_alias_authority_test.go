@@ -73,6 +73,20 @@ func runProviderAliasAuthorityScenario(t *testing.T, scenario providerAliasScena
 			}
 			root := writeProviderAliasAuthorityFixture(t, scenario)
 			rt := startWorkspaceLiveGatewayProofRuntime(t, backend, root, "", nil, "127.0.0.1:0")
+			var wantStartup, wantBusiness int32
+			if scenario.agents {
+				wantStartup, wantBusiness = 1, 4 // Two raw and two normalized text deliveries.
+			}
+			if scenario.replay {
+				wantBusiness += 2
+			}
+			requireTraffic := func(want int32) {
+				startup, total := rt.providerCalls()
+				if startup != wantStartup || total != wantStartup+want {
+					t.Fatalf("alias provider counts: startup=%d business=%d total=%d; want %d/%d/%d", startup, total-startup, total, wantStartup, want, wantStartup+want)
+				}
+			}
+			requireTraffic(0)
 			requireIndependentStandingRootTrees(t, rt, scenario)
 			for aliasIndex, alias := range []string{"alpha", "beta"} {
 				account := "420079"
@@ -193,6 +207,7 @@ func runProviderAliasAuthorityScenario(t *testing.T, scenario providerAliasScena
 			if scenario.publicConnected {
 				requireProviderAliasRootConnection(t, rt, scenario.alphaReceiver)
 			}
+			requireTraffic(wantBusiness)
 		})
 	}
 }
