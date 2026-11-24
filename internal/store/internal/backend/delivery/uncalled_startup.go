@@ -62,7 +62,7 @@ func (a *Adapter) uncalledStartupClaimsTx(ctx context.Context, tx *sql.Tx, proce
 			return nil, err
 		}
 		actor := record.Route.AgentIdentity
-		if record.Status != StatusInProgress || record.SubscriberClass != SubscriberAgent || actor.RunID != record.RunID || actor.Name.AgentID != record.SubscriberID {
+		if record.Status != deliverylifecycle.StatusInProgress || record.SubscriberClass != deliverylifecycle.SubscriberAgent || actor.RunID != record.RunID || actor.Name.AgentID != record.SubscriberID {
 			return nil, fmt.Errorf("uncalled startup candidate differs from its exact claimed actor")
 		}
 		claim, err := deliverylifecycle.AdmitPersistedClaim(id, record.RunID, events.EncodeDeliveryRouteIdentity(record.RouteIdentity), record.claimToken, record.ClaimVersion, record.SubscriberClass, record.SubscriberID)
