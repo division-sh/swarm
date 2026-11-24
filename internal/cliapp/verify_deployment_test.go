@@ -165,6 +165,49 @@ func TestVerifyDeploymentObservationPreservesFailureAndCancellation(t *testing.T
 		})
 	}
 	t.Run("stage_completion", testVerifyStageCompletionFailure)
+	t.Run("strict_consumer_construction_refusal", testStrictConsumerConstructionRefusal)
+}
+
+func testStrictConsumerConstructionRefusal(t *testing.T) {
+	root := canonicalrouting.CopyLifecycleEmitterStatic(t, canonicalrouting.LifecycleStaticLoopDangling)
+	module, _, err := NewSwarmWorkflowModule(RepoRoot(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts := runtime.DefaultWorkflowContractValidationOptions(nil, executionposture.Live)
+	opts.CheckMCPReachable = false
+	opts.FatalBootWarnings = true
+	validation, summary := runtime.ValidateWorkflowContractSurface(t.Context(), module.SemanticSource(), opts)
+	if !runtime.IsSoleWorkflowAdmissionReportRefusal(summary) {
+		t.Fatalf("strict loop did not return its validation summary: %v", summary)
+	}
+	result := ServeCheckStageResult{Validation: validation, Options: opts}
+	result.recordCompletionFailure(t.Context(), "source:"+validation.BootReport.SourceArtifactHash, summary)
+	stage := ServeConstructionChecks{Result: result, Failure: errors.Join(summary, result.Failure())}
+	cleanup := errors.New("independent native cleanup")
+	for _, cell := range []struct {
+		name string
+		err  error
+		want error
+	}{
+		{"direct", stage.Failure, summary},
+		{"native_join_without_cleanup", errors.Join(stage.Failure, nil), summary},
+		{"cleanup_after", errors.Join(stage.Failure, cleanup), nil},
+		{"cleanup_before", errors.Join(cleanup, stage.Failure), nil},
+		{"cancellation_sibling", errors.Join(stage.Failure, context.Canceled), nil},
+		{"lookalike", errors.New(stage.Failure.Error()), nil},
+	} {
+		t.Run(cell.name, func(t *testing.T) {
+			if got := stage.StrictConsumerRefusal(t.Context(), cell.err); got != cell.want {
+				t.Fatalf("refusal = %v, want exact result %v", got, cell.want)
+			}
+		})
+	}
+	canceled, cancel := context.WithCancel(t.Context())
+	cancel()
+	if got := stage.StrictConsumerRefusal(canceled, stage.Failure); got != nil {
+		t.Fatalf("canceled construction reclassified: %v", got)
+	}
 }
 
 func testVerifyStageCompletionFailure(t *testing.T) {
@@ -210,6 +253,10 @@ func testVerifyStageCompletionFailure(t *testing.T) {
 				if observation.Status != bootverify.AdmissionFailed || observation.FailureClass != auth || observation.Cause != summary ||
 					got != summary || observation.Reason != summary.Error() || out.ExitCode() != 4 {
 					t.Fatalf("completion=%+v, cause=%v, exit=%d; want the original authentication refusal and exit 4", observation, got, out.ExitCode())
+				}
+				stage := ServeConstructionChecks{Result: out, Failure: errors.Join(summary, out.Failure())}
+				if got := stage.StrictConsumerRefusal(t.Context(), errors.Join(stage.Failure, nil)); got != nil {
+					t.Fatalf("authentication refusal reclassified: %v", got)
 				}
 				return
 			}

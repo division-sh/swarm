@@ -943,6 +943,14 @@ func presentServeStageFailure(presenter *serveLifecyclePresenter, opts cliapp.Se
 	return max(1, checks.ExitCode())
 }
 
+func presentServeConstructionFailure(ctx context.Context, presenter *serveLifecyclePresenter, opts cliapp.ServeOptions, stage *cliapp.ServeConstructionChecks, failure error) int {
+	if refusal := stage.StrictConsumerRefusal(ctx, failure); refusal != nil {
+		presenter.fail(5, "runtime_context", refusal)
+		return 1
+	}
+	return presentServeStageFailure(presenter, opts, stage.Result, failure)
+}
+
 func presentServeCheckSourceRefusal(presenter *serveLifecyclePresenter, checks cliapp.ServeCheckStageResult) int {
 	for _, check := range []string{"retained_source_integrity", "pinned_source_admission"} {
 		for _, observation := range checks.Validation.BootReport.Observations {
@@ -1107,7 +1115,7 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 	stores, err := buildStoresForServe(ctx, storeSelection, cfg, bootStoreInput)
 	if err != nil {
 		if stage != nil && stage.Failure != nil {
-			return presentServeStageFailure(presenter, opts, stage.Result, err)
+			return presentServeConstructionFailure(ctx, presenter, opts, stage, err)
 		}
 		var acquisitionErr *runtimestartupownership.AcquisitionError
 		if errors.As(err, &acquisitionErr) {
