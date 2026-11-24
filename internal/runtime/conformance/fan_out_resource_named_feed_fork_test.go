@@ -20,6 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 	"github.com/google/uuid"
 )
@@ -56,10 +57,10 @@ func proveSelectedNamedFeedFork(t *testing.T, backend, variant string) {
 			return e.RunID() != sourceID || !bytes.Contains(e.Payload(), []byte(`"01-pending"`))
 		}}
 		gate.held.Store(true)
-		f = newDeploymentResourceFixtureConfigured(t, backend, semanticview.Wrap(bundle), notifyAllChildrenRuntimeOptions{}, func(store runtimedelivery.Store) runtimedelivery.Store {
+		f = newDeploymentResourceFixtureWithSource(t, backend, semanticview.Wrap(bundle), notifyAllChildrenRuntimeOptions{wrapDeploymentDelivery: func(store runtimedelivery.Store) runtimedelivery.Store {
 			gate.Store = store
 			return gate
-		})
+		}})
 	} else {
 		f = newDeploymentResourceFixtureWithSource(t, backend, semanticview.Wrap(bundle))
 		f.runtime.fanOutServing.Close()
@@ -159,36 +160,50 @@ func proveSelectedNamedFeedFork(t *testing.T, backend, variant string) {
 		childBatchID = durabledata.ForkRowsPublicationID(result.ForkRunID, batchID)
 	}
 	childMemberID := (durabledata.DeploymentFeed{RunID: result.ForkRunID, Publication: childBatchID, Declaration: named.Intent.Source.Declaration}).PublicationID()
-	var cursor int
-	var selectedVersion durabledata.VersionID
-	if err := f.db.QueryRowContext(f.ctx, `SELECT cursor,source_resource_version_id FROM fan_out_intents
-		WHERE run_id=$1 AND deployment_feed_id=$2`, result.ForkRunID, childMemberID).Scan(&cursor, &selectedVersion); err != nil ||
-		cursor != 1 || selectedVersion != named.Intent.Source.VersionID {
-		t.Fatalf("exact child member %s: cursor=%d version=%s err=%v", childMemberID, cursor, selectedVersion, err)
+	childPlan, err := planner.PlanRunFork(f.ctx, runfork.RunForkPlanRequest{SourceRunID: result.ForkRunID})
+	if err != nil {
+		t.Fatalf("read exact child intent versions: %v", err)
 	}
-	var childFeeds, namedRows, otherEvents, sourceFeeds, childRuns int
-	for _, check := range []struct {
-		id, query string
-		got       *int
-	}{
-		{result.ForkRunID, "SELECT COUNT(*) FROM fan_out_intents WHERE run_id=$1 AND origin_kind='deployment'", &childFeeds},
-		{result.ForkRunID, "SELECT COUNT(*) FROM fan_out_intents WHERE run_id=$1 AND source_resource_event_name='scan.requested' AND cursor=1 AND status='closed'", &namedRows},
-		{result.ForkRunID, "SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='score.observed'", &otherEvents},
-		{sourceID, "SELECT COUNT(*) FROM fan_out_intents WHERE run_id=$1 AND origin_kind='deployment' AND cursor=0 AND status='open'", &sourceFeeds},
-		{sourceID, "SELECT COUNT(*) FROM runs WHERE forked_from_run_id=$1", &childRuns},
-	} {
-		if err := f.db.QueryRowContext(f.ctx, check.query, check.id).Scan(check.got); err != nil {
-			t.Fatal(err)
+	namedRows := 0
+	for _, o := range childPlan.FanOutObligations {
+		intent := o.Intent
+		if intent.Source.Declaration.EventName == names[0] && intent.Cursor == 1 && intent.Status == fanoutobligation.StatusClosed {
+			namedRows++
+			if intent.Request.Key.DeploymentFeedID != childMemberID || intent.Source.VersionID != named.Intent.Source.VersionID {
+				t.Fatalf("wrong named child member or exact version: %+v", intent)
+			}
+		}
+	}
+	childIntents, sourceIntents := namedFeedInventory(t, f, result.ForkRunID), namedFeedInventory(t, f, sourceID)
+	if intent := childIntents[childMemberID]; intent.Cursor != 1 || intent.Status != fanoutobligation.StatusClosed {
+		t.Fatalf("named child member is not closed at ordinal 1: %+v", intent)
+	}
+	sourceFeeds := 0
+	for _, intent := range sourceIntents {
+		if intent.Cursor == 0 && intent.Status == fanoutobligation.StatusOpen {
+			sourceFeeds++
+		}
+	}
+	otherEvents, err := storetest.CountRunEventNameStorage(f.ctx, f.selected, result.ForkRunID, names[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	headers, next, err := f.selected.(operatorread.RunReader).ListRunHeaders(f.ctx, operatorread.RunHeaderListOptions{})
+	if err != nil || next != "" {
+		t.Fatalf("run inventory must be complete: next=%q err=%v", next, err)
+	}
+	var children []string
+	for _, h := range headers {
+		if h.Origin.SourceRunID() == sourceID {
+			children = append(children, h.RunID)
 		}
 	}
 	wantChildFeeds, wantSourceFeeds := 1, 2
 	if variant == "settled_other" {
 		wantChildFeeds, wantSourceFeeds = 2, 1
 		otherID := (durabledata.DeploymentFeed{RunID: result.ForkRunID, Publication: childBatchID, Declaration: other.Intent.Source.Declaration}).PublicationID()
-		var retained int
-		if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM fan_out_intents WHERE run_id=$1
-			AND deployment_feed_id=$2 AND status='closed' AND cardinality=0`, result.ForkRunID, otherID).Scan(&retained); err != nil || retained != 1 {
-			t.Fatalf("named selection lost the other feed's settled history: retained=%d err=%v", retained, err)
+		if retained := childIntents[otherID]; retained.Status != fanoutobligation.StatusClosed || retained.Cardinality != 0 {
+			t.Fatalf("named selection lost the other feed's settled history: %+v", retained)
 		}
 	}
 	if variant == "partial_other" {
@@ -198,15 +213,60 @@ func proveSelectedNamedFeedFork(t *testing.T, backend, variant string) {
 			t.Fatal("named selection changed the other feed's source deliveries")
 		}
 	}
-	if childFeeds != wantChildFeeds || namedRows != 1 || otherEvents != 0 || sourceFeeds != wantSourceFeeds || childRuns != 1 {
-		t.Fatalf("named-only work or source custody changed: child feeds=%d named settled=%d other events=%d source feeds=%d children=%d", childFeeds, namedRows, otherEvents, sourceFeeds, childRuns)
+	if len(childIntents) != wantChildFeeds || namedRows != 1 || otherEvents != 0 || sourceFeeds != wantSourceFeeds ||
+		!reflect.DeepEqual(children, []string{result.ForkRunID}) {
+		t.Fatalf("named-only work or source custody changed: child feeds=%d named settled=%d other events=%d source feeds=%d children=%v", len(childIntents), namedRows, otherEvents, sourceFeeds, children)
+	}
+	requireNamedFeedDelivery(t, f, result.ForkRunID, childMemberID)
+}
+
+func namedFeedInventory(t *testing.T, f *deploymentResourceFixture, runID string) map[string]fanoutobligation.IntentReadback {
+	t.Helper()
+	page, err := f.selected.(operatorread.FanOutReader).ListFanOutIntents(f.ctx, fanoutobligation.ListQuery{RunID: runID})
+	if err != nil || page.RunID != runID || page.NextCursor != "" {
+		t.Fatalf("feed inventory must be complete for %s: %+v err=%v", runID, page, err)
+	}
+	intents := make(map[string]fanoutobligation.IntentReadback)
+	for _, intent := range page.Intents {
+		if id := intent.Key.DeploymentFeedID; id != "" {
+			if _, exists := intents[id]; exists || intent.Key.RunID != runID {
+				t.Fatalf("duplicate or foreign feed: %+v", intent)
+			}
+			intents[id] = intent
+		}
+	}
+	return intents
+}
+
+func requireNamedFeedDelivery(t *testing.T, f *deploymentResourceFixture, runID, memberID string) {
+	t.Helper()
+	zero := 0
+	page, err := f.selected.(operatorread.FanOutReader).ListFanOutIntents(f.ctx, fanoutobligation.ListQuery{
+		RunID: runID, OutcomeFromOrdinal: &zero, Filter: fanoutobligation.ListFilter{DeploymentFeedID: memberID},
+	})
+	if err != nil || page.DeploymentOutcomes == nil || len(page.DeploymentOutcomes.Outcomes) != 1 {
+		t.Fatalf("missing exact named ordinal: %+v err=%v", page, err)
+	}
+	outcome := page.DeploymentOutcomes.Outcomes[0]
+	if outcome.Ordinal != 0 || outcome.Kind != fanoutobligation.OutcomeCommitted || outcome.EventID == "" {
+		t.Fatalf("wrong named ordinal outcome: %+v", outcome)
+	}
+	event, err := f.selected.(operatorread.ObservabilityReader).LoadOperatorEvent(f.ctx, outcome.EventID)
+	if err != nil || event.EventID != outcome.EventID || event.RunID != runID {
+		t.Fatalf("wrong named ordinal event: %+v err=%v", event, err)
 	}
 	var delivered int
-	if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM fan_out_outcomes o
-		JOIN event_deliveries d ON d.event_id=o.event_id AND d.run_id=o.run_id
-		WHERE o.run_id=$1 AND o.deployment_feed_id=$2 AND o.ordinal=0 AND o.outcome_kind='committed'
-		AND d.status='delivered' AND d.claim_version=1`, result.ForkRunID, childMemberID).Scan(&delivered); err != nil || delivered != 1 {
-		t.Fatalf("named ordinal did not settle exactly once: delivered=%d err=%v", delivered, err)
+	for _, delivery := range event.Deliveries {
+		snapshot, err := f.selected.Snapshot(f.ctx, delivery.DeliveryID)
+		if err != nil || snapshot.DeliveryID != delivery.DeliveryID || snapshot.EventID != event.EventID || snapshot.RunID != runID {
+			t.Fatalf("wrong named ordinal delivery: %+v err=%v", snapshot, err)
+		}
+		if snapshot.Status == runtimedelivery.StatusDelivered && snapshot.ClaimVersion == 1 {
+			delivered++
+		}
+	}
+	if delivered != 1 {
+		t.Fatalf("named ordinal did not settle exactly once: delivered=%d", delivered)
 	}
 }
 

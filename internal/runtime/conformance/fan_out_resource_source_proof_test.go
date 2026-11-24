@@ -113,11 +113,6 @@ func newDeploymentResourceFixtureWithSource(t *testing.T, backend string, source
 	if len(options) == 1 {
 		opts = options[0]
 	}
-	return newDeploymentResourceFixtureConfigured(t, backend, source, opts, nil)
-}
-
-func newDeploymentResourceFixtureConfigured(t *testing.T, backend string, source semanticview.Source, opts notifyAllChildrenRuntimeOptions, wrapDelivery func(runtimedelivery.Store) runtimedelivery.Store) *deploymentResourceFixture {
-	t.Helper()
 	f := &deploymentResourceFixture{source: source, config: opts.ordinaryConfig, ordinaryProviderCredentials: opts.ordinaryProviderCredentials}
 	switch backend {
 	case "sqlite":
@@ -131,8 +126,8 @@ func newDeploymentResourceFixtureConfigured(t *testing.T, backend string, source
 	default:
 		t.Fatalf("unknown selected backend %q", backend)
 	}
-	if wrapDelivery != nil {
-		f.ordinaryDeliveryLifecycle = wrapDelivery(f.selected)
+	if opts.wrapDeploymentDelivery != nil {
+		f.ordinaryDeliveryLifecycle = opts.wrapDeploymentDelivery(f.selected)
 	}
 	fact := conformanceSourceArtifactFact(t, f.source)
 	f.ctx = testAuthorActivityContextForBundle(context.Background(), fact)
