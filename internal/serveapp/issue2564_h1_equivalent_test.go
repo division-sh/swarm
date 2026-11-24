@@ -336,7 +336,8 @@ func (p *issue2564H1Provider) assert(t *testing.T, want int) map[string]issue256
 	if len(p.sessions) != issue2564H1Hubs*2 || len(acks) != want || p.firstMax < 2 {
 		t.Fatalf("H1 concurrent provider/session acknowledgments: sessions=%d acks=%d want=%d overlapping_first_requests=%d", len(p.sessions), len(acks), want, p.firstMax)
 	}
-	if p.startup.Load() != 1 || p.total.Load() != int32(len(p.sessions)*8+1) {
+	// Fresh H1 boots have only template agents; none is admitted before the first hub.start.
+	if p.startup.Load() != 0 || p.total.Load() != int32(len(p.sessions)*8) {
 		t.Fatalf("H1 provider counts: startup=%d total=%d business=%d", p.startup.Load(), p.total.Load(), len(p.sessions)*8)
 	}
 	t.Logf("H1_PROVIDER_RECEIPT sessions=%d acknowledgments=%d requests=%d overlapping_first_requests=%d first_round_delay=1.5s", len(p.sessions), len(acks), len(p.sessions)*8, p.firstMax)
