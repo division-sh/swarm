@@ -88,6 +88,18 @@ func (scope *turnOwnershipObservation) validateRetainedTurnSet(peeks []retainedT
 	return nil
 }
 
+func (scope *turnOwnershipObservation) reuseRetainedTurnOwnership(ctx context.Context, peeks []retainedTurnCoordinate, actors []agentidentity.Identity, extraSources []retainedTurnActorSource) (context.Context, error) {
+	if err := scope.validateRetainedTurnSet(peeks, actors); err != nil {
+		return nil, err
+	}
+	for _, source := range extraSources {
+		if scope.hashes[source.actor.RunID] != source.hash || scope.actors[source.actor].Validate() != nil {
+			return nil, fmt.Errorf("retained claim differs from its outer observed actor source")
+		}
+	}
+	return ctx, nil
+}
+
 // Peeks choose locks only. No decoder or anchor can acquire a missing prefix.
 func prepareRetainedTurnOwnershipTx(ctx context.Context, tx *sql.Tx, postgres bool, owner providerDrainDirectiveOwner, ids []string, extraActors ...agentidentity.Identity) (context.Context, error) {
 	peeks, actors, err := peekRetainedTurnSetTx(ctx, tx, ids, extraActors)
@@ -105,15 +117,7 @@ func bindRetainedTurnOwnershipTx(ctx context.Context, tx *sql.Tx, postgres bool,
 		return ctx, nil
 	}
 	if prior, _ := ctx.Value(turnOwnershipContextKey{}).(*turnOwnershipObservation); prior != nil && prior.tx == tx {
-		if err := prior.validateRetainedTurnSet(peeks, actors); err != nil {
-			return nil, err
-		}
-		for _, source := range extraSources {
-			if prior.hashes[source.actor.RunID] != source.hash || prior.actors[source.actor].Validate() != nil {
-				return nil, fmt.Errorf("retained claim differs from its outer observed actor source")
-			}
-		}
-		return ctx, nil
+		return prior.reuseRetainedTurnOwnership(ctx, peeks, actors, extraSources)
 	}
 	if owner == nil && (len(peeks) != 0 || len(extraSources) != 0) {
 		return nil, fmt.Errorf("retained turn requires its native ownership reader")
