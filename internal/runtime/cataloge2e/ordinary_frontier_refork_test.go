@@ -120,6 +120,12 @@ func proveOrdinaryEnvelopeRefork(t *testing.T, h *runtimeHarness, ctx context.Co
 	if producer.FlowID != "envelope" {
 		t.Fatalf("refork cut does not contain the pending envelope publication: %+v", plan.ForkPoint)
 	}
+	audit := requireOrdinaryReforkCut(t, plan, upstream, request.At)
+	receiver := audit.DeliveryRoute.Target.Route()
+	fixed, entity, found, err := runforkadmission.FixedConstructionForRoute(source, plan, flowidentity.StoredRoute(receiver.FlowID, flowidentity.LogicalInstanceID(receiver.FlowInstance), receiver.FlowInstance))
+	if err != nil || !found || entity.Fields["cross_count"] != int64(0) {
+		t.Fatalf("refork cut must retain the exact audit at zero: found=%t count=%v error=%v", found, entity.Fields["cross_count"], err)
+	}
 	selection := request.ContractSelection
 	frontier, err := runforkadmission.AdmitContractFrontier(runforkadmission.ContractFrontierRequest{Plan: plan, Source: source, ContractSelection: selection})
 	if err != nil {
@@ -178,6 +184,46 @@ func proveOrdinaryEnvelopeRefork(t *testing.T, h *runtimeHarness, ctx context.Co
 			t.Fatalf("ancestor proof became a child's delivery: %s count=%d / %v", projected, len(deliveries), err)
 		}
 	}
+	projected, err := runfork.ProjectCapturedConstructionIdentity(run, staged.ForkRunID, fixed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if t.Failed() {
+			logSelectedReceiverCountFailure(t, ctx, selected, plan, 1, staged.ForkRunID, projected)
+		}
+	}()
+	proveOrdinaryForkReceiver(t, h, ctx, source, plan, staged.ForkRunID, upstream, request.At, receiver)
+}
+
+func requireOrdinaryReforkCut(t *testing.T, plan runfork.RunForkPlan, upstream, output string) runfork.RunForkPendingWork {
+	t.Helper()
+	if plan.ForkPoint.EventID != output {
+		t.Fatalf("refork did not pin the first child's audit publication: %+v", plan.ForkPoint)
+	}
+	var sibling, audit runfork.RunForkPendingWork
+	for _, work := range plan.PendingWork {
+		if work.DeliveryID == "" || (work.EventID != upstream && work.EventID != output) {
+			continue
+		}
+		if work.Classification != runfork.RunForkPendingClassificationPending || work.ClaimVersion != 0 {
+			t.Fatalf("refork cut must precede these delivery claims: event=%s delivery=%s state=%s claim=%d", work.EventID, work.DeliveryID, work.Classification, work.ClaimVersion)
+		}
+		switch flow := work.DeliveryRoute.Target.Route().FlowID; {
+		case work.EventID == upstream && flow == ordinaryAccountFlow && sibling.DeliveryID == "":
+			sibling = work
+		case work.EventID == output && flow == ordinaryAuditFlow && audit.DeliveryID == "":
+			audit = work
+		default:
+			t.Fatalf("unexpected physical delivery on the refork cut: event=%s delivery=%s target=%s", work.EventID, work.DeliveryID, flow)
+		}
+	}
+	t.Logf("refork cut revision=%d upstream=%s sibling=%s/%s output=%s receiver=%s/%s", plan.ForkPoint.Revision, upstream,
+		sibling.DeliveryID, sibling.Classification, output, audit.DeliveryID, audit.Classification)
+	if sibling.DeliveryID == "" || audit.DeliveryID == "" {
+		t.Fatal("refork cut requires one pending sibling and one pending audit, with no ticket reporter")
+	}
+	return audit
 }
 
 func hasOrdinaryConstructorProof(topology runfork.RunForkSelectedContractRouteTopology, path, id string) bool {
