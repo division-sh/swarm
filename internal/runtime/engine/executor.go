@@ -1370,7 +1370,7 @@ func (e *Executor) computeModuleValue(frame *executionFrame, spec *runtimecontra
 	if !ok {
 		return nil, fail(computemodule.CodeCompile, fmt.Errorf("unknown module %q", moduleID))
 	}
-	if privateInput && (module.Kind != "wasm" || len(plan.Input) == 0) {
+	if privateInput && module.Kind != "wasm" {
 		return nil, fail(computemodule.CodeABI, nil)
 	}
 	inputBytes, inputHash, err := e.computeModuleInputs(frame, plan, module, moduleID, rowID)

@@ -48,12 +48,23 @@ func projectNodePolicyValueRow(value yamlsource.Value, kind string) (PolicySheet
 		return PolicySheetRowMetadata{}, nil, err
 	}
 	input, present := fields["input"]
-	if !present {
-		return PolicySheetRowMetadata{}, nil, fmt.Errorf("POLICY-SHEET-ROW: %s.input is required at %s", label, value.Location())
+	var inputs map[string]string
+	var parsed map[string]paths.Path
+	if present {
+		inputs, parsed, err = projectNodePolicyInputsValue(input, label+".input")
+		if err != nil {
+			return PolicySheetRowMetadata{}, nil, err
+		}
 	}
-	inputs, parsed, err := projectNodePolicyInputsValue(input, label+".input")
-	if err != nil {
-		return PolicySheetRowMetadata{}, nil, err
+	var secretInputs map[string]string
+	if secret, hasSecret := fields["secret_input"]; hasSecret {
+		secretInputs, err = projectNodePolicySecretInputsValue(secret)
+		if err != nil {
+			return PolicySheetRowMetadata{}, nil, err
+		}
+	}
+	if !present && len(secretInputs) == 0 {
+		return PolicySheetRowMetadata{}, nil, fmt.Errorf("POLICY-SHEET-ROW: %s.input is required at %s", label, value.Location())
 	}
 	compute := &ComputeSpec{Operation: operation, StoreAs: into}
 	metadata := PolicySheetRowMetadata{Kind: rowKind}
@@ -61,13 +72,7 @@ func projectNodePolicyValueRow(value yamlsource.Value, kind string) (PolicySheet
 		spec := &ComputeValidationSpec{Set: name, Into: into, Input: inputs, InputPaths: parsed}
 		compute.Validation, metadata.Validation = spec, spec
 	} else {
-		spec := &ComputeModuleSpec{Module: name, Into: into, Input: inputs, InputPaths: parsed}
-		if secret, present := fields["secret_input"]; present {
-			spec.SecretInput, err = projectNodePolicySecretInputsValue(secret)
-			if err != nil {
-				return PolicySheetRowMetadata{}, nil, err
-			}
-		}
+		spec := &ComputeModuleSpec{Module: name, Into: into, Input: inputs, InputPaths: parsed, SecretInput: secretInputs}
 		compute.Module, metadata.Module = spec, spec
 	}
 	return metadata, compute, nil

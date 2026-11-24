@@ -2302,6 +2302,20 @@ func TestExecutor_ComputeModuleReplayTraceComparison(t *testing.T) {
 			})
 		}
 	})
+	t.Run("secret_only_wasm_reaches_resolver", func(t *testing.T) {
+		source, _ := sourceWithStructuredRendererModule(t)
+		exec := newStructuredRendererExecutor(t, source)
+		exec.deps.ComputeSecretInputs = func(context.Context, map[string]string) (map[string]string, error) {
+			return nil, context.Canceled
+		}
+		spec := structuredRendererModuleSpec()
+		spec.Input, spec.InputPaths = nil, nil
+		spec.SecretInput = map[string]string{"owner": "named_key"}
+		_, err := exec.ExecuteSemanticFixture(context.Background(), structuredRendererExecutionRequest(t, spec))
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("secret-only Wasm did not reach the resolver: %v", err)
+		}
+	})
 	t.Run("python_secret_refused_before_handoff", func(t *testing.T) {
 		source, _ := sourceWithPythonRendererModule(t)
 		exec := newStructuredRendererExecutor(t, source)

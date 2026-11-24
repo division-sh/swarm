@@ -91,6 +91,14 @@ func TestValidatePolicySheetComputeModuleRowRequiresDeclaredInputs(t *testing.T)
 	if errs := validatePolicySheetComputeModuleRow("test row", rule, tool); len(errs) != 0 {
 		t.Fatalf("ordinary/secret union rejected: %v", errs)
 	}
+	t.Run("missing_ordinary_required_input", func(t *testing.T) {
+		ordinary := spec.Input
+		spec.Input = nil
+		defer func() { spec.Input = ordinary }()
+		if errs := validatePolicySheetComputeModuleRow("test row", rule, tool); !errorsContain(errs, `missing required module input "files"`) {
+			t.Fatalf("errors = %v, want missing required ordinary input", errs)
+		}
+	})
 	for _, tc := range []struct {
 		name, parameter, key, want string
 	}{
