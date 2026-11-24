@@ -24,6 +24,9 @@ import (
 func TestAudit2277ForkDurableResultBypassesGenericCompletionBothStores(t *testing.T) {
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
+			if backend == servedparity.BackendExplicitPostgres {
+				useDeclaredServePostgresTarget(t)
+			}
 			rt := startServedControlProofRuntimeWithFixture(t, backend, func(t *testing.T) string { return canonicalrouting.CopyRootIngressServedFollowUp(t) })
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"bundle_hash": rt.BundleHash, "event_name": "item.received", "payload": map[string]any{"item_id": "hold"}, "idempotency_key": "audit2277-source"})
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)

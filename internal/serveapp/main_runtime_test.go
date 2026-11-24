@@ -1430,6 +1430,9 @@ func startServedControlProofRuntimeWithFixture(t *testing.T, backend servedparit
 
 func runServedRunControlBackendProof(t *testing.T, backend servedparity.Backend) {
 	t.Helper()
+	if backend == servedparity.BackendExplicitPostgres {
+		useDeclaredServePostgresTarget(t)
+	}
 	credentialPath := filepath.Join(t.TempDir(), "credentials.json")
 	t.Setenv("SWARM_CREDENTIALS_FILE", credentialPath)
 	writeChannelOnboardingLiveToolCredentials(t, credentialPath)
@@ -1445,6 +1448,9 @@ func runServedRunControlBackendProof(t *testing.T, backend servedparity.Backend)
 
 func runServedRunForkBackendProof(t *testing.T, backend servedparity.Backend) {
 	t.Helper()
+	if backend == servedparity.BackendExplicitPostgres {
+		useDeclaredServePostgresTarget(t)
+	}
 	rt := startServedControlProofRuntimeWithFixture(t, backend, func(t *testing.T) string {
 		return canonicalrouting.CopyRootIngressServedFollowUp(t)
 	})
@@ -1588,12 +1594,18 @@ func runServedAgentRestartBackendProof(t *testing.T, backend servedparity.Backen
 	if backend == servedparity.BackendDefaultSQLite {
 		setDoctorProviderSecret(t, "ANTHROPIC_API_KEY", "agent-restart-provider-fixture")
 	}
+	if backend == servedparity.BackendExplicitPostgres {
+		useDeclaredServePostgresTarget(t)
+	}
 	rt := startServedLiveAgentProofRuntime(t, backend)
 	runServedAgentRestartLifecycleProof(t, rt)
 }
 
 func runServedAgentDirectiveBackendProof(t *testing.T, backend servedparity.Backend) {
 	t.Helper()
+	if backend == servedparity.BackendExplicitPostgres {
+		useDeclaredServePostgresTarget(t)
+	}
 	var effects atomic.Int32
 	faults := &servedDirectivePersistenceFaults{}
 	rt := startServedLiveAgentProofRuntimeWithLLMAndDirectiveFaults(t, backend, servedLiveAgentProofLLMRuntime{calls: &effects, directiveFailures: true}, faults)
@@ -1602,6 +1614,9 @@ func runServedAgentDirectiveBackendProof(t *testing.T, backend servedparity.Back
 
 func runServedRuntimeIngressControlBackendProof(t *testing.T, backend servedparity.Backend) {
 	t.Helper()
+	if backend == servedparity.BackendExplicitPostgres {
+		useDeclaredServePostgresTarget(t)
+	}
 	t.Cleanup(runtimebus.ResumeRuntimeIngress)
 	rt := startServedControlProofRuntimeWithFixture(t, backend, writeServedExternalEventFixture)
 	assertServedRetiredDashboardRefusal(t, rt)
@@ -1610,6 +1625,9 @@ func runServedRuntimeIngressControlBackendProof(t *testing.T, backend servedpari
 
 func runServedMailboxDecisionBackendProof(t *testing.T, backend servedparity.Backend) {
 	t.Helper()
+	if backend == servedparity.BackendExplicitPostgres {
+		useDeclaredServePostgresTarget(t)
+	}
 	credentialPath := filepath.Join(t.TempDir(), "credentials.json")
 	t.Setenv("SWARM_CREDENTIALS_FILE", credentialPath)
 	writeChannelOnboardingLiveToolCredentials(t, credentialPath)
@@ -3319,6 +3337,7 @@ func runServedDynamicAutoEmitSQLiteProof(t *testing.T) {
 
 func runServedDynamicAutoEmitPostgresProof(t *testing.T) {
 	t.Helper()
+	useDeclaredServePostgresTarget(t)
 	_, db, _ := installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
 	})

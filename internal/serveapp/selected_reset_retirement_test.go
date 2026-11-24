@@ -31,6 +31,9 @@ func captureSelectedResetSupervisor(t *testing.T) <-chan *processLifecycleSuperv
 func TestSelectedResetConstructionRequiresExactAuthorityBothStores(t *testing.T) {
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
+			if backend == servedparity.BackendExplicitPostgres {
+				useDeclaredServePostgresTarget(t)
+			}
 			captured := captureSelectedResetSupervisor(t)
 			rt := startServedControlProofRuntime(t, backend)
 			supervisor := <-captured
@@ -97,6 +100,9 @@ func TestSelectedResetConstructionRequiresExactAuthorityBothStores(t *testing.T)
 func TestSelectedResetFinalReceiptLossPreservesSuccessorBothStores(t *testing.T) {
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
+			if backend == servedparity.BackendExplicitPostgres {
+				useDeclaredServePostgresTarget(t)
+			}
 			captured := captureSelectedResetSupervisor(t)
 			rt := startServedControlProofRuntime(t, backend)
 			supervisor := <-captured
@@ -129,6 +135,9 @@ func TestSelectedResetFinalReceiptLossPreservesSuccessorBothStores(t *testing.T)
 func TestSelectedResetRepeatedEmptyTopologyStaysFencedBothStores(t *testing.T) {
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
+			if backend == servedparity.BackendExplicitPostgres {
+				useDeclaredServePostgresTarget(t)
+			}
 			captured := captureSelectedResetSupervisor(t)
 			rt := startServedControlProofRuntime(t, backend)
 			supervisor := <-captured
