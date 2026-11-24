@@ -12,6 +12,9 @@ import (
 func TestRunServeResetFinalReceiptFailureRetryPreservesLiveSuccessorBothStores(t *testing.T) {
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
+			if backend == servedparity.BackendExplicitPostgres {
+				useDeclaredServePostgresTarget(t)
+			}
 			proveServedResetFinalReceiptFailure(t, startServedControlProofRuntime(t, backend))
 		})
 	}

@@ -186,7 +186,7 @@ func fakeAdmissionClaude(root string, args []string, name, workdir string) int {
 		fmt.Fprintln(os.Stdout, `{"type":"result","is_error":false,"result":"ok"}`)
 		return 0
 	}
-	if err := validateReleaseClaudeArgs(command, true); err != nil {
+	if err := validateReleaseClaudeArgs(command, true, true); err != nil {
 		return fakeDockerUnexpected(root, args, err.Error())
 	}
 	rawURL, hostURL, _, err := validateReleaseMCPConfig(dockerOptionValue(args, "--mcp-config"), true)

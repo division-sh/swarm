@@ -1234,7 +1234,7 @@ target:
 			return invocation, fmt.Errorf("Claude live exec workdir = %q, want %q", workdir, releaseE2EAgentWorkdir)
 		}
 	}
-	if err := validateReleaseClaudeArgs(invocation.commandArgs[1:], invocation.startup); err != nil {
+	if err := validateReleaseClaudeArgs(invocation.commandArgs[1:], invocation.startup, false); err != nil {
 		return invocation, err
 	}
 	invocation.sessionID = dockerOptionValue(invocation.commandArgs, "--session-id")
@@ -1252,7 +1252,7 @@ target:
 	return invocation, nil
 }
 
-func validateReleaseClaudeArgs(args []string, startup bool) error {
+func validateReleaseClaudeArgs(args []string, startup, disposable bool) error {
 	valueFlags := map[string]string{}
 	boolFlags := map[string]bool{}
 	valueNames := map[string]bool{
@@ -1321,6 +1321,9 @@ func validateReleaseClaudeArgs(args []string, startup bool) error {
 		wantTools = releaseE2EStartupAllowedTools()
 	}
 	if os.Getenv(releaseResourceReadEnv) == "1" {
+		if startup && disposable {
+			wantTools = append(wantTools, "mcp__runtime-tools__read_state")
+		}
 		if resumed {
 			// A directive has no triggering state-read bindings. Resource and
 			// explicitly granted emit/notification tools remain admitted.
