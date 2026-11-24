@@ -36,6 +36,9 @@ func TestR2NamedRecordEmitSurvivesServedRestartBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
+			if backend == servedparity.BackendExplicitPostgres {
+				useDeclaredServePostgresTarget(t)
+			}
 			rt, restart := startSemanticNumericLiveRuntime(t, backend, root)
 			published := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 				"bundle_hash": rt.BundleHash, "event_name": "numeric.requested", "idempotency_key": uuid.NewString(),

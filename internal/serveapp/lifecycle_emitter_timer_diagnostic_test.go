@@ -30,6 +30,7 @@ func startLifecycleTimerContenderDiagnostic(t *testing.T, root string) (servedCo
 	var deliveryReader servedRunDeliveryReader
 	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { deliveryReader = p.deps.DeliveryStore.SummarizeRun })
 	d := &lifecycleTimerContenderDiagnostic{}
+	useDeclaredServePostgresTarget(t)
 	_, db, _ := installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle { return serveRuntimeWorkspaceStub{} })
 	var receiverReader receiverProofStateReader
 	captureSelectedRuntimePersistence(t, func(persistence serveRuntimePersistence) {
