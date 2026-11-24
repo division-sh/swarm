@@ -45,8 +45,14 @@ func testServedLifecycleEmitterDanglingAdmission(t *testing.T, backend servedpar
 			unsetStoreSelectorEnv(t)
 			config := ""
 			if backend == servedparity.BackendExplicitPostgres {
-				useDeclaredServePostgresTarget(t)
+				if tc.name != "loop" {
+					useDeclaredServePostgresTarget(t)
+				}
 				installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle { return serveRuntimeWorkspaceStub{} })
+				if tc.name == "loop" {
+					// The boot refusal belongs to Run, not to the test's opener.
+					buildStoresForServe = buildStores
+				}
 				config = writeServeRuntimeTestConfig(t)
 			} else {
 				stubServeRuntimeWorkspaceLifecycle(t)
@@ -78,6 +84,11 @@ func testServedLifecycleEmitterDanglingAdmission(t *testing.T, backend servedpar
 				opts.StoreMode, opts.StoreModeSet = "postgres", true
 			}
 			code := runFrom(ctx, repo, opts)
+			if tc.name == "loop" {
+				t.Logf("strict loop boot exit=%d local_preflight=%t runtime_context=%t", code,
+					strings.Contains(out.String(), "serve failed · local preflight"),
+					strings.Contains(out.String(), "serve failed · runtime context"))
+			}
 			if code == 0 || !strings.Contains(out.String(), "event_consumer_exists") || !strings.Contains(out.String(), tc.event) {
 				t.Fatalf("serve did not reject the dangling emitter: code=%d\n%s", code, out.String())
 			}

@@ -1603,6 +1603,9 @@ func runServedAgentRestartBackendProof(t *testing.T, backend servedparity.Backen
 
 func runServedAgentDirectiveBackendProof(t *testing.T, backend servedparity.Backend) {
 	t.Helper()
+	if backend == servedparity.BackendDefaultSQLite {
+		setDoctorProviderSecret(t, "ANTHROPIC_API_KEY", "directive-provider-fixture")
+	}
 	if backend == servedparity.BackendExplicitPostgres {
 		useDeclaredServePostgresTarget(t)
 	}
@@ -1691,6 +1694,11 @@ func startServedConversationForkProofRuntime(t *testing.T, backend servedparity.
 		t.Fatalf("create forkchat proof credential store: %v", err)
 	}
 	t.Setenv("SWARM_CREDENTIALS_FILE", credentialPath)
+	unsetEnvForTest(t, "OPENAI_COMPATIBLE_API_KEY")
+	const bootKey = "OPENAI_COMPATIBLE_API_KEY"
+	if err := credentials.Set(t.Context(), bootKey, "forkchat-proof-key"); err != nil {
+		t.Fatal(err)
+	}
 
 	start := func(configPath string, opts cliapp.ServeOptions) servedControlProofRuntime {
 		var servedDB *sql.DB
@@ -1742,6 +1750,12 @@ func startServedConversationForkProofRuntime(t *testing.T, backend servedparity.
 	default:
 		t.Fatalf("unknown conversation fork served parity backend %q", backend)
 	}
+	if err := credentials.Delete(t.Context(), bootKey); err != nil {
+		t.Fatal(err)
+	}
+	if _, present, err := credentials.Get(t.Context(), bootKey); err != nil || present {
+		t.Fatalf("forkchat prelaunch control requires an absent provider key: present=%t err=%v", present, err)
+	}
 	return servedConversationForkProofRuntime{servedControlProofRuntime: rt, Credentials: credentials, LLMRequests: requests}
 }
 
@@ -1767,6 +1781,7 @@ func writeServedConversationForkConfig(t *testing.T, backend, sqlitePath, provid
 	)
 	path := filepath.Join(t.TempDir(), "swarm.yaml")
 	text := withTestProviderTriggerPlatformInventory(t, strings.Join(lines, "\n")+"\n")
+	text = withInstalledServePostgresConfig(t, text, backend)
 	if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
 		t.Fatalf("write conversation fork served config: %v", err)
 	}
@@ -6329,26 +6344,28 @@ func TestRunServeRuntimeAPIAgentDefaultHostBootsWithoutDocker(t *testing.T) {
 		setDoctorProviderSecrets(t, map[string]string{"ANTHROPIC_API_KEY": "test-startup-key"})
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		called, constructed := false, false
+		called, published := false, false
+		databasePath := filepath.Join(t.TempDir(), "runtime.db")
 		previous := buildStoresForServe
-		buildStoresForServe = func(context.Context, storebackend.Selection, *config.Config, ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {
-			constructed = true
-			return nil, errors.New("must not construct after failed checks")
-		}
+		buildStoresForServe = buildStores
 		t.Cleanup(func() { buildStoresForServe = previous })
 		var out lockedBuffer
 		code := runFrom(ctx, repoRootForTest(), cliapp.ServeOptions{
-			ConfigPath: writeStoreBackendRuntimeConfig(t, "sqlite", filepath.Join(t.TempDir(), "runtime.db")),
+			ConfigPath: writeStoreBackendRuntimeConfig(t, "sqlite", databasePath),
 			SourceRoot: writeServeRuntimeAgentSlugFixture(t, "interrupted-check", "api-worker"),
 			StoreMode:  "sqlite", APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", Output: &out,
+			TestRuntimeContextsReadyHook: func(*runtimepkg.RuntimeContextManager) { published = true },
 			TestLLMRuntime: servedNoopLLMRuntime{servedStartupAnswerObservation: servedStartupAnswerObservation{inspect: func(context.Context) error {
 				called = true
 				cancel()
 				return errors.Join(startuprecovery.DataIntegrityError{}, errors.New("independent check cleanup"))
 			}}},
 		})
-		if !called || constructed || code != serveExitDataIntegrity || !strings.Contains(out.String(), "independent check cleanup") || !strings.Contains(out.String(), "context canceled") {
-			t.Fatalf("failed check lost typed/joined cause: called=%v constructed=%v code=%d output=%s", called, constructed, code, out.String())
+		if !called || published || code != serveExitDataIntegrity || !strings.Contains(out.String(), "independent check cleanup") || !strings.Contains(out.String(), "context canceled") {
+			t.Fatalf("failed check lost typed/joined cause: called=%v published=%v code=%d output=%s", called, published, code, out.String())
+		}
+		if _, err := os.Stat(databasePath); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("failed check created the SQLite database: %v", err)
 		}
 	})
 	missingDocker := filepath.Join(t.TempDir(), "missing-docker")
@@ -7628,7 +7645,7 @@ func TestRunServeRuntimeListenerBindFailuresExitBeforeReadiness(t *testing.T) {
 				if !strings.Contains(out.String(), "listener_availability") || !strings.Contains(out.String(), "FAILED") {
 					t.Fatalf("verbose serve output missing bind failure proof:\n%s", out.String())
 				}
-			} else if !strings.Contains(out.String(), "serve failed · local preflight") || !strings.Contains(out.String(), "listener_availability") {
+			} else if !strings.Contains(out.String(), "serve failed · http listener bind") {
 				t.Fatalf("concise serve output missing bind failure proof:\n%s", out.String())
 			}
 			if strings.Contains(out.String(), "ready                      ok") || strings.Contains(out.String(), "\n  ready in ") {

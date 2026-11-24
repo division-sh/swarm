@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -17,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/tests/support/testutil/llmapi"
 )
 
 func TestServedReceiverAgentBusinessNamespaceBothStores(t *testing.T) {
@@ -214,7 +216,7 @@ func requireServedReceiverAgentCollision(t *testing.T, rt servedControlProofRunt
 }
 
 type receiverCollisionProvider struct {
-	t        testing.TB
+	t        *testing.T
 	mu       sync.Mutex
 	requests []receiverCollisionRequest
 }
@@ -226,14 +228,25 @@ type receiverCollisionRequest struct {
 }
 
 func (p *receiverCollisionProvider) ServeHTTP(w http.ResponseWriter, req *http.Request) {
-	var request receiverCollisionRequest
-	if err := json.NewDecoder(req.Body).Decode(&request); err != nil {
+	body, err := io.ReadAll(req.Body)
+	if err != nil {
 		p.t.Error(err)
-		http.Error(w, "bad request", 400)
+		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
 	if req.URL.Path != "/v1/messages" || req.Header.Get("x-api-key") != "collision-proof-key" {
 		p.t.Errorf("wrong provider route/credential: %s", req.URL.Path)
+		http.Error(w, "wrong provider route or credential", http.StatusBadRequest)
+		return
+	}
+	if replyToFixtureStartup(p.t, w, llmapi.Anthropic, llmapi.Request{Body: body}) {
+		return
+	}
+	var request receiverCollisionRequest
+	if err := json.Unmarshal(body, &request); err != nil {
+		p.t.Error(err)
+		http.Error(w, "bad request", 400)
+		return
 	}
 	prompt := string(request.System)
 	if !strings.Contains(prompt, "AUTHORED_COLLISION_OBSERVER") || strings.Contains(prompt, "INERT_ARCHIVED_PROMPT") || strings.Contains(prompt, "INERT_LIST_PROMPT") {
