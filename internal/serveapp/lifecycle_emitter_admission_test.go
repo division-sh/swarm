@@ -50,7 +50,7 @@ func testServedLifecycleEmitterDanglingAdmission(t *testing.T, backend servedpar
 					useDeclaredServePostgresTarget(t)
 				}
 				installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle { return serveRuntimeWorkspaceStub{} })
-				if tc.name == "loop" {
+				if tc.name == "loop" || tc.name == "gate" {
 					// The boot refusal belongs to Run, not to the test's opener.
 					buildStoresForServe = buildStores
 				}
