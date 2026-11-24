@@ -178,27 +178,52 @@ func SelectedPreparationPlanFingerprint(plan RunForkPlan, frontier RunForkContra
 	if err != nil {
 		return "", err
 	}
+	pendingProducers, err := plan.pendingProducerPreparationWitnesses(frontier)
+	if err != nil {
+		return "", err
+	}
 	raw, err := canonicaljson.Bytes(struct {
-		Plan                  RunForkPlan
-		History               []string
-		Inputs                []InputPublicationCoordinates
-		Arrivals              []InputPublicationCoordinates
-		FirstTurn             *InputPublicationCoordinates
-		Replies               []replycontext.Record
-		Timers                []timerobligation.WorkflowTimerActivationRecord
-		JoinSchedules         []string
-		Transferred           []string
-		Frontier              RunForkContractFrontierAdmission
-		Recipients            RunForkSelectedContractRecipientPlanning
-		Declarations          string
-		OneShots              []string `json:",omitempty"`
-		InheritedConstruction string   `json:",omitempty"`
-	}{plan, history, plan.HistoricalInputCoordinates(), plan.HistoricalJoinCoordinates(), firstTurn, plan.ReplyContexts, plan.WorkflowTimers, joinSchedules, transferred, frontier, planning, declarationRevision, oneShots, inherited})
+		Plan                     RunForkPlan
+		History                  []string
+		Inputs                   []InputPublicationCoordinates
+		Arrivals                 []InputPublicationCoordinates
+		FirstTurn                *InputPublicationCoordinates
+		Replies                  []replycontext.Record
+		Timers                   []timerobligation.WorkflowTimerActivationRecord
+		JoinSchedules            []string
+		Transferred              []string
+		Frontier                 RunForkContractFrontierAdmission
+		Recipients               RunForkSelectedContractRecipientPlanning
+		Declarations             string
+		OneShots                 []string `json:",omitempty"`
+		InheritedConstruction    string   `json:",omitempty"`
+		PendingProducerWitnesses []string `json:",omitempty"`
+	}{plan, history, plan.HistoricalInputCoordinates(), plan.HistoricalJoinCoordinates(), firstTurn, plan.ReplyContexts, plan.WorkflowTimers, joinSchedules, transferred, frontier, planning, declarationRevision, oneShots, inherited, pendingProducers})
 	if err != nil {
 		return "", err
 	}
 	digest := sha256.Sum256(raw)
 	return hex.EncodeToString(digest[:]), nil
+}
+
+func (p RunForkPlan) pendingProducerPreparationWitnesses(frontier RunForkContractFrontierAdmission) ([]string, error) {
+	var digests []string
+	for producer, ids := range p.pendingProducerEvents(frontier) {
+		w, found, err := p.readPendingProducerWitness(producer, ids)
+		if err != nil {
+			return nil, err
+		}
+		if !found {
+			continue
+		}
+		digest, err := p.pendingProducerWitnessDigest(w, producer, ids)
+		if err != nil {
+			return nil, err
+		}
+		digests = append(digests, digest)
+	}
+	sort.Strings(digests)
+	return digests, nil
 }
 
 func SelectedPreparationSourceFingerprint(identity scenarioexecution.EffectiveSourceIdentity) (string, error) {

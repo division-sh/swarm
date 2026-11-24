@@ -101,9 +101,11 @@ func AdmitSelectedContractRouteHistory(req SelectedContractRouteHistoryRequest) 
 
 func inheritedKeyedConstructorEvidence(source semanticview.Source, routes *runtimebus.RouteTable, graph runtimepinrouting.CompiledConnectGraph, cut runfork.RunForkPlan, frontier runfork.RunForkContractFrontierAdmission, child fixedCutConstructor) (runfork.ConstructedRouteEvidence, bool, error) {
 	var absent runfork.ConstructedRouteEvidence
-	w, found := cut.InheritedConstructionWitness()
-	if !found {
-		return absent, false, nil
+	producer := events.RouteIdentity{FlowID: child.instance.TemplateID, FlowInstance: child.instance.InstancePath, EntityID: child.instance.EntityID}
+	marker := producer.FlowInstance == cut.ForkPoint.RoutingSource.Route().FlowInstance
+	w, found, err := inheritedProducerWitness(cut, frontier, producer, marker)
+	if err != nil || !found {
+		return absent, false, err
 	}
 	e := child.evidence
 	original := e.Original.Identity
@@ -137,8 +139,20 @@ func inheritedKeyedConstructorEvidence(source semanticview.Source, routes *runti
 	if err != nil || !found {
 		return absent, false, err
 	}
+	if !marker {
+		bound, err := cut.BindPendingProducerConstructedRouteEvidence(producer, event, frontier)
+		return bound, err == nil, err
+	}
 	bound, err := cut.BindInheritedConstructedRouteEvidence(event, frontier)
 	return bound, err == nil, err
+}
+
+func inheritedProducerWitness(cut runfork.RunForkPlan, frontier runfork.RunForkContractFrontierAdmission, producer events.RouteIdentity, marker bool) (runfork.InheritedConstructionWitness, bool, error) {
+	if marker {
+		w, found := cut.InheritedConstructionWitness()
+		return w, found, nil
+	}
+	return cut.PendingProducerConstructionWitness(producer, frontier)
 }
 
 func deriveAncestorConstructorRecipient(source semanticview.Source, routes *runtimebus.RouteTable, graph runtimepinrouting.CompiledConnectGraph, ancestor runfork.RunForkPlan, original runtimeflowidentity.Instance, selector events.Event) (runfork.RunForkSelectedContractRouteEvent, bool, error) {
