@@ -70,7 +70,7 @@ func issue642RemovedTimerTarget(t *testing.T, final bool) string {
 func issue642RemovedArmedTimerFork(t *testing.T, backend string, final bool) {
 	t.Helper()
 	sourceRoot, targetRoot := issue642TimerContinuationSource(t), issue642RemovedTimerTarget(t, final)
-	opts, start := issue2564ServeHarness(t, backend, sourceRoot, false)
+	opts, start := issue2564ServeHarnessAtLocation(t, backend, sourceRoot, false, "", true)
 	opts.SourceRoot = targetRoot
 	targetProcess, target := start()
 	if code := targetProcess.stop(); code != 0 {

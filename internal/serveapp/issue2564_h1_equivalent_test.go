@@ -106,7 +106,7 @@ func issue2564H1WriteCorpus(t *testing.T) string {
 
 func issue2564H1StartServed(t *testing.T, backend, root string, provider *issue2564H1Provider) issue2564ServedFixture {
 	t.Helper()
-	opts, start := issue2564ServeHarness(t, backend, root, false)
+	opts, start := issue2564ServeHarnessAtLocation(t, backend, root, false, "", true)
 	server := httptest.NewServer(provider)
 	t.Cleanup(server.Close)
 	setDoctorProviderSecret(t, "OPENAI_COMPATIBLE_API_KEY", "issue2564-h1-proof-key")
