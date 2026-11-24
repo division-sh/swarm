@@ -78,7 +78,7 @@ func ObserveClaudeStartup(ctx context.Context, cfg *config.Config, credentials P
 			return nil, err
 		}
 		raw, err := json.Marshal(map[string]any{"mcpServers": map[string]any{"runtime-tools": map[string]any{
-			"type": "http", "url": catalogue.URL, "headers": catalogue.Headers,
+			"type": "http", "url": toolgateway.NormalizeMCPServerURL(catalogue.URL), "headers": catalogue.Headers,
 		}}})
 		if err != nil {
 			return nil, err
