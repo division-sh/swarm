@@ -50,7 +50,7 @@ func TestRunStartForegroundObserverOverflowFromReleaseBinary(t *testing.T) {
 	dockerScript := fmt.Sprintf("#!/bin/sh\n%s=1 exec %s -- \"$@\"\n", fakeDockerHelperEnv, shellQuote(testBinary))
 	writeExecutable(t, filepath.Join(fakeBin, "docker"), dockerScript)
 	emitGate := filepath.Join(fakeRoot, "release-mcp-emit")
-	env := append(releaseProcessEnv(fakeBin, fakeRoot, home), fakeDockerMCPEmitGateEnv+"="+emitGate)
+	env := append(releaseProcessEnv(fakeBin, fakeRoot, home), fakeDockerMCPEmitGateEnv+"="+emitGate, releaseDisposableReadStateEnv+"=1")
 	contracts := filepath.Join(releaseRoot, "contracts")
 	verify := runReleaseCommand(t, 30*time.Second, releaseRoot, env, "", binaryPath, "verify", contracts)
 	if verify.err != nil {

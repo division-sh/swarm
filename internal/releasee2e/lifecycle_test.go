@@ -58,7 +58,7 @@ func TestClaudeCLIManagedLifecycleFromReleaseBinaryDefaults(t *testing.T) {
 	dockerScript := fmt.Sprintf("#!/bin/sh\n%s=1 exec %s -- \"$@\"\n", fakeDockerHelperEnv, shellQuote(testBinary))
 	writeExecutable(t, filepath.Join(fakeBin, "docker"), dockerScript)
 
-	env := releaseProcessEnv(fakeBin, fakeRoot, home)
+	env := append(releaseProcessEnv(fakeBin, fakeRoot, home), releaseDisposableReadStateEnv+"=1")
 	contracts := filepath.Join(releaseRoot, "contracts")
 	// Source preflight precedes credentials, store creation and the managed CLI test transport.
 	verify := runReleaseCommand(t, 45*time.Second, releaseRoot, env, "", binaryPath, "verify", contracts)
@@ -305,12 +305,16 @@ func runReleaseCommand(t *testing.T, timeout time.Duration, dir string, env []st
 
 func assertReleaseDockerEvidence(t *testing.T, records []fakeDockerRecord) {
 	t.Helper()
-	if err := validateReleaseDockerEvidence(records, true); err != nil {
+	if err := validateReleaseDockerEvidenceWithStartupTools(records, releaseE2EDisposableReadStateTools(), true); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func validateReleaseDockerEvidence(records []fakeDockerRecord, observed ...bool) error {
+	return validateReleaseDockerEvidenceWithStartupTools(records, releaseE2EStartupAllowedTools(), observed...)
+}
+
+func validateReleaseDockerEvidenceWithStartupTools(records []fakeDockerRecord, disposableTools []string, observed ...bool) error {
 	required := map[string]int{
 		"docker_version":   0,
 		"network_list":     0,
@@ -397,6 +401,9 @@ func validateReleaseDockerEvidence(records []fakeDockerRecord, observed ...bool)
 				return fmt.Errorf("startup selected builtins = %q, want exact fixture builtin surface", selected)
 			}
 			wantTools := releaseE2EStartupAllowedTools()
+			if record.StartupObservation {
+				wantTools = disposableTools
+			}
 			if allowed := splitAllowedTools(dockerOptionValue(record.Args, "--allowedTools")); !equalStrings(allowed, wantTools) {
 				return fmt.Errorf("startup accepted tools = %q, want exact fixture tool surface", allowed)
 			}
@@ -477,6 +484,10 @@ func validateReleaseDockerEvidence(records []fakeDockerRecord, observed ...bool)
 
 func releaseE2EStartupAllowedTools() []string {
 	return []string{"ExitPlanMode", "WebFetch", "WebSearch", "mcp__runtime-tools__emit_agent_completed", "mcp__runtime-tools__notify_human"}
+}
+
+func releaseE2EDisposableReadStateTools() []string {
+	return append(releaseE2EStartupAllowedTools(), "mcp__runtime-tools__read_state")
 }
 
 func releaseE2ELiveAllowedTools() []string {
@@ -659,6 +670,7 @@ func releaseProcessEnv(fakeBin, fakeRoot, home string) []string {
 		"SWARM_TOOL_GATEWAY_URL":        true,
 		"SWARM_TOOL_GATEWAY_TOKEN":      true,
 		"SWARM_TOOL_GATEWAY_AUTH_TOKEN": true,
+		releaseDisposableReadStateEnv:   true,
 	}
 	env := make([]string, 0, len(os.Environ())+7)
 	for _, entry := range os.Environ() {
