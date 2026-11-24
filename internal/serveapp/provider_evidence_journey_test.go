@@ -85,7 +85,8 @@ func runProviderEvidenceJourney(t *testing.T, backend servedparity.Backend, cell
 	h.start(t)
 	defer h.stop(t)
 	if synthetic != nil && cell == "instance_life" {
-		requireFixtureLLMHistory(t, synthetic, 1, 0)
+		// The fresh boot has only the worker template, not a retained witness.
+		requireFixtureLLMHistory(t, synthetic, 0, 0)
 	}
 	turns := 1
 	if cell == "memory" || cell == "empty_content" || cell == "instance_life" {
@@ -168,7 +169,8 @@ func runProviderEvidenceJourney(t *testing.T, backend servedparity.Backend, cell
 			h.stop(t)
 			h.start(t)
 			if synthetic != nil {
-				requireFixtureLLMHistory(t, synthetic, sequence+1, sequence)
+				// Each joined restart observes the retained witness exactly once.
+				requireFixtureLLMHistory(t, synthetic, sequence, sequence)
 			}
 		} else {
 			requireProviderEvidenceOutput(t, h, runID, published.EventID, sequence)
