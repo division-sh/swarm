@@ -21,6 +21,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/failures"
+	storeselected "github.com/division-sh/swarm/internal/store/selected"
 	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/tests/support/testpostgres"
 	"github.com/division-sh/swarm/tests/support/testutil"
@@ -175,6 +176,7 @@ func testStrictConsumerConstructionRefusal(t *testing.T) {
 		t.Fatal(err)
 	}
 	opts := runtime.DefaultWorkflowContractValidationOptions(nil, executionposture.Live)
+	opts.Purpose = bootverify.ExecutionValidation
 	opts.CheckMCPReachable = false
 	opts.FatalBootWarnings = true
 	validation, summary := runtime.ValidateWorkflowContractSurface(t.Context(), module.SemanticSource(), opts)
@@ -183,6 +185,9 @@ func testStrictConsumerConstructionRefusal(t *testing.T) {
 	}
 	result := ServeCheckStageResult{Validation: validation, Options: opts}
 	result.recordCompletionFailure(t.Context(), "source:"+validation.BootReport.SourceArtifactHash, summary)
+	t.Run("fresh_sqlite", func(t *testing.T) {
+		testStrictConsumerWithAbsentSQLiteStore(t, result, summary)
+	})
 	stage := ServeConstructionChecks{Result: result, Failure: errors.Join(summary, result.Failure())}
 	cleanup := errors.New("independent native cleanup")
 	for _, cell := range []struct {
@@ -207,6 +212,35 @@ func testStrictConsumerConstructionRefusal(t *testing.T) {
 	cancel()
 	if got := stage.StrictConsumerRefusal(canceled, stage.Failure); got != nil {
 		t.Fatalf("canceled construction reclassified: %v", got)
+	}
+}
+
+func testStrictConsumerWithAbsentSQLiteStore(t *testing.T, result ServeCheckStageResult, summary error) {
+	absent := &storeselected.AbsentSQLiteStore{Path: filepath.Join(t.TempDir(), "missing.db")}
+	for _, cell := range []struct {
+		name        string
+		cause       error
+		accountTail bool
+		want        error
+	}{
+		{"typed_absence", absent, true, summary},
+		{"incomplete_absence_evidence", absent, false, nil},
+		{"joined_native_failure", errors.Join(absent, errors.New("independent native read failure")), true, nil},
+		{"joined_cancellation", errors.Join(absent, context.Canceled), true, nil},
+	} {
+		t.Run(cell.name, func(t *testing.T) {
+			current := result
+			current.Validation.BootReport.Observations = slices.Clone(result.Validation.BootReport.Observations)
+			recordDeploymentObservation(t.Context(), &current.Validation, "selected_store_access", bootverify.SelectedStoreAccessOwner,
+				"project:test", failures.ClassDependencyUnavailable, time.Now(), cell.cause)
+			if cell.accountTail {
+				accountVerifyStoreAccessFailure(&current.Validation, "project:test")
+			}
+			stage := ServeConstructionChecks{Result: current, Failure: errors.Join(summary, current.Failure())}
+			if got := stage.StrictConsumerRefusal(t.Context(), errors.Join(stage.Failure, nil)); got != cell.want {
+				t.Fatalf("refusal = %v, want exact result %v", got, cell.want)
+			}
+		})
 	}
 }
 

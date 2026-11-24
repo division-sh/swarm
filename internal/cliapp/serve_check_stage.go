@@ -396,14 +396,25 @@ func (r ServeCheckStageResult) strictConsumerRefusal() error {
 	}
 	var summary error
 	for _, observation := range report.Observations {
-		if observation.CheckID == "check_stage_completion" && summary == nil &&
-			runtime.IsSoleWorkflowAdmissionReportRefusal(observation.Cause) {
+		switch {
+		case observation.CheckID == "check_stage_completion" && summary == nil &&
+			runtime.IsSoleWorkflowAdmissionReportRefusal(observation.Cause):
 			summary = observation.Cause
-		} else if observation.Cause != nil || observation.Status == bootverify.AdmissionFailed || observation.Status == bootverify.AdmissionUnavailable {
+		case observation.NotRunCause != nil:
+			if !isCanonicalSQLiteStoreAbsence(report, observation) {
+				return nil
+			}
+		case observation.Cause != nil || observation.Status == bootverify.AdmissionFailed || observation.Status == bootverify.AdmissionUnavailable:
 			return nil
 		}
 	}
 	return summary
+}
+
+func isCanonicalSQLiteStoreAbsence(report bootverify.Report, observation bootverify.AdmissionObservation) bool {
+	absent, ok := observation.Cause.(*storeselected.AbsentSQLiteStore)
+	return ok && absent != nil && absent.Path == observation.NotRunCause.Path &&
+		report.HasCompleteSelectedStoreAbsence()
 }
 
 func (r ServeCheckStageResult) onlyFatalConsumerWarnings() bool {

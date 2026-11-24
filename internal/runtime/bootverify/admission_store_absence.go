@@ -48,6 +48,13 @@ func SelectedStoreAbsentAdmissionChecks() []SelectedStoreAdmissionCheck {
 		SelectedStoreAdmissionCheck{"startup_process_possession", "internal/store/selected.AdmissionInspection.ProbePossession"})
 }
 
+// HasCompleteSelectedStoreAbsence reports evidence for a single absent
+// selected store, including its complete unobserved inspection tail.
+func (r Report) HasCompleteSelectedStoreAbsence() bool {
+	stores, valid := r.absentStoreEvidence()
+	return valid && len(stores) == 1
+}
+
 func (r Report) absentStoreEvidence() (map[string]map[string]bool, bool) {
 	stores := map[string]map[string]bool{}
 	valid := true
