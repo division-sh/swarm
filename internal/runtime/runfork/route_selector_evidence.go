@@ -376,17 +376,7 @@ func (e ConstructedRouteEvidence) ProofFor(instance string, admission RunForkSel
 		return RunForkSelectedContractDynamicTopologyProof{}, false, fmt.Errorf("invalid constructed route binding")
 	}
 	if e.inherited != nil {
-		witness := e.inherited
-		fingerprint, err := witness.fingerprint(admission.FrontierEvidenceFingerprint, admission.ContractSelection)
-		if err != nil || fingerprint != proof.FixedCutEvidenceFingerprint ||
-			witness.event.SourceEventID != proof.SourceEventIDs[0] || witness.event.EventName != proof.EventNames[0] ||
-			!slices.Equal(witness.event.DerivedRecipients, proof.DerivedRecipients) {
-			return RunForkSelectedContractDynamicTopologyProof{}, false, fmt.Errorf("inherited construction proof differs from its bound ancestor witness: %v", err)
-		}
-		proof.SourceEventIDs = slices.Clone(proof.SourceEventIDs)
-		proof.EventNames = slices.Clone(proof.EventNames)
-		proof.DerivedRecipients = slices.Clone(proof.DerivedRecipients)
-		return proof, true, nil
+		return e.inherited.proofFor(proof, admission)
 	}
 	for _, event := range admission.SelectedRouteEvents {
 		if event.SourceEventID != proof.SourceEventIDs[0] || event.EventName != proof.EventNames[0] || event.Disposition == RunForkSelectedContractDispositionFailClosed {
@@ -421,4 +411,17 @@ func (e ConstructedRouteEvidence) ProofFor(instance string, admission RunForkSel
 		return proof, true, nil
 	}
 	return RunForkSelectedContractDynamicTopologyProof{}, false, fmt.Errorf("constructed route lost its retained selector event")
+}
+
+func (witness *inheritedConstructedRouteBinding) proofFor(proof RunForkSelectedContractDynamicTopologyProof, admission RunForkSelectedContractRouteAdmission) (RunForkSelectedContractDynamicTopologyProof, bool, error) {
+	fingerprint, err := witness.fingerprint(admission.FrontierEvidenceFingerprint, admission.ContractSelection)
+	if err != nil || fingerprint != proof.FixedCutEvidenceFingerprint ||
+		witness.event.SourceEventID != proof.SourceEventIDs[0] || witness.event.EventName != proof.EventNames[0] ||
+		!slices.Equal(witness.event.DerivedRecipients, proof.DerivedRecipients) {
+		return RunForkSelectedContractDynamicTopologyProof{}, false, fmt.Errorf("inherited construction proof differs from its bound ancestor witness: %v", err)
+	}
+	proof.SourceEventIDs = slices.Clone(proof.SourceEventIDs)
+	proof.EventNames = slices.Clone(proof.EventNames)
+	proof.DerivedRecipients = slices.Clone(proof.DerivedRecipients)
+	return proof, true, nil
 }
