@@ -11,6 +11,14 @@ import (
 )
 
 var installedServePostgresFixtures sync.Map
+var declaredServePostgresTargets sync.Map
+
+// Only the named fixture caller opts in; siblings and child tests do not inherit it.
+func useDeclaredServePostgresTarget(t *testing.T) {
+	t.Helper()
+	declaredServePostgresTargets.Store(t, struct{}{})
+	t.Cleanup(func() { declaredServePostgresTargets.Delete(t) })
+}
 
 func recordServePostgresFixture(t *testing.T, dsn string) {
 	t.Helper()
