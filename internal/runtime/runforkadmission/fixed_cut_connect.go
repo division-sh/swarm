@@ -324,7 +324,10 @@ func fixedCutConstructorRouteEvidence(source semanticview.Source, routeTable *ru
 		return absent, false, err
 	}
 	if evidence.Original.CreatingInput.Input == "" {
-		return fixedCutEagerChildRouteEvidence(source, cut, constructors, graph, frontier, constructor, history)
+		childPath := constructor.instance.InstancePath
+		return fixedCutEagerChildRouteEvidence(source, cut, constructors, graph, frontier, constructor, history, func(event runfork.RunForkSelectedContractRouteEvent) []runfork.RunForkContractFrontierRecipient {
+			return fixedCutRecipientsAtPath(event, childPath)
+		})
 	}
 	if !found {
 		if constructor.instance.InstancePath == cut.ForkPoint.RoutingSource.Route().FlowInstance && evidence.InstanceKey != "" && len(evidence.Lineage) != 0 {
@@ -349,7 +352,7 @@ func fixedCutConstructorRouteEvidence(source semanticview.Source, routeTable *ru
 
 // A keyless child shares the parent's construction occurrence, not its input.
 // Only a completed edge to that exact child can supply its historical proof.
-func fixedCutEagerChildRouteEvidence(source semanticview.Source, cut runfork.RunForkPlan, constructors fixedCutConstructionIndex, graph pinrouting.CompiledConnectGraph, frontier runfork.RunForkContractFrontierAdmission, child fixedCutConstructor, history []runfork.RunForkSelectedContractRouteEvent) (runfork.ConstructedRouteEvidence, bool, error) {
+func fixedCutEagerChildRouteEvidence(source semanticview.Source, cut runfork.RunForkPlan, constructors fixedCutConstructionIndex, graph pinrouting.CompiledConnectGraph, frontier runfork.RunForkContractFrontierAdmission, child fixedCutConstructor, history []runfork.RunForkSelectedContractRouteEvent, recipientsAtPath func(runfork.RunForkSelectedContractRouteEvent) []runfork.RunForkContractFrontierRecipient) (runfork.ConstructedRouteEvidence, bool, error) {
 	var absent runfork.ConstructedRouteEvidence
 	parent, found := constructors.byPath[child.instance.ParentRoute.FlowInstance]
 	if !found || child.evidence.InstanceKey != "" ||
@@ -366,7 +369,7 @@ func fixedCutEagerChildRouteEvidence(source semanticview.Source, cut runfork.Run
 		if event.Disposition != runfork.RunForkSelectedContractDispositionEvidenceOnly {
 			continue
 		}
-		recipients := fixedCutRecipientsAtPath(event, child.instance.InstancePath)
+		recipients := recipientsAtPath(event)
 		routes, err := fixedCutEagerChildEdge(source, cut, constructors, graph, target, event, recipients)
 		if err != nil {
 			return absent, false, err
