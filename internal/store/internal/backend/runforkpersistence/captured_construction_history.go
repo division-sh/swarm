@@ -148,6 +148,10 @@ func retainPendingProducerWitnessReaders(plan runfork.RunForkPlan, snapshot *run
 		}
 	}
 	readers := make(map[events.RouteIdentity]func() (runfork.InheritedConstructionWitness, bool, error))
+	type witnessResult struct {
+		witness runfork.InheritedConstructionWitness
+		found   bool
+	}
 	for _, entity := range plan.Entities {
 		meta := entity.MaterializationMetadata
 		if meta == nil || meta.InstanceKey == "" || meta.HistoricalConstruction == nil || meta.FlowInstance == meta.FlowTemplate {
@@ -156,25 +160,17 @@ func retainPendingProducerWitnessReaders(plan runfork.RunForkPlan, snapshot *run
 		route := events.RouteIdentity{EntityID: entity.EntityID, FlowInstance: meta.FlowInstance, FlowID: meta.FlowTemplate}
 		if producers[route] {
 			// Only immutable snapshot data is held here; the transaction is not captured.
-			readers[route] = pendingProducerWitnessReader(plan, snapshot, entity)
+			read := sync.OnceValues(func() (witnessResult, error) {
+				witness, found, err := readInheritedCreatingWitness(plan, snapshot, entity)
+				return witnessResult{witness, found}, err
+			})
+			readers[route] = func() (runfork.InheritedConstructionWitness, bool, error) {
+				value, err := read()
+				return value.witness, value.found, err
+			}
 		}
 	}
 	return plan.WithPendingProducerWitnessReaders(readers)
-}
-
-func pendingProducerWitnessReader(plan runfork.RunForkPlan, snapshot *runForkRevisionSnapshot, entity runfork.RunForkEntityState) func() (runfork.InheritedConstructionWitness, bool, error) {
-	type result struct {
-		witness runfork.InheritedConstructionWitness
-		found   bool
-	}
-	read := sync.OnceValues(func() (result, error) {
-		witness, found, err := readInheritedCreatingWitness(plan, snapshot, entity)
-		return result{witness, found}, err
-	})
-	return func() (runfork.InheritedConstructionWitness, bool, error) {
-		value, err := read()
-		return value.witness, value.found, err
-	}
 }
 
 func readInheritedCreatingWitness(plan runfork.RunForkPlan, snapshot *runForkRevisionSnapshot, entity runfork.RunForkEntityState) (runfork.InheritedConstructionWitness, bool, error) {
