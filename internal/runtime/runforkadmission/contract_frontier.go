@@ -185,7 +185,14 @@ func AdmitContractFrontier(req ContractFrontierRequest) (runfork.RunForkContract
 		_, inputPublication := req.Plan.ExecutionInputPublication(frontier[i].SourceEventID)
 		var removedCompletedNode bool
 		if inputPublication || (!continuingFanOut && !continuingRequest) {
-			frontier[i].DerivedRecipients, removedCompletedNode = excludeCompletedFrontierRecipients(req.Plan, frontier[i])
+			var ancestor []runfork.AncestorDeliveryCompletion
+			if !inputPublication && reply == nil {
+				ancestor, err = req.Plan.OrdinaryReplayAncestorCompletions(frontier[i].SourceEventID)
+				if err != nil {
+					return runfork.RunForkContractFrontierAdmission{}, err
+				}
+			}
+			frontier[i].DerivedRecipients, removedCompletedNode = excludeCompletedFrontierRecipients(req.Plan, frontier[i], ancestor)
 		}
 		if inputPublication || continuingFanOut || continuingRequest || removedCompletedNode {
 			for _, recipient := range frontier[i].DerivedRecipients {
@@ -243,12 +250,19 @@ func AdmitContractFrontier(req ContractFrontierRequest) (runfork.RunForkContract
 	}, nil
 }
 
-func excludeCompletedFrontierRecipients(plan runfork.RunForkPlan, event runfork.RunForkContractFrontierEvent) ([]forkrecipient.Evidence, bool) {
-	var completed []events.DeliveryRoute
+func excludeCompletedFrontierRecipients(plan runfork.RunForkPlan, event runfork.RunForkContractFrontierEvent, ancestor []runfork.AncestorDeliveryCompletion) ([]forkrecipient.Evidence, bool) {
+	type historicalSlot struct {
+		run   string
+		route events.DeliveryRoute
+	}
+	var completed []historicalSlot
 	for _, item := range plan.PendingWork {
 		if item.EventID == event.SourceEventID && item.Classification == runfork.RunForkPendingClassificationDeliveredCompleted {
-			completed = append(completed, item.DeliveryRoute)
+			completed = append(completed, historicalSlot{plan.SourceRunID, item.DeliveryRoute})
 		}
+	}
+	for _, item := range ancestor {
+		completed = append(completed, historicalSlot{item.SourceRunID, item.Route})
 	}
 	if len(completed) == 0 {
 		return event.DerivedRecipients, false
@@ -256,10 +270,10 @@ func excludeCompletedFrontierRecipients(plan runfork.RunForkPlan, event runfork.
 	removedNode := false
 	pending := event.DerivedRecipients[:0]
 	for _, recipient := range event.DerivedRecipients {
-		if i := slices.IndexFunc(completed, func(route events.DeliveryRoute) bool {
-			return matchesHistoricalRecipient(plan.SourceRunID, route, recipient)
+		if i := slices.IndexFunc(completed, func(slot historicalSlot) bool {
+			return matchesHistoricalRecipient(slot.run, slot.route, recipient)
 		}); i >= 0 {
-			removedNode = removedNode || completed[i].Recipient.IsNode()
+			removedNode = removedNode || completed[i].route.Recipient.IsNode()
 			continue
 		}
 		pending = append(pending, recipient)

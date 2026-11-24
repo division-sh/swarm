@@ -10,7 +10,9 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -124,6 +126,108 @@ func expectSelectedInputLineage(mock sqlmock.Sqlmock, f selectedInputReadFixture
 	mock.ExpectQuery(`FROM run_fork_selected_contract_executions WHERE`).
 		WithArgs(f.attachment.evidence.binding.ForkRunID, f.source.SourceEventID,
 			activityidentity.ForkLineageEventID(f.attachment.evidence.binding.ForkRunID, f.source.SourceEventID)).WillReturnRows(rows)
+}
+
+func TestOrdinaryReplayAncestorCompletionsRequireEachRetainedLink(t *testing.T) {
+	nativeRun := uuid.NewString()
+	native := eventtest.ChildForProducerWithRoutingSource(uuid.NewString(), "task.start", eventtest.Producer(events.EventProducerPlatform, "fixture"), "", []byte(`{}`), 0,
+		events.EventLineage{RunID: nativeRun, ParentEventID: uuid.NewString(), ExecutionMode: executionmode.Live},
+		events.EventEnvelope{}, eventtest.RootRoutingSource(nativeRun), time.Unix(99, 0).UTC())
+	first, firstEvent := ordinaryCompletionReplayFixture(t, native)
+	second, secondEvent := ordinaryCompletionReplayFixture(t, firstEvent)
+	firstBinding, secondBinding := first.attachment.evidence.binding, second.attachment.evidence.binding
+	completed := runfork.RunForkPendingWork{
+		EventID: native.ID(), DeliveryID: uuid.NewString(), Classification: runfork.RunForkPendingClassificationDeliveredCompleted,
+		DeliveryRoute: events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(identitytest.RootNode(t, "consumer")),
+			Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: ".", FlowInstance: nativeRun, EntityID: nativeRun})},
+	}
+	parents := map[string]ordinaryReplayParent{
+		secondEvent.RunID(): {binding: secondBinding, cut: ordinaryCompletionReplayCut(t, firstEvent, first.schema)},
+		firstEvent.RunID():  {binding: firstBinding, cut: ordinaryCompletionReplayCut(t, native, first.schema), pending: []runfork.RunForkPendingWork{completed}},
+	}
+	cut := ordinaryCompletionReplayCut(t, secondEvent, second.schema)
+	for _, name := range []string{"deep_match", "missing_inner_link", "crossed_inner_link"} {
+		t.Run(name, func(t *testing.T) {
+			tx, mock := startSnapshotTransaction(t)
+			expectSelectedInputLineage(mock, second, 1)
+			inner, count := first, 1
+			if name == "missing_inner_link" {
+				count = 0
+			}
+			if name == "crossed_inner_link" {
+				inner.lineage.SourceRunID = uuid.NewString()
+			}
+			expectSelectedInputLineage(mock, inner, count)
+			rows, err := readOrdinaryReplayAncestorCompletions(context.Background(), tx, cut, nil, secondEvent.ID(), parents)
+			if name == "deep_match" {
+				if err != nil || len(rows) != 1 || rows[0].SourceRunID != nativeRun || rows[0].Point != firstBinding.ForkPoint ||
+					rows[0].EventID != native.ID() || rows[0].DeliveryID != completed.DeliveryID {
+					t.Fatalf("completion did not survive the empty intermediate cut: %+v / %v", rows, err)
+				}
+			} else if err == nil || len(rows) != 0 {
+				t.Fatalf("non-exact inner lineage granted a completion: %+v / %v", rows, err)
+			}
+		})
+	}
+}
+
+func ordinaryCompletionReplayFixture(t *testing.T, parent events.Event) (selectedInputReadFixture, events.Event) {
+	t.Helper()
+	f := newSelectedInputReadFixture(t)
+	binding := &f.attachment.evidence.binding
+	binding.SourceRunID = parent.RunID()
+	binding.ForkPoint = runfork.RunForkPoint{Kind: runfork.RunForkPointEvent, EventID: parent.ID(), Revision: 3}
+	binding.ForkEventID = parent.ID()
+	f.source.SourceEventID = parent.ID()
+	f.lineage.SourceRunID, f.lineage.SourceEventID = parent.RunID(), parent.ID()
+	f.lineage.ForkEventID = activityidentity.ForkLineageEventID(binding.ForkRunID, parent.ID())
+	lineage, err := events.NewSelectedForkLineage(binding.ForkRunID, parent.RunID(), parent.ID(), f.lineage.SelectionAuthority, "", parent.ExecutionMode())
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := eventtest.RootRoutingSource(binding.ForkRunID)
+	event := eventtest.SelectedForkReplayWithRoutingSource(f.lineage.ForkEventID, parent.Type(),
+		eventtest.Producer(events.EventProducerPlatform, f.lineage.SelectionAuthority), parent.Payload(), lineage,
+		events.EnvelopeForSourceRoute(events.EventEnvelope{}, source.Route()), source, f.lineage.CreatedAt)
+	return f, event
+}
+
+func ordinaryCompletionReplayCut(t *testing.T, event events.Event, schema events.PayloadSchemaBinding) runForkReplayCut {
+	t.Helper()
+	payload, err := events.NewPayloadAdmission(event.Payload(), schema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	event, err = events.ApplyPayloadAdmission(event, payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	admitted, err := events.AdmitForPersistence(event, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ledger, err := events.NewConnectEvaluationLedger(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	class := events.EventWriteNormalPublication
+	if event.AdmissionClass() == events.EventAdmissionSelectedForkReplay {
+		class = events.EventWriteSelectedForkPublication
+	}
+	settlement, err := events.NewNoDeliverySettlement(class, events.NoDeliveryDeclaredConsumerNoPlan, ledger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, err := eventrecord.FromAdmitted(admitted, settlement)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cut, err := newRunForkReplayCut(&runForkRevisionSnapshot{RunID: event.RunID(), Revision: 3,
+		Events: []runForkRevisionEvent{genericPublicationRevisionEvent(record, event)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cut
 }
 
 func TestSelectedForkInputReadRequiresCanonicalRequest(t *testing.T) {

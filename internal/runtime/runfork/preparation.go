@@ -182,6 +182,10 @@ func SelectedPreparationPlanFingerprint(plan RunForkPlan, frontier RunForkContra
 	if err != nil {
 		return "", err
 	}
+	ancestorCompletions, err := plan.ordinaryPreparationCompletions(frontier)
+	if err != nil {
+		return "", err
+	}
 	raw, err := canonicaljson.Bytes(struct {
 		Plan                     RunForkPlan
 		History                  []string
@@ -195,15 +199,30 @@ func SelectedPreparationPlanFingerprint(plan RunForkPlan, frontier RunForkContra
 		Frontier                 RunForkContractFrontierAdmission
 		Recipients               RunForkSelectedContractRecipientPlanning
 		Declarations             string
-		OneShots                 []string `json:",omitempty"`
-		InheritedConstruction    string   `json:",omitempty"`
-		PendingProducerWitnesses []string `json:",omitempty"`
-	}{plan, history, plan.HistoricalInputCoordinates(), plan.HistoricalJoinCoordinates(), firstTurn, plan.ReplyContexts, plan.WorkflowTimers, joinSchedules, transferred, frontier, planning, declarationRevision, oneShots, inherited, pendingProducers})
+		OneShots                 []string                                `json:",omitempty"`
+		InheritedConstruction    string                                  `json:",omitempty"`
+		PendingProducerWitnesses []string                                `json:",omitempty"`
+		AncestorCompletions      map[string][]AncestorDeliveryCompletion `json:",omitempty"`
+	}{plan, history, plan.HistoricalInputCoordinates(), plan.HistoricalJoinCoordinates(), firstTurn, plan.ReplyContexts, plan.WorkflowTimers, joinSchedules, transferred, frontier, planning, declarationRevision, oneShots, inherited, pendingProducers, ancestorCompletions})
 	if err != nil {
 		return "", err
 	}
 	digest := sha256.Sum256(raw)
 	return hex.EncodeToString(digest[:]), nil
+}
+
+func (p RunForkPlan) ordinaryPreparationCompletions(frontier RunForkContractFrontierAdmission) (map[string][]AncestorDeliveryCompletion, error) {
+	out := make(map[string][]AncestorDeliveryCompletion)
+	for _, event := range frontier.FrontierEvents {
+		rows, err := p.OrdinaryReplayAncestorCompletions(event.SourceEventID)
+		if err != nil {
+			return nil, err
+		}
+		if len(rows) > 0 {
+			out[event.SourceEventID] = rows
+		}
+	}
+	return out, nil
 }
 
 func (p RunForkPlan) pendingProducerPreparationWitnesses(frontier RunForkContractFrontierAdmission) ([]string, error) {
