@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
@@ -12,8 +13,31 @@ import (
 
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	"github.com/division-sh/swarm/tests/support/testutil/llmapi"
 	"github.com/division-sh/swarm/tests/support/testutil/packfixture"
 )
+
+func replyToFixtureStartup(t *testing.T, w http.ResponseWriter, protocol llmapi.Protocol, request llmapi.Request) bool {
+	t.Helper()
+	reply, ok := llmapi.StartupAnswer(request)
+	if !ok {
+		return false
+	}
+	if err := llmapi.WriteReply(w, protocol, reply); err != nil {
+		t.Error(err)
+		http.Error(w, "encode startup reply", http.StatusInternalServerError)
+	}
+	return true
+}
+
+func requireFixtureLLMHistory(t *testing.T, provider *llmapi.Server, startup, business int) {
+	t.Helper()
+	requests := provider.Requests()
+	actors := len(llmapi.ActorRequests(requests))
+	if got := len(requests) - actors; got != startup || actors != business || len(requests) != startup+business {
+		t.Fatalf("provider request counts: startup=%d business=%d total=%d; want %d/%d/%d", got, actors, len(requests), startup, business, startup+business)
+	}
+}
 
 func freeDoctorTCPPort(t *testing.T) string {
 	t.Helper()

@@ -26,7 +26,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
-	storeselected "github.com/division-sh/swarm/internal/store/selected"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/tests/support/testutil"
 	"github.com/google/uuid"
@@ -162,20 +161,19 @@ func newServedBoundaryFixtureLifetime(t *testing.T, backend, sourceRoot string) 
 		location = filepath.Join(t.TempDir(), ".swarm", "boundary.sqlite")
 	case "postgres":
 		location = testutil.StartEmptyPostgresDSN(t)
+		recordServePostgresFixture(t, location)
 	default:
 		t.Fatalf("unsupported boundary fixture backend %q", backend)
 	}
 	var selected *selectedStoreOwner
 	previous := buildStoresForServe
+	constructor := previous
+	if backend == "postgres" {
+		constructor = buildStores
+	}
 	buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config, bootCheck ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {
 		var err error
-		if backend == "postgres" {
-			selected, err = storeselected.OpenRuntime(ctx, storeselected.RuntimeRequest{
-				Selection: selection, PostgresDSN: location, SessionLockTTL: runtimeSessionLockTTL(cfg), BootCheckInput: firstBootCheckInput(bootCheck),
-			})
-		} else {
-			selected, err = previous(ctx, selection, cfg, bootCheck...)
-		}
+		selected, err = constructor(ctx, selection, cfg, bootCheck...)
 		return selected, err
 	}
 	t.Cleanup(func() { buildStoresForServe = previous })

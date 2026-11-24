@@ -150,6 +150,12 @@ func TestRuntimeConstructorWaitsBeforeBootstrapBothStores(t *testing.T) {
 			} else {
 				dsn, _, _ := testutil.StartEmptyPostgres(t)
 				t.Run("checks_under_native_possession", func(t *testing.T) {
+					deadline, ok := t.Deadline()
+					if !ok {
+						t.Fatal("possession observation requires the test deadline")
+					}
+					observationCtx, cancel := context.WithDeadline(t.Context(), deadline)
+					defer cancel()
 					parameters, err := testpostgres.ParseConnectionParameters(dsn)
 					if err != nil {
 						t.Fatal(err)
@@ -171,7 +177,7 @@ func TestRuntimeConstructorWaitsBeforeBootstrapBothStores(t *testing.T) {
 						if err != nil {
 							return err
 						}
-						observed, err := other.ProbePossession(t.Context())
+						observed, err := other.ProbePossession(observationCtx)
 						if closeErr := other.Close(); err != nil || closeErr != nil || observed.Available {
 							t.Fatalf("checks did not retain native exclusion: %+v, %v, %v", observed, err, closeErr)
 						}
