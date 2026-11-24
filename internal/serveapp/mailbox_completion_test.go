@@ -190,7 +190,7 @@ func gateCompletionAssertResponse(t *testing.T, result gateCompletionHTTPResult,
 	}
 }
 
-func gateCompletionHarness(t *testing.T, backend, root string, firstChecked bool) (*cliapp.ServeOptions, func() (*serveRuntimeTestProcess, servedControlProofRuntime)) {
+func gateCompletionHarness(t *testing.T, backend, root string, useDeclaration bool) (*cliapp.ServeOptions, func() (*serveRuntimeTestProcess, servedControlProofRuntime)) {
 	t.Helper()
 	if _, err := packartifact.ImportEmbeddedPack(root, "telegram", packfixture.EmbeddedBase(t)); err != nil {
 		t.Fatal(err)
@@ -215,7 +215,7 @@ func gateCompletionHarness(t *testing.T, backend, root string, firstChecked bool
 		t.Cleanup(cleanup)
 		original := buildStoresForServe
 		buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config, bootCheck ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {
-			target, err := firstCheckedPostgresFixtureDSN(ctx, cfg, dsn, &firstChecked, bootCheck)
+			target, err := checkedPostgresFixtureDSN(ctx, cfg, dsn, useDeclaration, bootCheck)
 			if err != nil {
 				return nil, err
 			}
