@@ -60,7 +60,7 @@ func AdmitSelectedContractRouteHistory(req SelectedContractRouteHistoryRequest) 
 	if err != nil {
 		return runfork.RunForkSelectedContractRouteAdmission{}, err
 	}
-	constructedEvidence, err := fixedCutConstructedRouteEvidence(req.Source, routeTable, req.Plan, constructors, connectGraph, req.FrontierAdmission, dynamicFlowInstances, routeEvents)
+	constructedEvidence, err := bindFixedCutConstructedRoutes(req.Source, routeTable, req.Plan, constructors, connectGraph, req.FrontierAdmission, dynamicFlowInstances, routeEvents)
 	if err != nil {
 		return runfork.RunForkSelectedContractRouteAdmission{}, err
 	}
@@ -173,12 +173,7 @@ func deriveAncestorConstructorRecipient(source semanticview.Source, routes *runt
 		return absent, false, err
 	}
 	event := eventsAtCut[0]
-	recipients := event.DerivedRecipients[:0]
-	for _, recipient := range event.DerivedRecipients {
-		if recipient.Path == original.InstancePath {
-			recipients = append(recipients, recipient)
-		}
-	}
+	recipients := fixedCutConstructedRouteEvidence(event, original.InstancePath)
 	if len(recipients) == 0 || len(recipients) != len(history.deliveryRoutes) {
 		return absent, false, nil
 	}
