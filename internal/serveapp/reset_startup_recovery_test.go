@@ -34,6 +34,7 @@ func TestServedResetPendingStartupUsesAdmittedSourcesBothStores(t *testing.T) {
 						WorkspaceBackend: "host", WorkspaceBackendSet: true,
 					}
 					if backend == servedparity.BackendExplicitPostgres {
+						useDeclaredServePostgresTarget(t)
 						installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle { return serveRuntimeWorkspaceStub{} })
 						opts.ConfigPath = writeServeRuntimeTestConfig(t)
 						opts.StoreMode, opts.StoreModeSet = "postgres", true
