@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"maps"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
@@ -235,6 +237,7 @@ type crossInstanceSelectedForkStore interface {
 	storetest.RootedDataCatalogStore
 	bus.PreparedPublishEventReader
 	deliverylifecycle.Store
+	LoadOperatorEvent(context.Context, string) (operatorread.OperatorEventFull, error)
 }
 
 func proveSelectedCrossInstanceFork(t *testing.T, backend catalogRuntimeBackend, name string) {
@@ -537,6 +540,9 @@ func proveSelectedCrossInstanceFork(t *testing.T, backend catalogRuntimeBackend,
 			}
 			select {
 			case <-wait.Done():
+				if deep && !counted {
+					defer logSelectedReceiverCountFailure(t, ctx, selected, plan, hop, child, projected)
+				}
 				t.Fatalf("fork did not execute from captured zero exactly once: instances=%+v error=%v", childInstances, wait.Err())
 			case <-time.After(10 * time.Millisecond):
 			}
@@ -562,6 +568,66 @@ func proveSelectedCrossInstanceFork(t *testing.T, backend catalogRuntimeBackend,
 		}
 		sourceRun, cut, receiverPath = child, childEvent, projected.InstancePath
 	}
+}
+
+func logSelectedReceiverCountFailure(t *testing.T, ctx context.Context, selected crossInstanceSelectedForkStore, plan runfork.RunForkPlan, hop int, child string, receiver flowidentity.Instance) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(ctx, catalogRuntimePublishTimeout)
+	defer cancel()
+	cutEvents, cutEventsKnown := plan.HistoricalEventIDs(plan.ForkPoint.Revision)
+	t.Logf("receiver capture hop=%d source_run=%s cut_event=%s cut_revision=%d child_run=%s receiver=%s entity=%s cut_event_set_known=%t",
+		hop, plan.SourceRunID, plan.ForkPoint.EventID, plan.ForkPoint.Revision, child, receiver.InstancePath, receiver.EntityID, cutEventsKnown)
+	for _, item := range plan.PendingWork {
+		if item.DeliveryID == "" {
+			continue
+		}
+		target := item.DeliveryRoute.Target.Route()
+		t.Logf("receiver capture at_cut event=%s name=%s delivery=%s classification=%s status=%s recipient=%s target=%s entity=%s claim=%d",
+			item.EventID, item.EventName, item.DeliveryID, item.Classification, item.Status, item.DeliveryRoute.Recipient.ID(), target.FlowInstance, target.EntityID, item.ClaimVersion)
+	}
+	seen := make(map[string]bool)
+	var writes int
+	for _, write := range storetest.ObserveEntityMutationHistory(t, ctx, selected, child) {
+		if write.EntityID != receiver.EntityID || write.Domain != "authored_field" || write.Path != "cross_count" {
+			continue
+		}
+		writes++
+		t.Logf("receiver capture write=%s event=%s event_name=%s writer=%s/%s step=%s old=%s new=%s at=%s",
+			write.MutationID, write.CausedByEvent, write.EventName, write.WriterType, write.WriterID, write.HandlerStep, write.OldValue, write.NewValue, write.CreatedAt.UTC().Format(time.RFC3339Nano))
+		logSelectedReceiverEvent(t, ctx, selected, write.CausedByEvent, receiver, cutEvents, seen)
+	}
+	t.Logf("receiver capture journal rows for cross_count=%d", writes)
+}
+
+func logSelectedReceiverEvent(t *testing.T, ctx context.Context, selected crossInstanceSelectedForkStore, id string, receiver flowidentity.Instance, cutEvents []string, seen map[string]bool) {
+	t.Helper()
+	if id == "" || seen[id] {
+		return
+	}
+	seen[id] = true
+	observed, err := selected.LoadOperatorEvent(ctx, id)
+	if err != nil {
+		t.Logf("receiver capture event=%s read unavailable: %v", id, err)
+		return
+	}
+	event, err := observed.EventSnapshot()
+	if err != nil {
+		t.Logf("receiver capture event=%s snapshot unavailable: %v", id, err)
+		return
+	}
+	lineage, replay := event.SelectedForkLineage()
+	source := event.RoutingSource().Route()
+	t.Logf("receiver capture event=%s name=%s run=%s class=%s producer=%s/%s producer_path=%s producer_entity=%s parent_event=%s selected_replay=%t replay_source_run=%s replay_source_event=%s in_cut_events=%t",
+		id, event.Type(), event.RunID(), event.AdmissionClass(), event.ProducerType(), event.SourceAgent(), source.FlowInstance, source.EntityID,
+		event.ParentEventID(), replay, lineage.SourceRunID(), lineage.SourceEventID(), slices.Contains(cutEvents, id))
+	for _, delivery := range observed.Deliveries {
+		target := delivery.Route.Target.Route()
+		t.Logf("receiver capture event=%s delivery=%s subscriber=%s/%s status=%s target=%s entity=%s claim=%d receiver=%t",
+			id, delivery.DeliveryID, delivery.SubscriberType, delivery.SubscriberID, delivery.Status, target.FlowInstance, target.EntityID, delivery.ClaimVersion,
+			target.FlowID == receiver.TemplateID && target.FlowInstance == receiver.InstancePath && target.EntityID == receiver.EntityID)
+	}
+	logSelectedReceiverEvent(t, ctx, selected, event.ParentEventID(), receiver, cutEvents, seen)
+	logSelectedReceiverEvent(t, ctx, selected, lineage.SourceEventID(), receiver, cutEvents, seen)
 }
 
 func selectedFirstHopClaim(t *testing.T, source semanticview.Source, original events.DeliveryRoute) events.ConnectExecutionClaim {
