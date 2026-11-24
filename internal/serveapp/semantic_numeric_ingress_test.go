@@ -33,6 +33,7 @@ func TestServedSemanticNumericIdempotencyReplay(t *testing.T) {
 					opts := cliapp.ServeOptions{SourceRoot: root, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig()}
 					var db *sql.DB
 					if backend == servedparity.BackendExplicitPostgres {
+						useDeclaredServePostgresTarget(t)
 						_, db, _ = installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle { return serveRuntimeWorkspaceStub{} })
 						opts.ConfigPath = writeServeRuntimeTestConfig(t)
 						opts.StoreMode = "postgres"
