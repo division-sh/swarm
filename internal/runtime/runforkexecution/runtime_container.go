@@ -896,11 +896,12 @@ func (c selectedContractForkLocalRuntimeContainer) selectedSourcePublicationCont
 	if err != nil {
 		return nil, err
 	}
-	if !continuing && !request && len(source.ContinuedRecipientRoutes) == 0 && len(source.ContinuedReplyRequests) == 0 && source.ContinuedReplyReturn == nil {
+	namedContinuation := continuing || request || len(source.ContinuedRecipientRoutes) != 0 || len(source.ContinuedReplyRequests) != 0 || source.ContinuedReplyReturn != nil
+	if !namedContinuation && !c.hasMixedOrdinaryPublicationCut(source) {
 		return ctx, nil
 	}
 	for _, plan := range c.req.RecipientPlanning.RecipientPlanEvents {
-		if plan.SourceEventID != source.SourceEventID {
+		if plan.SourceEventID != source.SourceEventID || (!namedContinuation && len(plan.Recipients) == 0) {
 			continue
 		}
 		ctx, err = runtimebus.WithSelectedForkRecipientPlan(ctx, event, plan.Recipients)
@@ -915,6 +916,31 @@ func (c selectedContractForkLocalRuntimeContainer) selectedSourcePublicationCont
 		return runtimebus.WithSelectedForkReplyReturn(ctx, event, *source.ContinuedReplyReturn)
 	}
 	return ctx, nil
+}
+
+func (c selectedContractForkLocalRuntimeContainer) hasMixedOrdinaryPublicationCut(source runfork.RunForkSelectedContractSourceEvent) bool {
+	if _, input := c.req.SourcePlan.ExecutionInputPublication(source.SourceEventID); input || source.JoinContinuation.Present() {
+		return false
+	}
+	if _, join := c.req.SourcePlan.HistoricalJoinPublication(source.SourceEventID); join {
+		return false
+	}
+	var completed, unfinished bool
+	for _, item := range c.req.SourcePlan.PendingWork {
+		if item.EventID != source.SourceEventID || item.DeliveryID == "" || item.DeliveryRoute.Recipient.ID() == "" {
+			continue
+		}
+		switch item.Classification {
+		case runfork.RunForkPendingClassificationDeliveredCompleted:
+			completed = true
+		case runfork.RunForkPendingClassificationPending, runfork.RunForkPendingClassificationInProgress, runfork.RunForkPendingClassificationFailedRetryable:
+			unfinished = true
+		}
+		if completed && unfinished {
+			return true
+		}
+	}
+	return false
 }
 
 func (c selectedContractForkLocalRuntimeContainer) awaitTerminalSettlement(ctx context.Context, failures <-chan error) error {
