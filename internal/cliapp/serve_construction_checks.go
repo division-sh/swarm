@@ -3,6 +3,7 @@ package cliapp
 import (
 	"context"
 	"errors"
+	"reflect"
 
 	"github.com/division-sh/swarm/internal/runtime/bootverify"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
@@ -44,4 +45,28 @@ func (c *ServeConstructionChecks) InspectConstruction(ctx context.Context, targe
 		err = c.Result.Revalidate(ctx, c.Input)
 	}
 	return c.Result.Validation.BootReport, err
+}
+
+// StrictConsumerRefusal returns the original validation refusal only when
+// native construction returned that stage failure without a cleanup sibling.
+func (c *ServeConstructionChecks) StrictConsumerRefusal(ctx context.Context, failure error) error {
+	if ctx.Err() != nil || !isUnaccompaniedConstructionFailure(failure, c.Failure) {
+		return nil
+	}
+	return c.Result.strictConsumerRefusal()
+}
+
+func isUnaccompaniedConstructionFailure(failure, stage error) bool {
+	if stage == nil || !reflect.TypeOf(stage).Comparable() {
+		return false
+	}
+	if failure == stage {
+		return true
+	}
+	// Both native constructors join the stage failure with their own cleanup.
+	if joined, ok := failure.(interface{ Unwrap() []error }); ok {
+		causes := joined.Unwrap()
+		return len(causes) == 1 && causes[0] == stage
+	}
+	return false
 }
