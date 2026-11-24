@@ -49,11 +49,11 @@ func issue2564ServeHarness(t *testing.T, backend, root string, mock bool) (*clia
 
 // An explicit native location lets process-death proofs reopen the same store.
 // Ordinary harness calls retain their original allocation and configuration.
-func issue2564ServeHarnessAtLocation(t *testing.T, backend, root string, mock bool, location string) (*cliapp.ServeOptions, func() (*serveRuntimeTestProcess, issue2564ServedFixture)) {
-	return issue2564ServeHarnessWithPosture(t, backend, root, mock, location, executionposture.MockOnly)
+func issue2564ServeHarnessAtLocation(t *testing.T, backend, root string, mock bool, location string, open ...issue2564OpenFromDeclaration) (*cliapp.ServeOptions, func() (*serveRuntimeTestProcess, issue2564ServedFixture)) {
+	return issue2564ServeHarnessWithPosture(t, backend, root, mock, location, executionposture.MockOnly, open...)
 }
 
-func issue2564LiveServeHarness(t *testing.T, backend, root, location string) (*cliapp.ServeOptions, func() (*serveRuntimeTestProcess, issue2564ServedFixture)) {
+func issue2564LiveServeHarness(t *testing.T, backend, root, location string, open ...issue2564OpenFromDeclaration) (*cliapp.ServeOptions, func() (*serveRuntimeTestProcess, issue2564ServedFixture)) {
 	t.Helper()
 	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		if request.URL.Path != "/v1/messages" || request.Header.Get("x-api-key") != "live-flow-fixture-key" {
@@ -116,10 +116,12 @@ func issue2564LiveServeHarness(t *testing.T, backend, root, location string) (*c
 	t.Cleanup(provider.Close)
 	redirectExternalHosts(t, map[string]string{"api.anthropic.com": provider.URL})
 	setDoctorProviderSecret(t, "ANTHROPIC_API_KEY", "live-flow-fixture-key")
-	return issue2564ServeHarnessWithPosture(t, backend, root, true, location, executionposture.Live)
+	return issue2564ServeHarnessWithPosture(t, backend, root, true, location, executionposture.Live, open...)
 }
 
-func issue2564ServeHarnessWithPosture(t *testing.T, backend, root string, mock bool, location string, posture executionposture.Posture) (*cliapp.ServeOptions, func() (*serveRuntimeTestProcess, issue2564ServedFixture)) {
+type issue2564OpenFromDeclaration bool
+
+func issue2564ServeHarnessWithPosture(t *testing.T, backend, root string, mock bool, location string, posture executionposture.Posture, open ...issue2564OpenFromDeclaration) (*cliapp.ServeOptions, func() (*serveRuntimeTestProcess, issue2564ServedFixture)) {
 	t.Helper()
 	unsetStoreSelectorEnv(t)
 	stubServeRuntimeWorkspaceLifecycle(t)
@@ -151,8 +153,16 @@ func issue2564ServeHarnessWithPosture(t *testing.T, backend, root string, mock b
 		}
 		recordServePostgresFixture(t, dsn)
 		original := buildStoresForServe
-		buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config, bootCheck ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {
-			owner, err := storeselected.OpenRuntime(ctx, storeselected.RuntimeRequest{Selection: storebackend.Selection{Backend: storebackend.BackendPostgres}, PostgresDSN: dsn, SessionLockTTL: runtimeSessionLockTTL(cfg), BootCheckInput: firstBootCheckInput(bootCheck)})
+		buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config, bootCheck ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {
+			check, openDSN := firstBootCheckInput(bootCheck), dsn
+			if len(open) == 1 && open[0] && location == "" && selection.Backend == storebackend.BackendPostgres && check != nil {
+				var err error
+				openDSN, err = postgresDSNFromConfig(ctx, cfg.Database)
+				if err != nil {
+					return nil, err
+				}
+			}
+			owner, err := storeselected.OpenRuntime(ctx, storeselected.RuntimeRequest{Selection: storebackend.Selection{Backend: storebackend.BackendPostgres}, PostgresDSN: openDSN, SessionLockTTL: runtimeSessionLockTTL(cfg), BootCheckInput: check})
 			if err != nil {
 				return nil, err
 			}

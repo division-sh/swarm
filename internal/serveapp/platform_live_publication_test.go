@@ -36,7 +36,7 @@ func testRunlessPlatformLivePublication(t *testing.T, backend string) {
 	writeStandingCandidateFile(t, filepath.Join(root, "events.yaml"), "observed:\n")
 	writeStandingCandidateFile(t, filepath.Join(root, "nodes.yaml"), "boot-observer:\n  platform.boot:\n    emit: {event: observed}\n")
 	writeStandingCandidateFile(t, filepath.Join(root, "other", "agents.yaml"), "observer:\n  role: observer\n  intent: {inline: Observe the boot occurrence.}\n  model: regular\n  subscriptions: [platform.boot]\n  emit_events: []\n")
-	opts, _ := issue2564LiveServeHarness(t, backend, root, "")
+	opts, _ := issue2564LiveServeHarness(t, backend, root, "", issue2564OpenFromDeclaration(true))
 	var persistence serveRuntimePersistence
 	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { persistence = p })
 	process := startServeRuntimeTestProcess(t, *opts)
