@@ -86,6 +86,7 @@ import (
 	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 	agentfixture "github.com/division-sh/swarm/tests/support/store/testutil/agentfixture"
 
+	"github.com/division-sh/swarm/tests/support/testpostgres"
 	"github.com/division-sh/swarm/tests/support/testutil"
 	"github.com/division-sh/swarm/tests/support/testutil/packfixture"
 	"github.com/division-sh/swarm/tests/support/testutil/sourceartifactfixture"
@@ -7134,8 +7135,21 @@ func installServeRuntimePostgresTestStoresForDatabase(t *testing.T, workspaceFac
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
 	t.Cleanup(func() { _ = storetest.DatabaseForTest(runtimePG).Close() })
-	buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config, bootCheck ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {
-		owner := openSelectedPostgresOwner(t, dsn, storetest.DatabaseForTest(runtimePG), cfg, bootCheck...)
+	buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config, bootCheck ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {
+		openDSN := dsn
+		if selection.Backend == storebackend.BackendPostgres && firstBootCheckInput(bootCheck) != nil && cfg != nil &&
+			cfg.Database.PasswordEnv == serveFixturePostgresPasswordEnv && cfg.Database.PasswordFile == "" && cfg.Database.PasswordSecretKey == "" {
+			// Keep the original fixture target unless the declaration names it.
+			// An independent or invalid declaration still reaches the native check.
+			if declaredDSN, err := postgresDSNFromConfig(ctx, cfg.Database); err == nil {
+				allocated, allocatedErr := testpostgres.ParseConnectionParameters(dsn)
+				declared, declaredErr := testpostgres.ParseConnectionParameters(declaredDSN)
+				if allocatedErr == nil && declaredErr == nil && allocated == declared {
+					openDSN = declaredDSN
+				}
+			}
+		}
+		owner := openSelectedPostgresOwner(t, openDSN, storetest.DatabaseForTest(runtimePG), cfg, bootCheck...)
 		storetest.BootstrapPostgresRuntimeStore(t, runtimePG)
 		return owner, nil
 	}
