@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/tests/support/testutil"
@@ -42,8 +43,6 @@ func requireNestedReceiverProviderResume(t *testing.T) {
 					reissued <- request
 					<-releaseSecond
 					reply.Tools = []llmapi.ToolCall{{ID: "create-leaf", Name: "emit_leaf_requested", Arguments: json.RawMessage(`{"worker_id":"alpha-leaf","label":"leaf-parent-A","count":1}`)}}
-				case 3:
-					reply.Text = "Created the leaf."
 				default:
 					return llmapi.Reply{}, fmt.Errorf("unexpected nested receiver provider request %d", request.Number)
 				}
@@ -139,8 +138,12 @@ func requireNestedReceiverProviderResume(t *testing.T) {
 			if len(attempts) != 2 || !priorUncertain || reissuedAttemptID == "" {
 				t.Fatalf("restart did not launch the recorded bridge call's reissue: %+v", attempts)
 			}
-			priorClaims, err := storetest.ReadDeliveryAttemptDiagnosticRows(t.Context(), reader, predecessor.OriginDeliveryID)
-			if err != nil {
+			var priorClaims []storetest.DeliveryAttemptDiagnosticRow
+			if err := reader.InspectSnapshot(t.Context(), func(ctx context.Context) error {
+				var err error
+				priorClaims, err = storetest.ReadDeliveryAttemptDiagnosticRows(ctx, reader, predecessor.OriginDeliveryID)
+				return err
+			}); err != nil {
 				t.Fatal(err)
 			}
 			if len(priorClaims) != 2 || priorClaims[0].Version != 1 || priorClaims[0].Closure != "settled" ||
@@ -152,10 +155,16 @@ func requireNestedReceiverProviderResume(t *testing.T) {
 			unblockSecond()
 			endpoint = second.endpoint(t) + "/v1/rpc"
 			waitServedRunDeliveryQuiescence(t, func(ctx context.Context, runID string) (deliverylifecycle.RunSummary, error) {
-				return storetest.ReadServedRunDeliverySummary(ctx, reader, runID)
+				var summary deliverylifecycle.RunSummary
+				err := reader.InspectSnapshot(ctx, func(ctx context.Context) error {
+					var err error
+					summary, err = storetest.ReadServedRunDeliverySummary(ctx, reader, runID)
+					return err
+				})
+				return summary, err
 			}, seed.RunID)
 			requireServedJSONRPCResult(t, endpoint, "event.get", map[string]any{"event_id": predecessor.OriginEventID}, &ready)
-			if len(provider.Requests()) != 3 || len(ready.Deliveries) != 1 ||
+			if len(provider.Requests()) != 2 || len(ready.Deliveries) != 1 ||
 				ready.Deliveries[0].DeliveryID != predecessor.OriginDeliveryID || ready.Deliveries[0].Status != "delivered" {
 				t.Fatalf("original bridge delivery did not finish after its exact reissue: calls=%d deliveries=%+v", len(provider.Requests()), ready.Deliveries)
 			}
@@ -216,8 +225,13 @@ func readNestedReceiverEffects(t *testing.T, reader storetest.ReleaseProcessRead
 
 func requireNestedReceiverInstances(t *testing.T, reader storetest.ReleaseProcessReadOnlyInspection, runID string, wantLeaves int) {
 	t.Helper()
-	instances, err := requireReceiverProofStateReader(t, reader).ListWorkflowInstances(t.Context(), runID)
-	if err != nil {
+	workflows := requireReceiverProofStateReader(t, reader)
+	var instances []pipeline.WorkflowInstance
+	if err := reader.InspectSnapshot(t.Context(), func(ctx context.Context) error {
+		var err error
+		instances, err = workflows.ListWorkflowInstances(ctx, runID)
+		return err
+	}); err != nil {
 		t.Fatal(err)
 	}
 	var parents, leaves int
