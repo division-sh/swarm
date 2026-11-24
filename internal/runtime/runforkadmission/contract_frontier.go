@@ -256,10 +256,10 @@ func excludeCompletedFrontierRecipients(plan runfork.RunForkPlan, event runfork.
 	removedNode := false
 	pending := event.DerivedRecipients[:0]
 	for _, recipient := range event.DerivedRecipients {
-		if slices.ContainsFunc(completed, func(route events.DeliveryRoute) bool {
+		if i := slices.IndexFunc(completed, func(route events.DeliveryRoute) bool {
 			return matchesHistoricalRecipient(plan.SourceRunID, route, recipient)
-		}) {
-			removedNode = removedNode || recipient.Recipient.IsNode()
+		}); i >= 0 {
+			removedNode = removedNode || completed[i].Recipient.IsNode()
 			continue
 		}
 		pending = append(pending, recipient)
