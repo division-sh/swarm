@@ -195,15 +195,14 @@ func (p RunForkPlan) BindInheritedConstructedRouteEvidence(event RunForkSelected
 		return ConstructedRouteEvidence{}, err
 	}
 	producer := p.ForkPoint.RoutingSource.Route()
-	recipients, err := forkrecipient.CanonicalSet(event.DerivedRecipients)
-	if err != nil || len(recipients) == 0 {
-		return ConstructedRouteEvidence{}, fmt.Errorf("inherited construction binding lacks exact recipients: %v", err)
+	ancestor, err := w.Ancestor.BindConstructedRouteEvidence(w.OriginalEntityID, event.SourceEventID, event.DerivedRecipients, frontier)
+	if err != nil {
+		return ConstructedRouteEvidence{}, fmt.Errorf("inherited construction binding lacks exact recipients: %w", err)
 	}
-	for _, recipient := range recipients {
-		if recipient.Path != producer.FlowInstance {
-			return ConstructedRouteEvidence{}, fmt.Errorf("inherited construction binding crosses the producer path")
-		}
+	if ancestor.proof.FlowInstance != producer.FlowInstance {
+		return ConstructedRouteEvidence{}, fmt.Errorf("inherited construction binding crosses the producer path")
 	}
+	recipients := ancestor.proof.DerivedRecipients
 	digest, err := p.inheritedConstructionDigest()
 	if err != nil {
 		return ConstructedRouteEvidence{}, err

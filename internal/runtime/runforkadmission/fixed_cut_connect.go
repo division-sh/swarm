@@ -288,7 +288,7 @@ func fixedCutKeylessDescendants(source semanticview.Source, constructors fixedCu
 	return owner, nil
 }
 
-func fixedCutConstructedRouteEvidence(source semanticview.Source, routeTable *runtimebus.RouteTable, cut runfork.RunForkPlan, constructors fixedCutConstructionIndex, graph pinrouting.CompiledConnectGraph, frontier runfork.RunForkContractFrontierAdmission, dynamic []string, history []runfork.RunForkSelectedContractRouteEvent) ([]runfork.ConstructedRouteEvidence, error) {
+func bindFixedCutConstructedRoutes(source semanticview.Source, routeTable *runtimebus.RouteTable, cut runfork.RunForkPlan, constructors fixedCutConstructionIndex, graph pinrouting.CompiledConnectGraph, frontier runfork.RunForkContractFrontierAdmission, dynamic []string, history []runfork.RunForkSelectedContractRouteEvent) ([]runfork.ConstructedRouteEvidence, error) {
 	var out []runfork.ConstructedRouteEvidence
 	eventsByID := make(map[string]runfork.RunForkSelectedContractRouteEvent, len(history))
 	for _, event := range history {
@@ -310,7 +310,9 @@ func fixedCutConstructedRouteEvidence(source semanticview.Source, routeTable *ru
 	return out, nil
 }
 
-func fixedCutRecipientsAtPath(event runfork.RunForkSelectedContractRouteEvent, capturedPath string) []runfork.RunForkContractFrontierRecipient {
+// fixedCutConstructedRouteEvidence narrows derived evidence to one captured
+// constructor before binding it. It does not derive any new recipients.
+func fixedCutConstructedRouteEvidence(event runfork.RunForkSelectedContractRouteEvent, capturedPath string) []runfork.RunForkContractFrontierRecipient {
 	return slices.DeleteFunc(slices.Clone(event.DerivedRecipients), func(recipient runfork.RunForkContractFrontierRecipient) bool {
 		return recipient.Path != capturedPath
 	})
@@ -326,7 +328,7 @@ func fixedCutConstructorRouteEvidence(source semanticview.Source, routeTable *ru
 	if evidence.Original.CreatingInput.Input == "" {
 		childPath := constructor.instance.InstancePath
 		return fixedCutEagerChildRouteEvidence(source, cut, constructors, graph, frontier, constructor, history, func(event runfork.RunForkSelectedContractRouteEvent) []runfork.RunForkContractFrontierRecipient {
-			return fixedCutRecipientsAtPath(event, childPath)
+			return fixedCutConstructedRouteEvidence(event, childPath)
 		})
 	}
 	if !found {
@@ -342,7 +344,7 @@ func fixedCutConstructorRouteEvidence(source semanticview.Source, routeTable *ru
 	if !found || event.Disposition == runfork.RunForkSelectedContractDispositionFailClosed {
 		return absent, false, nil
 	}
-	recipients := fixedCutRecipientsAtPath(event, constructor.instance.InstancePath)
+	recipients := fixedCutConstructedRouteEvidence(event, constructor.instance.InstancePath)
 	if len(recipients) == 0 {
 		return absent, false, nil
 	}
