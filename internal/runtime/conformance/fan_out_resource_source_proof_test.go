@@ -16,6 +16,7 @@ import (
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
@@ -79,6 +80,7 @@ type deploymentResourceFixture struct {
 	liveContexts                *runtimepkg.RuntimeContextManager
 	config                      *config.Config
 	ordinaryProviderCredentials runtimecredentials.Store
+	ordinaryDeliveryLifecycle   runtimedelivery.Store
 	forkAgents                  runforkexecution.SelectedContractAgentRuntimeOptions
 	forkRequest                 atomic.Pointer[runfork.ForkOperationRequest]
 }
@@ -111,6 +113,11 @@ func newDeploymentResourceFixtureWithSource(t *testing.T, backend string, source
 	if len(options) == 1 {
 		opts = options[0]
 	}
+	return newDeploymentResourceFixtureConfigured(t, backend, source, opts, nil)
+}
+
+func newDeploymentResourceFixtureConfigured(t *testing.T, backend string, source semanticview.Source, opts notifyAllChildrenRuntimeOptions, wrapDelivery func(runtimedelivery.Store) runtimedelivery.Store) *deploymentResourceFixture {
+	t.Helper()
 	f := &deploymentResourceFixture{source: source, config: opts.ordinaryConfig, ordinaryProviderCredentials: opts.ordinaryProviderCredentials}
 	switch backend {
 	case "sqlite":
@@ -123,6 +130,9 @@ func newDeploymentResourceFixtureWithSource(t *testing.T, backend string, source
 		f.selected, f.db = storetest.AdmitPostgresRuntimeStore(t, db), db
 	default:
 		t.Fatalf("unknown selected backend %q", backend)
+	}
+	if wrapDelivery != nil {
+		f.ordinaryDeliveryLifecycle = wrapDelivery(f.selected)
 	}
 	fact := conformanceSourceArtifactFact(t, f.source)
 	f.ctx = testAuthorActivityContextForBundle(context.Background(), fact)
@@ -139,6 +149,7 @@ func (f *deploymentResourceFixture) boot(t *testing.T) {
 		ordinaryContext:             true,
 		ordinaryConfig:              f.config,
 		ordinaryProviderCredentials: f.ordinaryProviderCredentials,
+		deliveryLifecycle:           f.ordinaryDeliveryLifecycle,
 		processTopology:             f.topology,
 		fanOutExecutor: func(coordinator *pipeline.PipelineCoordinator) startupownership.FanOutExecutor {
 			return deploymentFanOutDiagnostic{FanOutExecutor: coordinator, t: t}

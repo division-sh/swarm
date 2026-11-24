@@ -12,7 +12,11 @@ import (
 
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/durabledata"
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -22,7 +26,7 @@ import (
 
 func TestDeploymentSourceSelectedForkParksOtherFeedBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
-		for _, variant := range []string{"same_batch", "prior_batch", "settled_other", "legacy_recovery"} {
+		for _, variant := range []string{"same_batch", "prior_batch", "settled_other", "partial_other", "legacy_recovery"} {
 			t.Run(backend+"/"+variant, func(t *testing.T) {
 				proveSelectedNamedFeedFork(t, backend, variant)
 			})
@@ -37,14 +41,30 @@ func proveSelectedNamedFeedFork(t *testing.T, backend, variant string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f := newDeploymentResourceFixtureWithSource(t, backend, semanticview.Wrap(bundle))
-	f.runtime.fanOutServing.Close()
 	names := []string{"scan.requested", "score.observed"}
 	input := [][]byte{[]byte("{\"topic\":\"named\"}\n"), []byte("{\"label\":\"other\"}\n")}
 	if variant == "settled_other" {
 		input[1] = nil
 	}
-	var sourceID, batchID string
+	sourceID := uuid.NewString()
+	var f *deploymentResourceFixture
+	var gate *selectedDeploymentClaimGate
+	var sourceOther operatorread.OperatorEventListResult
+	if variant == "partial_other" {
+		input[1] = []byte("{\"label\":\"00-settled\"}\n{\"label\":\"01-pending\"}\n")
+		gate = &selectedDeploymentClaimGate{eventName: names[1], allow: func(e events.Event) bool {
+			return e.RunID() != sourceID || !bytes.Contains(e.Payload(), []byte(`"01-pending"`))
+		}}
+		gate.held.Store(true)
+		f = newDeploymentResourceFixtureConfigured(t, backend, semanticview.Wrap(bundle), notifyAllChildrenRuntimeOptions{}, func(store runtimedelivery.Store) runtimedelivery.Store {
+			gate.Store = store
+			return gate
+		})
+	} else {
+		f = newDeploymentResourceFixtureWithSource(t, backend, semanticview.Wrap(bundle))
+		f.runtime.fanOutServing.Close()
+	}
+	var batchID string
 	if variant == "legacy_recovery" {
 		var data durabledata.RunCreationDataEnvelope
 		for i, name := range names {
@@ -59,7 +79,6 @@ func proveSelectedNamedFeedFork(t *testing.T, backend, variant string) {
 		}
 		sourceID = createDeploymentResourceFixtureRun(t, f, data)
 	} else {
-		sourceID = uuid.NewString()
 		prepareDeploymentRowsFixtureRun(t, f, sourceID, ".")
 		server := f.operatorServer(t)
 		dir := t.TempDir()
@@ -71,18 +90,20 @@ func proveSelectedNamedFeedFork(t *testing.T, backend, variant string) {
 			}
 			data = append(data, name+"="+path)
 		}
-		if variant == "prior_batch" {
+		if variant == "prior_batch" || variant == "partial_other" {
 			publishNamedFeedBatch(t, f.ctx, server.URL, sourceID, data[1:])
 			data = data[:1]
 		}
+		if variant == "partial_other" {
+			sourceOther = waitNamedFeedPartialCut(t, f, sourceID, names[1], gate)
+			f.runtime.fanOutServing.Close()
+		}
 		batchID = publishNamedFeedBatch(t, f.ctx, server.URL, sourceID, data)
 	}
-	planner := f.selected.(interface {
-		PlanRunFork(context.Context, runfork.RunForkPlanRequest) (runfork.RunForkPlan, error)
-	})
+	planner := f.selected.(namedFeedForkPlanner)
 	before, err := planner.PlanRunFork(f.ctx, runfork.RunForkPlanRequest{SourceRunID: sourceID, PublicationID: batchID})
-	if err != nil || len(before.FanOutObligations) != 2 || before.EventCountAtFork != 0 {
-		t.Fatalf("source cut must hold both unissued feeds: %+v err=%v", before, err)
+	if err != nil || len(before.FanOutObligations) != 2 || (variant != "partial_other" && before.EventCountAtFork != 0) {
+		t.Fatalf("source cut must hold both feeds: %+v err=%v", before, err)
 	}
 	var named, other runfork.RunForkFanOutObligation
 	for _, o := range before.FanOutObligations {
@@ -96,12 +117,16 @@ func proveSelectedNamedFeedFork(t *testing.T, backend, variant string) {
 	if named.Intent.Request.Key.DeploymentFeedID == "" || other.Intent.Request.Key.DeploymentFeedID == "" {
 		t.Fatal("fixture lacks exact named and other source members")
 	}
-	otherCardinality := 1
+	otherCursor, otherCardinality := 0, 1
 	if variant == "settled_other" {
 		otherCardinality = 0
 	}
+	if variant == "partial_other" {
+		otherCursor, otherCardinality = 2, 2
+		requireNamedFeedPartialCut(t, other, sourceOther)
+	}
 	if named.Intent.Cursor != 0 || named.Intent.Request.Cardinality != 1 ||
-		other.Intent.Cursor != 0 || other.Intent.Request.Cardinality != otherCardinality {
+		other.Intent.Cursor != otherCursor || other.Intent.Request.Cardinality != otherCardinality {
 		t.Fatalf("source advanced before its fixed cut: named=%+v other=%+v", named.Intent, other.Intent)
 	}
 	pauseDeploymentFixtureRun(t, f, sourceID)
@@ -110,9 +135,9 @@ func proveSelectedNamedFeedFork(t *testing.T, backend, variant string) {
 		"idempotency_key": uuid.NewString(),
 	}
 	var owner runforkexecution.SelectedContractExecutionOwner
-	var recoveredID string
-	if variant == "legacy_recovery" {
-		owner, recoveredID = restartNamedFeedForkAtActivation(t, f, params)
+	var recovery runfork.SelectedForkRecoveryResult
+	if variant == "legacy_recovery" || variant == "partial_other" {
+		owner, recovery = restartNamedFeedForkAtActivation(t, f, params)
 	} else {
 		var recovered []runfork.SelectedForkRecoveryResult
 		owner, recovered = deploymentForkOwner(t, f)
@@ -122,7 +147,7 @@ func proveSelectedNamedFeedFork(t *testing.T, backend, variant string) {
 	}
 	result, refused := deploymentForkRPC(t, f.ctx, deploymentForkServer(t, f, owner), params)
 	if len(refused) != 0 || result.ForkRunID == "" || result.ForkRevision != before.ForkPoint.Revision ||
-		(recoveredID != "" && result.ForkRunID != recoveredID) {
+		(recovery.RunID != "" && result.ForkRunID != recovery.RunID) {
 		t.Fatalf("named feed fork: %+v refusal=%s", result, refused)
 	}
 	retry, refused := deploymentForkRPC(t, f.ctx, deploymentForkServer(t, f, owner), params)
@@ -166,6 +191,13 @@ func proveSelectedNamedFeedFork(t *testing.T, backend, variant string) {
 			t.Fatalf("named selection lost the other feed's settled history: retained=%d err=%v", retained, err)
 		}
 	}
+	if variant == "partial_other" {
+		wantSourceFeeds = 1
+		requireRecoveredNamedFeedHistory(t, f.ctx, planner, recovery, before.ForkPoint.Revision, named, other)
+		if after := deploymentResourcePublicEventsByName(t, f.ctx, f.operatorServer(t), sourceID, names[1], ""); !reflect.DeepEqual(sourceOther, after) {
+			t.Fatal("named selection changed the other feed's source deliveries")
+		}
+	}
 	if childFeeds != wantChildFeeds || namedRows != 1 || otherEvents != 0 || sourceFeeds != wantSourceFeeds || childRuns != 1 {
 		t.Fatalf("named-only work or source custody changed: child feeds=%d named settled=%d other events=%d source feeds=%d children=%d", childFeeds, namedRows, otherEvents, sourceFeeds, childRuns)
 	}
@@ -175,6 +207,76 @@ func proveSelectedNamedFeedFork(t *testing.T, backend, variant string) {
 		WHERE o.run_id=$1 AND o.deployment_feed_id=$2 AND o.ordinal=0 AND o.outcome_kind='committed'
 		AND d.status='delivered' AND d.claim_version=1`, result.ForkRunID, childMemberID).Scan(&delivered); err != nil || delivered != 1 {
 		t.Fatalf("named ordinal did not settle exactly once: delivered=%d err=%v", delivered, err)
+	}
+}
+
+type namedFeedForkPlanner interface {
+	PlanRunFork(context.Context, runfork.RunForkPlanRequest) (runfork.RunForkPlan, error)
+}
+
+func waitNamedFeedPartialCut(t *testing.T, f *deploymentResourceFixture, runID, eventName string, gate *selectedDeploymentClaimGate) operatorread.OperatorEventListResult {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(f.ctx, 20*time.Second)
+	defer cancel()
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+	server := f.operatorServer(t)
+	for {
+		cut := deploymentResourcePublicEventsByName(t, ctx, server, runID, eventName, "")
+		status := map[string]string{}
+		for _, e := range cut.Events {
+			if label, ok := e.Payload["label"].(string); ok && len(e.Deliveries) == 1 {
+				status[label] = e.Deliveries[0].Status
+			}
+		}
+		if len(cut.Events) == 2 && cut.NextCursor == "" && gate.deferred.Load() > 0 &&
+			status["00-settled"] == "delivered" && status["01-pending"] == "pending" {
+			return cut
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("other feed did not reach a real partial cut: %+v", cut)
+		case <-tick.C:
+		}
+	}
+}
+
+func requireNamedFeedPartialCut(t *testing.T, other runfork.RunForkFanOutObligation, cut operatorread.OperatorEventListResult) {
+	t.Helper()
+	if len(other.Outcomes) != 1 || len(other.PendingDeployment) != 1 {
+		t.Fatalf("other feed needs one settled ordinal and one pending delivery: %+v", other)
+	}
+	settled, pending := other.Outcomes[0], other.PendingDeployment[0]
+	for _, e := range cut.Events {
+		switch e.Payload["label"] {
+		case "00-settled":
+			if settled.Ordinal != 0 || settled.SourceEventID != e.EventID || settled.EventID != "" ||
+				settled.Kind != fanoutobligation.OutcomeCommitted || settled.InheritedDisposition != fanoutobligation.InheritedSucceeded {
+				t.Fatalf("settled source ordinal lost attribution: %+v", settled)
+			}
+		case "01-pending":
+			if pending.Ordinal != 1 || pending.SourceEventID != e.EventID || pending.Phase != runfork.RunForkDeploymentPendingReceiver ||
+				!reflect.DeepEqual(pending.SourceDeliveryIDs, []string{e.Deliveries[0].DeliveryID}) {
+				t.Fatalf("pending source ordinal is not the held receiver: %+v", pending)
+			}
+		}
+	}
+}
+
+func requireRecoveredNamedFeedHistory(t *testing.T, ctx context.Context, planner namedFeedForkPlanner, recovery runfork.SelectedForkRecoveryResult, revision int64, named, other runfork.RunForkFanOutObligation) {
+	t.Helper()
+	record := recovery.Operation
+	if record == nil || record.ForkRunID != recovery.RunID {
+		t.Fatalf("recovery lacks the exact child operation: %+v", recovery)
+	}
+	op := record.Request
+	if op.PublicationID != named.Intent.Request.Key.DeploymentFeedID || op.ResolvedPoint == nil || op.ResolvedPoint.Revision != revision {
+		t.Fatalf("recovery changed the named feed or fixed cut: %+v", op)
+	}
+	plan, err := planner.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: op.SourceRunID, PublicationID: op.PublicationID, ResolvedPoint: op.ResolvedPoint})
+	if err != nil || plan.DeploymentFeedSelection == nil || plan.DeploymentFeedSelection.Named != op.PublicationID ||
+		len(plan.DeploymentFeedSelection.Parked) != 1 || !reflect.DeepEqual(plan.DeploymentFeedSelection.Parked[0], other) {
+		t.Fatalf("child recovery cut lost the other feed's ordinal attribution or exact tail: %+v err=%v", plan.DeploymentFeedSelection, err)
 	}
 }
 
@@ -196,7 +298,7 @@ func publishNamedFeedBatch(t *testing.T, ctx context.Context, endpoint, runID st
 	return batchID
 }
 
-func restartNamedFeedForkAtActivation(t *testing.T, f *deploymentResourceFixture, params map[string]any) (runforkexecution.SelectedContractExecutionOwner, string) {
+func restartNamedFeedForkAtActivation(t *testing.T, f *deploymentResourceFixture, params map[string]any) (runforkexecution.SelectedContractExecutionOwner, runfork.SelectedForkRecoveryResult) {
 	t.Helper()
 	cut := selectedDeploymentBeforeActivationCrash{
 		SelectedContractForkLifecycle: f.selected.(runforkexecution.SelectedContractForkLifecycle),
@@ -233,9 +335,9 @@ func restartNamedFeedForkAtActivation(t *testing.T, f *deploymentResourceFixture
 	restarted, recovery := deploymentForkOwner(t, f)
 	for _, recovered := range recovery {
 		if recovered.RunID == childID {
-			return restarted, childID
+			return restarted, recovered
 		}
 	}
 	t.Fatalf("recovery did not retain the exact materialized child %s: %+v", childID, recovery)
-	return restarted, ""
+	return restarted, runfork.SelectedForkRecoveryResult{}
 }
