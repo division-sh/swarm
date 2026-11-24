@@ -124,8 +124,7 @@ func (s *EffectPostgresOwner) ReconcileExternalEffectAttempts(ctx context.Contex
 	result := mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.Story, mutationprotocol.Ordinary, nil, s.candidates, func(txctx context.Context, mutation *mutationprotocol.Attempt) (runtimeeffects.RecoverySummary, error) {
 		var summary runtimeeffects.RecoverySummary
 		err := mutation.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
-			var err error
-			txctx, err = prepareProviderRecoveryOwnershipTx(txctx, tx, true, s.directives, "", nil)
+			txctx, uncalled, err := prepareNormalStartupRecoveryTx(txctx, tx, true, s.delivery, s.directives)
 			if err != nil {
 				return err
 			}
@@ -146,7 +145,8 @@ func (s *EffectPostgresOwner) ReconcileExternalEffectAttempts(ctx context.Contex
 			if err := recordRecoveredExternalEffectStories(txctx, mutation, tx, candidates, request.Now(), true); err != nil {
 				return err
 			}
-			return nil
+			summary.UncalledAgentClaimsDeadLettered, err = settleUncalledStartupClaims(txctx, mutation, s.delivery, uncalled, request.Now())
+			return err
 		})
 		return summary, err
 	})
@@ -167,8 +167,7 @@ func (s *EffectSQLiteOwner) ReconcileExternalEffectAttempts(ctx context.Context,
 	result := mutationprotocol.RunSQLite(ctx, s.backend, "sqlite reconcile external effect attempts", mutationprotocol.Story, mutationprotocol.Ordinary, nil, s.candidates, func(txctx context.Context, mutation *mutationprotocol.Attempt) (runtimeeffects.RecoverySummary, error) {
 		var summary runtimeeffects.RecoverySummary
 		err := mutation.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
-			var err error
-			txctx, err = prepareProviderRecoveryOwnershipTx(txctx, tx, false, s.directives, "", nil)
+			txctx, uncalled, err := prepareNormalStartupRecoveryTx(txctx, tx, false, s.delivery, s.directives)
 			if err != nil {
 				return err
 			}
@@ -189,7 +188,8 @@ func (s *EffectSQLiteOwner) ReconcileExternalEffectAttempts(ctx context.Context,
 			if err := recordRecoveredExternalEffectStories(txctx, mutation, tx, candidates, request.Now(), false); err != nil {
 				return err
 			}
-			return nil
+			summary.UncalledAgentClaimsDeadLettered, err = settleUncalledStartupClaims(txctx, mutation, s.delivery, uncalled, request.Now())
+			return err
 		})
 		return summary, err
 	})

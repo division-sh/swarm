@@ -18,7 +18,10 @@ import (
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/operatorread"
 	credentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/tests/support/testutil"
 	"github.com/division-sh/swarm/tests/support/testutil/llmapi"
@@ -26,6 +29,222 @@ import (
 )
 
 const providerResumeProcessEnv = "SWARM_TEST_PROVIDER_RESUME_PROCESS"
+
+const uncalledAgentTurnChildEnv = "SWARM_TEST_UNCALLED_AGENT_TURN_CHILD"
+
+type uncalledAgentClaim struct {
+	Event, Run, Delivery string
+	Version              int64
+}
+
+func TestServedInterruptedUncalledAgentTurnDeadLettersBothStores(t *testing.T) {
+	if root := os.Getenv(uncalledAgentTurnChildEnv); root != "" {
+		signal := os.NewFile(3, "uncalled-agent-claim")
+		if signal == nil {
+			t.Fatal("missing child observation pipe")
+		}
+		defer signal.Close()
+		configureHostWorkspaceProofLifecycle(t)
+		if err := os.Chdir(root); err != nil {
+			t.Fatal(err)
+		}
+		observer := issue2564H2CompletionObserver(func(ctx context.Context, s lifecycleprobe.Signal) {
+			if s.Kind != lifecycleprobe.DeliveryStatusChanged || s.SubscriberType != "agent" ||
+				s.SubscriberID != "load-agent" || s.Status != string(deliverylifecycle.StatusInProgress) {
+				return
+			}
+			claim, ok := deliverylifecycle.ClaimFromContext(ctx)
+			if !ok || claim.Validate() != nil || claim.SubscriberID() != s.SubscriberID {
+				t.Error("agent in-progress observation has no exact claim")
+			} else if err := json.NewEncoder(signal).Encode(uncalledAgentClaim{s.EventID, claim.RunID(), claim.DeliveryID(), claim.Version()}); err != nil {
+				t.Error(err)
+			}
+			// The parent owns the crash cut; don't enter provider execution.
+			<-ctx.Done()
+		})
+		runOwnedMockLifecycleProcessEntry(t, observer)
+		return
+	}
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			isolateCLIAPIConfigEnv(t)
+			unsetStoreSelectorEnv(t)
+			provider := llmapi.New(t, llmapi.Protocol("openai_compatible"), "/v1/chat/completions", "restart-key", func(llmapi.Request) (llmapi.Reply, error) {
+				return llmapi.Reply{}, fmt.Errorf("uncalled agent turn reached its provider")
+			})
+			tool := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				t.Error("uncalled agent turn reached its tool")
+				w.WriteHeader(http.StatusServiceUnavailable)
+			}))
+			t.Cleanup(tool.Close)
+			source := writeProviderResumeSource(t, tool.URL, false)
+			root := t.TempDir()
+			location := filepath.Join(root, "resume.sqlite")
+			var config string
+			if backend == "postgres" {
+				location = testutil.StartEmptyPostgresDSN(t)
+				config = writeChannelOnboardingPostgresRuntimeConfig(t, location)
+			} else {
+				config = writeStandingMockRuntimeConfig(t, backend, location)
+			}
+			configureProviderResume(t, config, "openai_compatible", provider.URL)
+			t.Setenv("SWARM_CREDENTIALS_FILE", filepath.Join(root, "credentials.json"))
+			secrets, err := credentials.NewFileStore(os.Getenv("SWARM_CREDENTIALS_FILE"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			profile, err := llmselection.ResolveActiveBackend("openai_compatible")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := secrets.Set(t.Context(), profile.Credential.EnvVar, "restart-key"); err != nil {
+				t.Fatal(err)
+			}
+			request, err := json.Marshal(map[string]any{"ConfigPath": config, "Source": source, "Live": true,
+				"Store": backend, "Token": apiv1.DefaultLoopbackAPIToken, "ShutdownGrace": int64(5 * time.Second)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			env := []string{uncalledAgentTurnChildEnv + "=" + root, "SWARM_TEST_INTERNAL_MOCK_LIFECYCLE_REQUEST=" + string(request)}
+			first, firstClaims := startUncalledAgentTurnChild(t, env)
+			endpoint := first.endpoint(t) + "/v1/rpc"
+			seed := requireServedEventPublishRPCResult(t, endpoint, map[string]any{"event_name": "item.received",
+				"bundle_hash": servedEventPublishFixtureBundleHash(t, source), "payload": map[string]any{"item_id": "uncalled"}, "idempotency_key": "uncalled-seed"})
+			waitProviderResumeSeedDelivery(t, endpoint, seed.EventID)
+			input := requireServedEventPublishRPCResult(t, endpoint, map[string]any{"event_name": "item.agent_hold",
+				"run_id": seed.RunID, "source_event_id": seed.EventID, "payload": map[string]any{"note": "never called"}, "idempotency_key": "uncalled-agent-input"})
+			reader, err := storetest.OpenReleaseProcessReadOnlyInspection(backend, location)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() {
+				if err := reader.Close(); err != nil {
+					t.Error(err)
+				}
+			}()
+			var claim uncalledAgentClaim
+			select {
+			case claim = <-firstClaims:
+			case <-time.After(servedEventPublishLifecycleProbeWaitTimeout):
+				t.Fatalf("predecessor did not reach the claim cut: %s", first.output.String())
+			}
+			if claim.Event != input.EventID || claim.Run != seed.RunID || claim.Delivery == "" || claim.Version != 1 {
+				t.Fatalf("wrong predecessor claim: %+v", claim)
+			}
+			requireUncalledAgentClaimStorage(t, reader, claim, deliverylifecycle.StatusInProgress)
+			if len(provider.Requests()) != 0 {
+				t.Fatal("predecessor made a provider call before crash")
+			}
+			if err := first.kill(); err != nil {
+				t.Fatal(err)
+			}
+
+			second, secondClaims := startUncalledAgentTurnChild(t, env)
+			endpoint = second.endpoint(t) + "/v1/rpc"
+			letter := awaitUncalledAgentTurnDeadLetter(t, endpoint, reader, claim, secondClaims)
+			const reason = "effect_recovery_prelaunch_abandoned"
+			if letter.ClaimVersion != claim.Version || letter.Failure.Detail.Code != reason {
+				t.Fatalf("wrong recovered dead letter: %+v", letter)
+			}
+			if err := second.stop(); err != nil {
+				t.Fatal(err)
+			}
+			if next, ok := <-secondClaims; ok {
+				t.Fatalf("dead-lettered turn reached the agent: %+v", next)
+			}
+			requireUncalledAgentClaimStorage(t, reader, claim, deliverylifecycle.StatusDeadLetter)
+			if len(provider.Requests()) != 0 {
+				t.Fatal("restart made a provider call for the dead-lettered turn")
+			}
+			const notice = "runtime.warn component=startup-recovery message=Agent turns dead-lettered at restart before any provider call: 1; they are not run again. List dead-lettered deliveries with swarm event list --delivery-status dead_letter"
+			if output := second.output.String(); strings.Count(output, notice+"\n") != 1 || strings.Contains(output, "attempts abandoned before launch") {
+				t.Fatalf("startup did not report exactly one uncalled turn without modifying attempt counts:\n%s", output)
+			}
+		})
+	}
+}
+
+func startUncalledAgentTurnChild(t *testing.T, env []string) (*channelOnboardingCrashServeProcess, <-chan uncalledAgentClaim) {
+	t.Helper()
+	read, write, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = read.Close(); _ = write.Close() })
+	child := startServedCrashProcessBeforeReadiness(t, "TestServedInterruptedUncalledAgentTurnDeadLettersBothStores", env, write)
+	_ = write.Close()
+	claims := make(chan uncalledAgentClaim, 1)
+	go func() {
+		defer close(claims)
+		var claim uncalledAgentClaim
+		if err := json.NewDecoder(read).Decode(&claim); err == nil {
+			claims <- claim
+		}
+	}()
+	t.Cleanup(func() { _ = child.kill(); <-claims })
+	return child, claims
+}
+
+func requireUncalledAgentClaimStorage(t *testing.T, reader storetest.ReleaseProcessReadOnlyInspection, want uncalledAgentClaim, status deliverylifecycle.Status) {
+	t.Helper()
+	if err := reader.InspectSnapshot(t.Context(), func(ctx context.Context) error {
+		phases, err := storetest.ReadWorkspaceInvocationPhases(ctx, reader)
+		if err != nil {
+			return err
+		}
+		effects, err := storetest.ReadManagedTurnEffectStorage(ctx, reader, want.Run, "load-agent")
+		if err != nil {
+			return err
+		}
+		if effects.ProviderAttempts != 0 {
+			return fmt.Errorf("claim cut provider attempts=%d, want zero", effects.ProviderAttempts)
+		}
+		for _, row := range phases.Deliveries {
+			if row.DeliveryID != want.Delivery {
+				continue
+			}
+			if row.EventID == want.Event && row.RunID == want.Run && row.SubscriberType == "agent" && row.SubscriberID == "load-agent" &&
+				row.ClaimVersion == want.Version && row.Status == string(status) && row.AttemptOpenMarker != nil && *row.AttemptOpenMarker == (status == deliverylifecycle.StatusInProgress) {
+				if status == deliverylifecycle.StatusInProgress && row.AttemptOutcome == nil ||
+					status == deliverylifecycle.StatusDeadLetter && row.AttemptOutcome != nil && *row.AttemptOutcome == "dead_letter" {
+					return nil
+				}
+			}
+			return fmt.Errorf("native delivery %s/%s v%d, want %s %s v%d", row.EventID, row.Status, row.ClaimVersion, want.Event, status, want.Version)
+		}
+		return fmt.Errorf("native claim not found for delivery %s", want.Delivery)
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func awaitUncalledAgentTurnDeadLetter(t *testing.T, endpoint string, reader storetest.ReleaseProcessReadOnlyInspection, claim uncalledAgentClaim, nextClaims <-chan uncalledAgentClaim) operatorread.OperatorDeadLetterRecord {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(t.Context(), servedEventPublishLifecycleProbeWaitTimeout)
+	defer cancel()
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		var event operatorread.OperatorEventFull
+		requireServedJSONRPCResult(t, endpoint, "event.get", map[string]any{"event_id": claim.Event}, &event)
+		for _, letter := range event.DeadLetters {
+			if letter.DeliveryID == claim.Delivery {
+				return letter
+			}
+		}
+		select {
+		case next, ok := <-nextClaims:
+			if !ok || next.Event != claim.Event || next.Run != claim.Run || next.Delivery != claim.Delivery || next.Version != claim.Version+1 {
+				t.Fatalf("unexpected successor claim: %+v open=%t, predecessor=%+v", next, ok, claim)
+			}
+			requireUncalledAgentClaimStorage(t, reader, next, deliverylifecycle.StatusInProgress)
+			t.Fatalf("restart acquired second native claim v%d for delivery %s instead of settling v%d", next.Version, next.Delivery, claim.Version)
+		case <-ctx.Done():
+			t.Fatalf("successor did not reach a second claim or a dead letter: deliveries=%+v", event.Deliveries)
+		case <-tick.C:
+		}
+	}
+}
 
 func TestInterruptedReadOnlyProviderTurnResumesOnlyInterruptedCallBothStores(t *testing.T) {
 	if target := os.Getenv(providerResumeProcessEnv); target != "" {
@@ -316,6 +535,12 @@ func writeProviderResumeConfig(t *testing.T, backend, profile, root, providerURL
 	if backend == "postgres" {
 		configPath = writeChannelOnboardingPostgresRuntimeConfig(t, testutil.StartEmptyPostgresDSN(t))
 	}
+	configureProviderResume(t, configPath, profile, providerURL)
+	return configPath
+}
+
+func configureProviderResume(t *testing.T, configPath, profile, providerURL string) {
+	t.Helper()
 	raw, err := os.ReadFile(configPath)
 	if err != nil {
 		t.Fatal(err)
@@ -339,7 +564,6 @@ func writeProviderResumeConfig(t *testing.T, backend, profile, root, providerURL
 	if err := os.WriteFile(configPath, raw, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	return configPath
 }
 
 func waitProviderResumeSeedDelivery(t *testing.T, endpoint, eventID string) {

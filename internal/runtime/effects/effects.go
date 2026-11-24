@@ -583,9 +583,10 @@ type CompletionHeartbeatStore interface {
 }
 
 type RecoverySummary struct {
-	ChannelSourcesChanged bool `json:"-"`
-	PrelaunchTerminal     int
-	OutcomeUncertain      int
+	ChannelSourcesChanged           bool `json:"-"`
+	UncalledAgentClaimsDeadLettered int  `json:"-"`
+	PrelaunchTerminal               int
+	OutcomeUncertain                int
 }
 
 type RecoveryRequest struct {

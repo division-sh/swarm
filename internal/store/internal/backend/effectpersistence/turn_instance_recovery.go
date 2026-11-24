@@ -30,6 +30,11 @@ type retainedTurnCoordinate struct {
 	actor                                                      agentidentity.Identity
 }
 
+type retainedTurnActorSource struct {
+	actor agentidentity.Identity
+	hash  string
+}
+
 func peekRetainedTurnTx(ctx context.Context, tx *sql.Tx, id string) (retainedTurnCoordinate, error) {
 	var row retainedTurnCoordinate
 	err := tx.QueryRowContext(ctx, `SELECT CAST(a.attempt_id AS TEXT),CAST(a.operation_id AS TEXT),o.bundle_hash,
@@ -85,9 +90,16 @@ func (scope *turnOwnershipObservation) validateRetainedTurnSet(peeks []retainedT
 
 // Peeks choose locks only. No decoder or anchor can acquire a missing prefix.
 func prepareRetainedTurnOwnershipTx(ctx context.Context, tx *sql.Tx, postgres bool, owner providerDrainDirectiveOwner, ids []string, extraActors ...agentidentity.Identity) (context.Context, error) {
+	return prepareRetainedTurnOwnershipWithSourcesTx(ctx, tx, postgres, owner, ids, nil, extraActors)
+}
+
+func prepareRetainedTurnOwnershipWithSourcesTx(ctx context.Context, tx *sql.Tx, postgres bool, owner providerDrainDirectiveOwner, ids []string, extraSources []retainedTurnActorSource, extraActors []agentidentity.Identity) (context.Context, error) {
 	peeks, actors, err := peekRetainedTurnSetTx(ctx, tx, ids, extraActors)
 	if err != nil {
 		return nil, err
+	}
+	for _, source := range extraSources {
+		actors = append(actors, source.actor)
 	}
 	if len(peeks) == 0 && len(actors) == 0 {
 		return ctx, nil
@@ -96,20 +108,30 @@ func prepareRetainedTurnOwnershipTx(ctx context.Context, tx *sql.Tx, postgres bo
 		if err := prior.validateRetainedTurnSet(peeks, actors); err != nil {
 			return nil, err
 		}
+		for _, source := range extraSources {
+			if prior.hashes[source.actor.RunID] != source.hash || prior.actors[source.actor].Validate() != nil {
+				return nil, fmt.Errorf("retained claim differs from its outer observed actor source")
+			}
+		}
 		return ctx, nil
 	}
-	if owner == nil && len(peeks) != 0 {
+	if owner == nil && (len(peeks) != 0 || len(extraSources) != 0) {
 		return nil, fmt.Errorf("retained turn requires its native ownership reader")
 	}
 	if err := agentpersistence.LockTurnOwnershipActorsTx(ctx, tx, actors, !postgres); err != nil {
 		return nil, err
 	}
 	// Actor locks are complete before the ordered source/run suffix begins.
-	sort.Slice(peeks, func(i, j int) bool {
-		if peeks[i].actor.RunID != peeks[j].actor.RunID {
-			return peeks[i].actor.RunID < peeks[j].actor.RunID
+	sources := make([]retainedTurnActorSource, 0, len(peeks)+len(extraSources))
+	for _, row := range peeks {
+		sources = append(sources, retainedTurnActorSource{row.actor, row.hash})
+	}
+	sources = append(sources, extraSources...)
+	sort.Slice(sources, func(i, j int) bool {
+		if sources[i].actor.RunID != sources[j].actor.RunID {
+			return sources[i].actor.RunID < sources[j].actor.RunID
 		}
-		return agentidentity.Less(peeks[i].actor, peeks[j].actor)
+		return agentidentity.Less(sources[i].actor, sources[j].actor)
 	})
 	scope := &turnOwnershipObservation{tx: tx, actors: make(map[agentidentity.Identity]events.InstanceOwnership), hashes: make(map[string]string), attempts: make(map[string]retainedTurnCoordinate), locked: make(map[agentidentity.Identity]bool)}
 	for _, actor := range actors {
@@ -117,6 +139,8 @@ func prepareRetainedTurnOwnershipTx(ctx context.Context, tx *sql.Tx, postgres bo
 	}
 	for _, row := range peeks {
 		scope.attempts[row.id] = row
+	}
+	for _, row := range sources {
 		if hash, found := scope.hashes[row.actor.RunID]; found && hash != row.hash {
 			return nil, fmt.Errorf("retained turn set crosses its exact native source")
 		}
@@ -313,7 +337,7 @@ func peekProviderRecoveryIDsTx(ctx context.Context, tx *sql.Tx, runID string, ac
 	return ids, nil
 }
 
-func prepareProviderRecoveryOwnershipTx(ctx context.Context, tx *sql.Tx, postgres bool, owner providerDrainDirectiveOwner, runID string, actor *agentidentity.Identity) (context.Context, error) {
+func prepareProviderRecoveryOwnershipTx(ctx context.Context, tx *sql.Tx, postgres bool, owner providerDrainDirectiveOwner, runID string, actor *agentidentity.Identity, extraSources ...retainedTurnActorSource) (context.Context, error) {
 	ids, err := peekProviderRecoveryIDsTx(ctx, tx, runID, actor)
 	if err != nil {
 		return nil, err
@@ -340,7 +364,7 @@ func prepareProviderRecoveryOwnershipTx(ctx context.Context, tx *sql.Tx, postgre
 		}
 		extra = append(extra, *actor)
 	}
-	ctx, err = prepareRetainedTurnOwnershipTx(ctx, tx, postgres, owner, ids, extra...)
+	ctx, err = prepareRetainedTurnOwnershipWithSourcesTx(ctx, tx, postgres, owner, ids, extraSources, extra)
 	if err != nil {
 		return nil, err
 	}
