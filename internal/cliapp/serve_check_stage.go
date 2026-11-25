@@ -94,11 +94,9 @@ func InspectServeCheckStage(ctx context.Context, in ServeCheckStageRequest) (out
 	backend, inspection, workspaceOK := inspectServeSourceAdmission(ctx, in, &out, preference)
 	intent := in.Options
 	intent.MCPListenAddr = WorkspaceMCPListenAddr(intent.MCPListenAddr, intent.MCPListenAddrSource, backend)
-	listenerIntent, err := serveCheckListenerIntent(intent, in.Config.Config.Serve.PublicWebhook)
-	if err != nil {
+	if err := inspectVerifyListeners(ctx, in.Repo, in.Config, &out.Validation, intent); err != nil {
 		return out, errors.Join(retErr, err)
 	}
-	inspectVerifyListeners(ctx, in.Repo, in.Config, &out.Validation, listenerIntent)
 	inspectVerifyWorkspaceDependencies(ctx, in.Config, backend, workspaceOK, &out.Validation)
 	inspectVerifyPublicIngress(ctx, in.Config, &out.Validation, "source:"+out.Validation.BootReport.SourceArtifactHash, intent)
 	var retained *verifyRetainedAdmissionInventory
@@ -164,19 +162,6 @@ func InspectServeCheckStage(ctx context.Context, in ServeCheckStageRequest) (out
 	})
 	out.Validation.BootReport.Sort()
 	return out, ctx.Err()
-}
-
-func serveCheckListenerIntent(intent ServeOptions, webhook *config.PublicWebhookConfig) (ServeOptions, error) {
-	mode, enabled, err := ResolveServePublicIngressMode(intent, webhook)
-	if err != nil {
-		return intent, err
-	}
-	if !enabled {
-		intent.PublicWebhookListen = ""
-	} else if mode == publicingress.ModeNativeTLS {
-		_, intent.PublicWebhookListen, err = publicingress.NativeTLSAddresses(webhook)
-	}
-	return intent, err
 }
 
 func (r *ServeCheckStageResult) recordCompletionFailure(ctx context.Context, subject string, err error) error {
@@ -506,12 +491,13 @@ func serveProviderPrerequisitesReady(report bootverify.Report, dryRun bool) bool
 	return decision.FailureClass == "" && !decision.Interrupted
 }
 
-func probeServeDryRunListener(ctx context.Context, name, addr string, held *[]verifyListenerBinding, result *runtime.WorkflowContractValidationResult) {
+func probeServeDryRunListener(ctx context.Context, target verifyListenerTarget, held *[]verifyListenerBinding, result *runtime.WorkflowContractValidationResult) {
+	name, addr := target.name, target.addr
 	var occupied error
 	verifyDeploymentObservation(ctx, result, "listener_availability", "internal/cliapp.ListenServeHTTPListener", name+":"+addr, failures.ClassDependencyUnavailable, func(ctx context.Context) error {
 		bounded, cancel := context.WithTimeout(ctx, verifyLocalDeadline)
 		defer cancel()
-		listener, err := ListenServeHTTPListenerInContext(bounded, name, addr)
+		listener, err := target.bind(bounded, name, addr)
 		if err != nil {
 			if !errors.Is(err, syscall.EADDRINUSE) || bounded.Err() != nil {
 				return err

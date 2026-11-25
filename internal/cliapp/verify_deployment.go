@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/bootverify"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
@@ -339,7 +341,25 @@ type verifyListenerBinding struct {
 	borrowed bool
 }
 
-func inspectVerifyListeners(ctx context.Context, repo string, cfg RuntimeConfigLoadResult, result *runtime.WorkflowContractValidationResult, intents ...ServeOptions) {
+type verifyListenerTarget struct {
+	name, addr string
+	bind       func(context.Context, string, string) (net.Listener, error)
+}
+
+func verifyPublicWebhookListenerTarget(intent ServeOptions, webhook *config.PublicWebhookConfig) (verifyListenerTarget, error) {
+	target := verifyListenerTarget{"public-webhook", intent.PublicWebhookListen, ListenServeHTTPListenerInContext}
+	if webhook == nil {
+		return target, nil
+	}
+	if _, _, err := ResolveServePublicIngressMode(intent, webhook); err != nil {
+		return verifyListenerTarget{}, err
+	}
+	_, address, err := publicingress.NativeTLSAddresses(webhook)
+	// Native TLS derives a wildcard bind, not an authored listen flag.
+	return verifyListenerTarget{"public-webhook", address, bindServeHTTPListener}, err
+}
+
+func inspectVerifyListeners(ctx context.Context, repo string, cfg RuntimeConfigLoadResult, result *runtime.WorkflowContractValidationResult, intents ...ServeOptions) error {
 	var held []verifyListenerBinding
 	defer func() {
 		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), verifyCleanupDeadline)
@@ -355,8 +375,14 @@ func inspectVerifyListeners(ctx context.Context, repo string, cfg RuntimeConfigL
 	}()
 	var api, mcp string
 	intent := ServeOptions{}
+	var webhook *config.PublicWebhookConfig
 	if len(intents) != 0 {
 		intent = intents[0]
+		webhook = cfg.Config.Serve.PublicWebhook
+	}
+	publicListener, err := verifyPublicWebhookListenerTarget(intent, webhook)
+	if err != nil {
+		return err
 	}
 	valid := verifyDeploymentObservation(ctx, result, "serve_listener_configuration", "internal/cliapp.RuntimeConfigLoadResult.ResolveServeListeners", "project:"+repo, failures.ClassSchemaInvalid, func(context.Context) error {
 		var err error
@@ -364,7 +390,7 @@ func inspectVerifyListeners(ctx context.Context, repo string, cfg RuntimeConfigL
 		return err
 	})
 	if !valid {
-		return
+		return nil
 	}
 	verifyDeploymentObservation(ctx, result, "serve_api_auth_admission", "internal/cliapp.ValidateServeAPIAuthBinding", "api:"+api, failures.ClassAuthenticationNeeded, func(context.Context) error {
 		root, err := NewInvocationRoot(repo)
@@ -377,9 +403,12 @@ func inspectVerifyListeners(ctx context.Context, repo string, cfg RuntimeConfigL
 		}
 		return ValidateServeAPIAuthBinding(api, auth)
 	})
-	bindings := []struct{ name, addr string }{{"api", api}, {"mcp", mcp}}
-	if intent.PublicWebhookListen != "" {
-		bindings = append(bindings, struct{ name, addr string }{"public-webhook", intent.PublicWebhookListen})
+	bindings := []verifyListenerTarget{
+		{"api", api, ListenServeHTTPListenerInContext},
+		{"mcp", mcp, ListenServeHTTPListenerInContext},
+	}
+	if strings.TrimSpace(publicListener.addr) != "" {
+		bindings = append(bindings, publicListener)
 	}
 	if intent.PublicWebhookListener != nil {
 		held = append(held, verifyListenerBinding{subject: "public-webhook:" + intent.PublicWebhookListener.Addr().String(), listener: intent.PublicWebhookListener, borrowed: true})
@@ -401,12 +430,12 @@ func inspectVerifyListeners(ctx context.Context, repo string, cfg RuntimeConfigL
 				return connection.Control(func(uintptr) {})
 			})
 		} else if intent.DryRun {
-			probeServeDryRunListener(ctx, binding.name, binding.addr, &held, result)
+			probeServeDryRunListener(ctx, binding, &held, result)
 		} else {
 			verifyDeploymentObservation(ctx, result, "listener_availability", "internal/cliapp.ListenServeHTTPListener", binding.name+":"+binding.addr, failures.ClassDependencyUnavailable, func(ctx context.Context) error {
 				local, cancel := context.WithTimeout(ctx, verifyLocalDeadline)
 				defer cancel()
-				listener, err := ListenServeHTTPListenerInContext(local, binding.name, binding.addr)
+				listener, err := binding.bind(local, binding.name, binding.addr)
 				if err != nil {
 					return err
 				}
@@ -420,4 +449,5 @@ func inspectVerifyListeners(ctx context.Context, repo string, cfg RuntimeConfigL
 			Reason: "availability is an observation, not a reservation; startup must bind and publish its own listener",
 		})
 	}
+	return nil
 }
