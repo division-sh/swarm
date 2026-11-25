@@ -24,6 +24,54 @@ type verifyRetainedSourceReader interface {
 	LoadRunRootedSource(context.Context, string) (sourceartifact.RootedSource, error)
 }
 
+type verifyRetainedCompileInput struct {
+	root    sourceartifact.RootAdmissionReference
+	logical string
+}
+
+type verifyRetainedCompileVerdicts map[verifyRetainedCompileInput]map[*packartifact.PlatformPackInventory]error
+
+// A candidate hit may resolve early, but the compiler still receives that exact
+// result only at its original resolution seat if the candidate misses.
+type verifyRetainedPackSelection struct {
+	resolver packartifact.PlatformPackBaseResolver
+	resolved bool
+	base     *packartifact.PlatformPackInventory
+	err      error
+}
+
+func (s *verifyRetainedPackSelection) CurrentPlatformPackBase() (*packartifact.PlatformPackInventory, error) {
+	if !s.resolved {
+		s.base, s.err = s.resolver.CurrentPlatformPackBase()
+		s.resolved = true
+	}
+	return s.base, s.err
+}
+
+func (verdicts verifyRetainedCompileVerdicts) compile(ctx context.Context, repo string, rooted sourceartifact.RootedSource, packBases packartifact.PlatformPackBaseResolver) error {
+	input := verifyRetainedCompileInput{rooted.Admission().Reference(), string(rooted.Artifact().LogicalBlob())}
+	prior := verdicts[input]
+	selection := &verifyRetainedPackSelection{resolver: packBases}
+	if len(prior) != 0 {
+		base, err := selection.CurrentPlatformPackBase()
+		if verdict, ok := prior[base]; ok && err == nil && ctx.Err() == nil {
+			return verdict
+		}
+	}
+	_, err := contracts.LoadWorkflowContractBundleFromRootedSource(repo, rooted, platform.PlatformSpecDisplayPath, contracts.WorkflowContractLoadOptions{
+		PlatformPackBases: selection, AdmitPackInventory: packadmission.AdmitInventory,
+	})
+	if selection.base != nil && selection.err == nil && ctx.Err() == nil &&
+		!errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+		if prior == nil {
+			prior = make(map[*packartifact.PlatformPackInventory]error)
+			verdicts[input] = prior
+		}
+		prior[selection.base] = err
+	}
+	return err
+}
+
 func inspectVerifyRetainedSources(ctx context.Context, reader verifyRetainedSourceReader, repo, subject string, packBases packartifact.PlatformPackBaseResolver, result *runtime.WorkflowContractValidationResult) {
 	const check = "retained_source_integrity"
 	_, preparationErr := verifyRetainedSourceLoader(repo, packBases)
@@ -33,8 +81,9 @@ func inspectVerifyRetainedSources(ctx context.Context, reader verifyRetainedSour
 		inventory, err = startuprecovery.Inspect(ctx, startuprecovery.Request{AvailabilityReader: reader, ArtifactReader: reader})
 		return errors.Join(err, preparationErr)
 	})
-	// Inspect retains its complete population even when one artifact fails.
-	// Compile each exact run independently; an earlier refusal is not a cut.
+	// The repo, embedded spec and compiler options are fixed within this check.
+	// Every run still reads its own rooted source, even after an earlier refusal.
+	verdicts := make(verifyRetainedCompileVerdicts)
 	for _, availability := range inventory.CheckedAvailabilities {
 		runSubject := "run:" + availability.RunID
 		if availability.BundleHash != "" {
@@ -55,10 +104,7 @@ func inspectVerifyRetainedSources(ctx context.Context, reader verifyRetainedSour
 		attempted := false
 		verifyDeploymentObservation(ctx, result, check, "internal/runtime/contracts.LoadWorkflowContractBundleFromRootedSource", runSubject, failures.ClassSchemaInvalid, func(ctx context.Context) error {
 			attempted = true
-			_, err := contracts.LoadWorkflowContractBundleFromRootedSource(repo, rooted, platform.PlatformSpecDisplayPath, contracts.WorkflowContractLoadOptions{
-				PlatformPackBases: packBases, AdmitPackInventory: packadmission.AdmitInventory,
-			})
-			return err
+			return verdicts.compile(ctx, repo, rooted, packBases)
 		})
 		if !attempted {
 			result.BootReport.Observations[len(result.BootReport.Observations)-1].Status = bootverify.AdmissionNotRun
