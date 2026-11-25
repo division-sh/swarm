@@ -147,15 +147,20 @@ func TestIssue642ArmedTemplateArrivalTimeoutContinuesExactDeliveryBothStores(t *
 			if err != nil {
 				t.Fatal(err)
 			}
-			result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
+			activationCtx, activationTrace := armSelectedForkActivation(ctx, backend, owner.ports.contexts.capability)
+			defer activationTrace.Close()
+			result, err := ExecuteSelectedContractRunFork(activationCtx, SelectedContractExecutionRequest{
 				SourceRunID: sourceRun, At: marker, Owner: owner, ForkOperation: &operation,
 				LiveRuntime: liveRuntime, LiveContexts: liveContexts, LiveRuns: selected.(runlifecycle.LiveRunReader),
 				SourceLoader: loader, ContractSelection: selection,
 				AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: owner.ports.contexts.capability},
 			})
 			if err != nil || !result.Activation.Activated {
+				logForkProcessCapabilityOnFailure(t, owner.ports.contexts.capability)
+				logSelectedForkActivationTraceAt(t, activationTrace, "armed template arrival executor refused", ctx, err)
 				t.Fatalf("selected armed template arrival activation must succeed: %+v err=%v", result, err)
 			}
+			activationTrace.Close()
 			child := result.Materialization.ForkRunID
 			projected, err := runfork.ProjectConstructionIdentity(sourceRun, child, receipt.Identity)
 			if err != nil {

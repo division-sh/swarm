@@ -15,6 +15,7 @@ import (
 	runtimechanneldelivery "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
@@ -236,6 +237,17 @@ func (s *postgresSession) Authority() (runtimestartupownership.Authority, error)
 	return s.authority, nil
 }
 
+func (s *postgresSession) BindForkCancelCapture(trace *forkcancelcapture.Capture) {
+	trace.Bind(s)
+	session := s.lease.Session()
+	if session == nil {
+		trace.Missing("retained PostgreSQL session unavailable at capture bind", s)
+		return
+	}
+	trace.Bind(session)
+	trace.Note("retained session to native session", session, s, nil, nil, false)
+}
+
 func (s *postgresSession) mutationContext(ctx context.Context, changing bool) (context.Context, error) {
 	authority, err := s.Authority()
 	if err != nil {
@@ -298,6 +310,7 @@ func (s *postgresSession) InstallTerminalOwner(owner runtimestartupownership.Ses
 		return errors.New("install PostgreSQL process capability terminal callback")
 	}
 	return s.lease.InstallLocalFenceOwner(func() {
+		forkcancelcapture.Owner(s).Note("installed local fence callback", owner, s, nil, nil, true)
 		owner.SelectedStoreSessionTerminal(runtimestartupownership.TerminalResult{Cause: runtimestartupownership.TerminalOwnershipUnprovable})
 	})
 }
@@ -306,6 +319,7 @@ func (s *postgresSession) terminal(owner runtimestartupownership.SessionTerminal
 	if s == nil || owner == nil {
 		return
 	}
+	forkcancelcapture.Owner(s).Note("native process session disposal callback", owner, s, nil, nil, true)
 	if s.lease.ReleasedCleanly() {
 		return
 	}
