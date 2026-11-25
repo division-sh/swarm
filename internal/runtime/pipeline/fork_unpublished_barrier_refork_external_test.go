@@ -205,6 +205,7 @@ func verifyUnpublishedTransferredBarrierRefork(t *testing.T, latePublication boo
 				select {
 				case observed = <-childProbe.claim:
 				case ack := <-acknowledged:
+					logPostgresForkEngineActivationFailure(t, backend, capability)
 					t.Fatalf("pending barrier returned before its crash cut: child=%s err=%v", ack.result.Materialization.ForkRunID, ack.err)
 				case <-phase.Done():
 					t.Fatal(phase.Err())
@@ -248,6 +249,7 @@ func verifyUnpublishedTransferredBarrierRefork(t *testing.T, latePublication boo
 				parentRequest.AgentRuntime.AgentManagerOptions = manager.AgentManagerOptions{TestLifecycleProbe: parentProbe}
 				parentResult, err := family.Execute(phase, parentRequest)
 				if err != nil || !parentResult.Activation.Activated || parentResult.Materialization.ForkRunID != parent.ForkRunID {
+					logPostgresForkEngineActivationFailure(t, backend, capability)
 					t.Fatalf("late parent's exact selected barrier execution: %+v error=%v", parentResult, err)
 				}
 				if _, err := parentProbe.Wait(phase, lifecycleprobe.Signal{Kind: lifecycleprobe.DeliveryStatusChanged, EventID: occurrence.Publication.EventID, SubscriberID: producer.Key(), SubscriberType: "node", Status: "delivered"}); err != nil {
@@ -274,11 +276,13 @@ func verifyUnpublishedTransferredBarrierRefork(t *testing.T, latePublication boo
 				childRun := child.Materialization.ForkRunID
 				child, err = family.Execute(phase, request)
 				if err != nil || !child.Activation.Activated || child.Activation.SourceFrozen || child.Materialization.ForkRunID != childRun {
+					logPostgresForkEngineActivationFailure(t, backend, capability)
 					t.Fatalf("late-source child must execute its exact retained branch: %+v error=%v", child, err)
 				}
 			} else {
 				child, err = family.Execute(phase, request)
 				if err != nil || !child.Activation.Activated {
+					logPostgresForkEngineActivationFailure(t, backend, capability)
 					t.Fatalf("continue pending barrier: %+v error=%v", child, err)
 				}
 			}

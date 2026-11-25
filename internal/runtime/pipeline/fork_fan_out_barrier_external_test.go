@@ -28,6 +28,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 	"github.com/google/uuid"
@@ -40,6 +41,21 @@ type forkBarrierCompletionProbe struct {
 	claimOnce, completeOnce sync.Once
 	mu                      sync.Mutex
 	history                 []lifecycleprobe.Signal
+}
+
+func logPostgresForkEngineActivationFailure(t *testing.T, backend string, capability startupownership.ProcessCapability) {
+	t.Helper()
+	if backend != "postgres" {
+		return
+	}
+	readAt := time.Now().UTC().Format(time.RFC3339Nano)
+	select {
+	case <-capability.Done():
+		terminal, available := capability.TerminalResult()
+		t.Logf("the capability's terminal state as read by the test: read_at=%s done_closed=true terminal_result=%+v terminal_result_available=%t; Done also closes on a clean release; read_at is when the test looked", readAt, terminal, available)
+	default:
+		t.Logf("the capability's terminal state as read by the test: read_at=%s done_closed=false; Done also closes on a clean release; read_at is when the test looked", readAt)
+	}
 }
 
 func (p *forkBarrierCompletionProbe) NotifyLifecycle(ctx context.Context, signal lifecycleprobe.Signal) {
@@ -195,16 +211,7 @@ func TestIssue642FanOutBarrierFrontierBothStores(t *testing.T) {
 				}
 				result, err := family.Execute(phase, forkEngineLiveRequest(t, rt, selected, executionRequest))
 				if err != nil || !result.Activation.Activated || result.ForkLocalRuntimeContainer == nil {
-					if backend == "postgres" && retained == fanoutobligation.InheritedDeadLettered {
-						readAt := time.Now().UTC().Format(time.RFC3339Nano)
-						select {
-						case <-capability.Done():
-							terminal, available := capability.TerminalResult()
-							t.Logf("the capability's terminal state as read by the test: read_at=%s done_closed=true terminal_result=%+v terminal_result_available=%t; Done also closes on a clean release; read_at is when the test looked", readAt, terminal, available)
-						default:
-							t.Logf("the capability's terminal state as read by the test: read_at=%s done_closed=false; Done also closes on a clean release; read_at is when the test looked", readAt)
-						}
-					}
+					logPostgresForkEngineActivationFailure(t, backend, capability)
 					t.Fatalf("barrier child did not acknowledge activation: %+v err=%v", result, err)
 				}
 				proof := result.ForkLocalRuntimeContainer

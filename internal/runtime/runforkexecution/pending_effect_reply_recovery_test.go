@@ -403,6 +403,7 @@ func TestIssue642FreshPendingEffectBeforeJournalSIGKILLRecoveryBothStores(t *tes
 			case selectedContext = <-startupEntered:
 			case outcome := <-done:
 				joined = true
+				logPostgresForkActivationFailure(t, backend, capability)
 				t.Fatalf("native recovery missed its startup cut: %+v error=%v", outcome.entries, outcome.err)
 			case <-wait.Done():
 				t.Fatal("successor did not reach its native startup reconciliation")
@@ -443,6 +444,7 @@ func TestIssue642FreshPendingEffectBeforeJournalSIGKILLRecoveryBothStores(t *tes
 			joined = true
 			recovered, err := outcome.entries, outcome.err
 			if err != nil || len(recovered) != 2 {
+				logPostgresForkActivationFailure(t, backend, capability)
 				t.Fatalf("pending-card native recovery: %+v error=%v", recovered, err)
 			}
 			matched := 0

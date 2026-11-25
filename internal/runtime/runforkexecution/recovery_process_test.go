@@ -37,7 +37,17 @@ type selectedForkCrashCheckpoint struct {
 	FanOut             *selectedHandlerFanOutCrashCheckpoint `json:"fan_out,omitempty"`
 }
 
+func killSelectedForkAtObservedActivationCheckpoint(t *testing.T, backend, dsn, cut string) selectedForkCrashCheckpoint {
+	t.Helper()
+	return killSelectedForkAtCheckpointWithObservation(t, backend, dsn, cut, backend == "postgres")
+}
+
 func killSelectedForkAtCheckpoint(t *testing.T, backend, dsn, cut string) selectedForkCrashCheckpoint {
+	t.Helper()
+	return killSelectedForkAtCheckpointWithObservation(t, backend, dsn, cut, false)
+}
+
+func killSelectedForkAtCheckpointWithObservation(t *testing.T, backend, dsn, cut string, observeActivation bool) selectedForkCrashCheckpoint {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
@@ -52,6 +62,11 @@ func killSelectedForkAtCheckpoint(t *testing.T, backend, dsn, cut string) select
 		cmd.Args = append(cmd.Args, "-test.v")
 	}
 	cmd.Env = append(os.Environ(), "SWARM_SELECTED_CRASH_BACKEND="+backend, "SWARM_SELECTED_CRASH_DSN="+dsn, "SWARM_SELECTED_CRASH_CUT="+cut)
+	observe := "0"
+	if observeActivation {
+		observe = "1"
+	}
+	cmd.Env = append(cmd.Env, "SWARM_SELECTED_CRASH_OBSERVE_ACTIVATION="+observe)
 	if strings.HasPrefix(cut, "retained_timer_") || strings.HasPrefix(cut, "retained_join_") || strings.HasPrefix(cut, "retained_pending_join_") || strings.HasPrefix(cut, "retained_armed_join_") || strings.HasPrefix(cut, "retained_activity_") || strings.HasPrefix(cut, "retained_handler_fan_out_") {
 		// The killed child cannot release its sealed source projections. Keep
 		// every private scratch root under the parent's exact cleanup ownership.
@@ -316,8 +331,8 @@ func TestSelectedForkCrashProcessHelper(t *testing.T) {
 	}
 	result, err := ExecuteSelectedContractRunFork(ctx, request)
 	if err != nil {
-		if backend == "postgres" && cut == "retained_armed_join_after_activation" && os.Getenv(armedArrivalPreparationEnv) == "" {
-			logForkProcessCapabilityOnFailure(t, capability)
+		if os.Getenv("SWARM_SELECTED_CRASH_OBSERVE_ACTIVATION") == "1" {
+			logPostgresForkActivationFailure(t, backend, capability)
 		}
 		t.Fatal(err)
 	}

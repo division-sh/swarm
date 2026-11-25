@@ -74,7 +74,7 @@ func TestIssue642RetainedForkCrashRestartBothStores(t *testing.T) {
 					t.Setenv(publishedJoinFlowEnv, "orders")
 					checkpointCut = "retained_join_after_activation"
 				}
-				checkpoint := killSelectedForkAtCheckpoint(t, backend, dsn, checkpointCut)
+				checkpoint := killSelectedForkAtObservedActivationCheckpoint(t, backend, dsn, checkpointCut)
 				operations := selected.(interface {
 					LoadForkOperation(context.Context, string, string, string) (runfork.ForkOperationRecord, bool, error)
 				})
@@ -146,6 +146,7 @@ func TestIssue642RetainedForkCrashRestartBothStores(t *testing.T) {
 				if err != nil || len(recovered) != 1 || recovered[0].RunID != checkpoint.ForkRun || recovered[0].Disposition != expectedRecovery {
 					diagnostic, diagnosticErr := storetest.ReadServedRunDebugSummary(context.WithoutCancel(ctx), selected, checkpoint.ForkRun)
 					t.Logf("PRE_ACK_RECOVERY_NATIVE_STATE %s err=%v", diagnostic, diagnosticErr)
+					logPostgresForkActivationFailure(t, backend, capability)
 					t.Fatalf("retained recovery failed: %+v %v", recovered, err)
 				}
 				wait, cancel := context.WithTimeout(context.Background(), 15*time.Second)
