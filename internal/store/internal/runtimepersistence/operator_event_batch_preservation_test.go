@@ -149,7 +149,7 @@ func TestOperatorEventBatchConsumedPrefixBothStores(t *testing.T) {
 			if err != nil || len(clean.Events) != 1 || clean.NextCursor == "" {
 				t.Fatalf("clean prefix: %+v err=%v", clean, err)
 			}
-			assertOperatorBatchScalarEqual(t, clean.Events[0], originals[1])
+			assertOperatorListMatchesDetail(t, clean.Events[0], originals[1])
 			for _, fault := range []string{"event", "delivery", "dead_letter"} {
 				// A is filtered out only after admission; C is the matching lookahead;
 				// D is beyond that lookahead and must not be admitted on this page.
@@ -189,13 +189,13 @@ func TestOperatorEventBatchConsumedPrefixBothStores(t *testing.T) {
 			if err != nil || len(page.Events) != 1 || page.NextCursor == "" {
 				t.Fatalf("second matching page: %+v err=%v", page, err)
 			}
-			assertOperatorBatchScalarEqual(t, page.Events[0], originals[2])
+			assertOperatorListMatchesDetail(t, page.Events[0], originals[2])
 			opts.Cursor = page.NextCursor
 			page, err = store.ListOperatorEvents(ctx, opts)
 			if err != nil || len(page.Events) != 1 || page.NextCursor != "" {
 				t.Fatalf("last matching page: %+v err=%v", page, err)
 			}
-			assertOperatorBatchScalarEqual(t, page.Events[0], originals[3])
+			assertOperatorListMatchesDetail(t, page.Events[0], originals[3])
 		})
 	}
 }
@@ -251,14 +251,14 @@ func TestOperatorEventBatchEvidenceMembershipAndFreshnessBothStores(t *testing.T
 			if err != nil || len(page.Events) != 1 || page.NextCursor != "" {
 				t.Fatalf("separate delivery/reason predicates: %+v err=%v", page, err)
 			}
-			assertOperatorBatchScalarEqual(t, page.Events[0], scalar)
+			assertOperatorListMatchesDetail(t, page.Events[0], scalar)
 			eventOnlyReason := opts
 			eventOnlyReason.Filter.ReasonCode = "unassociated_failure"
 			eventOnlyPage, err := store.ListOperatorEvents(ctx, eventOnlyReason)
 			if err != nil || len(eventOnlyPage.Events) != 1 {
 				t.Fatalf("event-only dead-letter reason predicate: %+v err=%v", eventOnlyPage, err)
 			}
-			assertOperatorBatchScalarEqual(t, eventOnlyPage.Events[0], scalar)
+			assertOperatorListMatchesDetail(t, eventOnlyPage.Events[0], scalar)
 			var queuedID, failedID string
 			for _, delivery := range page.Events[0].Deliveries {
 				if delivery.SubscriberID == failed.Recipient.ID() {
@@ -301,7 +301,7 @@ func TestOperatorEventBatchEvidenceMembershipAndFreshnessBothStores(t *testing.T
 				if err != nil {
 					t.Fatal(err)
 				}
-				assertOperatorBatchScalarEqual(t, got.Events[0], want)
+				assertOperatorListMatchesDetail(t, got.Events[0], want)
 			})
 			t.Run("cross_run_delivery_must_not_disappear_in_join", func(t *testing.T) {
 				_, err := fixture.db.ExecContext(ctx, `UPDATE event_deliveries SET run_id=$1 WHERE delivery_id=$2`, foreignRun, queuedID)
@@ -312,7 +312,7 @@ func TestOperatorEventBatchEvidenceMembershipAndFreshnessBothStores(t *testing.T
 				if err != nil {
 					t.Fatal(err)
 				}
-				assertOperatorBatchScalarEqual(t, got, page.Events[0])
+				assertOperatorListMatchesDetail(t, page.Events[0], got)
 				listed, err := store.ListOperatorEvents(ctx, unfiltered)
 				if err != nil || len(listed.Events) != 1 {
 					t.Fatalf("refused cross-run write changed batch membership: %+v err=%v", listed, err)
@@ -348,13 +348,25 @@ func TestOperatorEventBatchEvidenceMembershipAndFreshnessBothStores(t *testing.T
 			if err != nil {
 				t.Fatal(err)
 			}
-			assertOperatorBatchScalarEqual(t, after.Events[0], freshScalar)
-			assertOperatorBatchScalarEqual(t, before, scalar)
+			assertOperatorListMatchesDetail(t, after.Events[0], freshScalar)
+			assertOperatorListMatchesDetail(t, before, scalar)
 			if reflect.DeepEqual(before, after.Events[0]) {
 				t.Fatal("real delivery transition did not change projection")
 			}
 		})
 	}
+}
+
+func assertOperatorListMatchesDetail(t *testing.T, listed, detail operatorread.OperatorEventFull) {
+	t.Helper()
+	if listed.ConnectPlans != nil {
+		t.Fatal("list included detail-only connect_plans")
+	}
+	if detail.ConnectPlans == nil || *detail.ConnectPlans == nil || len(*detail.ConnectPlans) != 0 {
+		t.Fatal("detail did not include the recorded empty connect_plans")
+	}
+	detail.ConnectPlans = nil
+	assertOperatorBatchScalarEqual(t, listed, detail)
 }
 
 func assertOperatorBatchScalarEqual(t *testing.T, got, want operatorread.OperatorEventFull) {
