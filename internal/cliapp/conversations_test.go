@@ -421,7 +421,15 @@ func TestConversationTurnTokenCostOutput(t *testing.T) {
 				var stdout, stderr bytes.Buffer
 				code := executeRootCommandWithOptions(context.Background(), t.TempDir(), args, &stdout, &stderr, testRootCommandOptions(server))
 				if tc.raw != "" && tc.amount == "" {
-					if code == cliExitOK || stdout.Len() != 0 || !strings.Contains(stderr.String(), "token_cost_estimate") {
+					wantError := "token_cost_estimate"
+					// Envelope admission runs before the estimate decoder.
+					switch tc.name {
+					case "duplicate":
+						wantError = `duplicate JSON object key "usd"`
+					case "nonfinite":
+						wantError = `JSON number "1e309" overflows binary64`
+					}
+					if code == cliExitOK || stdout.Len() != 0 || !strings.Contains(stderr.String(), wantError) {
 						t.Fatalf("malformed estimate not refused: code=%d stdout=%q stderr=%q", code, &stdout, &stderr)
 					}
 					continue
