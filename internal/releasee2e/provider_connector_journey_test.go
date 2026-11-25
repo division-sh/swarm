@@ -10,6 +10,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/http/httputil"
@@ -88,7 +89,12 @@ func TestEmbeddedConnectorPublicJourneysBothStores(t *testing.T) {
 			}
 			verify := command("", "verify", source, "--json")
 			assertFullLifecycleVerifySuccess(t, releaseCommandResult{output: verify})
-			publicListen := fmt.Sprintf("127.0.0.1:%d", freeReleaseTCPPort(t))
+			publicPort, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer publicPort.Close()
+			publicListen := publicPort.Addr().String()
 			publicTarget, err := url.Parse("http://" + publicListen)
 			if err != nil {
 				t.Fatal(err)
@@ -98,6 +104,10 @@ func TestEmbeddedConnectorPublicJourneysBothStores(t *testing.T) {
 			certificate := filepath.Join(base, "public-ca.pem")
 			writeReleaseFile(t, certificate, string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: publicOrigin.Certificate().Raw})))
 			env = append(env, "SSL_CERT_FILE="+certificate)
+			// Keep the proxy from taking the child's port before the child is launched.
+			if err := publicPort.Close(); err != nil {
+				t.Fatal(err)
+			}
 			process := startReleaseServe(t, releaseProcessSpec{BinaryPath: binary, WorkingDir: base, Source: source, ConfigPath: config, Store: backend, TokenFile: token, Token: goldenAPIToken, Env: env,
 				PublicWebhookBaseURL: publicOrigin.URL, PublicWebhookListen: publicListen, RedactValues: secrets})
 			ctx, cancel := context.WithTimeout(t.Context(), goldenStartupTimeout)
