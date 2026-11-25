@@ -586,6 +586,7 @@ type RecoverySummary struct {
 	ChannelSourcesChanged                    bool `json:"-"`
 	UncalledAgentClaimsDeadLettered          int  `json:"-"`
 	UncalledRetryExhaustedClaimsDeadLettered int  `json:"-"`
+	UncalledFailedRetryClaimsDeadLettered    int  `json:"-"`
 	PrelaunchTerminal                        int
 	OutcomeUncertain                         int
 }

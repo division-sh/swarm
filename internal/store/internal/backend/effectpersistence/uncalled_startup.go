@@ -69,7 +69,7 @@ func prepareNormalStartupRecoveryTx(ctx context.Context, tx *sql.Tx, mutation *m
 }
 
 type deliveryClaimRecoveryCounts struct {
-	uncalled, retryExhausted int
+	uncalled, retryExhausted, failedRetryExhausted int
 }
 
 func settleUncalledStartupClaims(ctx context.Context, mutation *mutationprotocol.Attempt, delivery providerDrainDeliveryOwner, claims []storedelivery.UncalledStartupClaim, now time.Time) (deliveryClaimRecoveryCounts, error) {
@@ -87,7 +87,7 @@ func settleUncalledStartupClaims(ctx context.Context, mutation *mutationprotocol
 		RuleSelection: deliverylifecycle.NotApplicableHandlerRuleObservation()}
 	for _, candidate := range claims {
 		settlement := settlement
-		if candidate.RetryExhausted {
+		if candidate.Kind != storedelivery.UncalledStartupFirstCall {
 			// The locked claim has no budget left, so the existing retry
 			// settlement dead-letters it without advancing retry_count.
 			settlement.Disposition = deliverylifecycle.FailureRetry
@@ -95,10 +95,13 @@ func settleUncalledStartupClaims(ctx context.Context, mutation *mutationprotocol
 		if err := delivery.SettleProviderOriginRecoveryFailureTx(ctx, mutation, candidate.Claim, settlement, ""); err != nil {
 			return deliveryClaimRecoveryCounts{}, err
 		}
-		if candidate.RetryExhausted {
-			counts.retryExhausted++
-		} else {
+		switch candidate.Kind {
+		case storedelivery.UncalledStartupFirstCall:
 			counts.uncalled++
+		case storedelivery.UncalledStartupInterruptedRetry:
+			counts.retryExhausted++
+		case storedelivery.UncalledStartupFailedRetry:
+			counts.failedRetryExhausted++
 		}
 	}
 	return counts, nil

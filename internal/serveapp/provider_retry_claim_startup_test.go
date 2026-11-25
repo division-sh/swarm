@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -152,9 +153,23 @@ func TestServedOrdinaryUncalledRetrySettlesAtStartupBothStores(t *testing.T) {
 			if after.Status != deliverylifecycle.StatusDeadLetter || after.Reason != "retry_exhausted" || after.Attempts[1].Closure != "settled" || after.Attempts[1].Outcome != "dead_letter" {
 				t.Fatalf("startup did not settle the exhausted never-called retry: status=%s reason=%q v2=%s/%s", after.Status, after.Reason, after.Attempts[1].Closure, after.Attempts[1].Outcome)
 			}
-			second.endpoint(t)
+			delivery, letter := awaitExhaustedRetryClaim(t, second.endpoint(t)+"/v1/rpc", claim)
+			if delivery.Status != string(deliverylifecycle.StatusDeadLetter) || delivery.RetryCount != 1 ||
+				delivery.ReasonCode != "retry_exhausted" || delivery.Failure == nil ||
+				delivery.Failure.Class != runtimefailures.ClassRetryExhausted ||
+				delivery.Failure.Detail.Code != "delivery_retry_exhausted" || letter.ClaimVersion != 2 {
+				t.Fatalf("wrong public exhaustion result: delivery=%+v dead_letter_claim=%d", delivery, letter.ClaimVersion)
+			}
+			requireExhaustedRetryHistory(t, after.Attempts[0], after.Attempts[1], delivery, letter)
 			if err := second.stop(); err != nil {
 				t.Fatal(err)
+			}
+			const notice = "runtime.warn component=startup-recovery message=Agent turns dead-lettered at restart at their retry limit, after a failed attempt and before the retry made a provider call: 1; they are not run again. List dead-lettered deliveries with swarm event list --delivery-status dead_letter"
+			if output := second.output.String(); strings.Count(output, notice+"\n") != 1 ||
+				strings.Contains(output, "Agent turns dead-lettered at restart before any provider call:") ||
+				strings.Contains(output, "before the interrupted call was issued again:") ||
+				strings.Contains(output, "attempts abandoned before launch") {
+				t.Fatalf("startup did not report the exhausted retry once and separately:\n%s", output)
 			}
 			if count := len(provider.Requests()); count != 1 {
 				t.Fatalf("after dispatch release: provider wire requests=%d, want the sole v1 request", count)
