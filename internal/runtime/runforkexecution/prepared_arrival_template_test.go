@@ -223,6 +223,7 @@ func testPreparedTemplateArrivalTimeoutBothStores(t *testing.T, selectedDelay st
 			}
 			result, err := ExecuteSelectedContractRunFork(ctx, request)
 			if err != nil || !result.Activation.Activated {
+				logPostgresForkActivationFailure(t, backend, owner.ports.contexts.capability)
 				t.Fatalf("selected prepared template arrival activation must succeed: %+v err=%v", result, err)
 			}
 			child := result.Materialization.ForkRunID

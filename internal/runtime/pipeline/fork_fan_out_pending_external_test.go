@@ -225,6 +225,7 @@ func runMixedFanOutPendingMatrixWithCrash(t *testing.T, refork bool, crash *mixe
 				select {
 				case observed = <-probe.claimed:
 				case ack := <-acknowledged:
+					logPostgresForkEngineActivationFailure(t, backend, capability)
 					t.Fatalf("mixed fan-out returned before its controlled claim: %+v err=%v", ack.result, ack.err)
 				case <-forkCtx.Done():
 					t.Fatalf("child did not acquire the exact owed receiver: %v", forkCtx.Err())
@@ -278,6 +279,7 @@ func runMixedFanOutPendingMatrixWithCrash(t *testing.T, refork bool, crash *mixe
 				select {
 				case ack := <-acknowledged:
 					if ack.err != nil || !ack.result.Activation.Activated || request != forkEngineExecutionProofRequest(t, ack.result, sourceClaim.id, observed.id, claim) {
+						logPostgresForkEngineActivationFailure(t, backend, capability)
 						t.Fatalf("mixed fan-out lost its exact post-settlement handoff: %+v err=%v", ack.result, ack.err)
 					}
 					assertForkEngineCommittedEvidence(t, claimedProof, ack.result, cutID)

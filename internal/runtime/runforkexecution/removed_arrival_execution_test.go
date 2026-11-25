@@ -138,6 +138,7 @@ func TestIssue642RemovedPreparedArrivalRuleSettlesDependentsBothStores(t *testin
 				AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: owner.ports.contexts.capability},
 			})
 			if err != nil || !result.Activation.Activated {
+				logPostgresForkActivationFailure(t, backend, owner.ports.contexts.capability)
 				t.Fatalf("removed arrival rule must cancel, not refuse the fork: %+v err=%v", result, err)
 			}
 			child := result.Materialization.ForkRunID

@@ -305,6 +305,7 @@ func TestSelectedForkReceiverSupportedDeliveryBothStores(t *testing.T) {
 				select {
 				case observed = <-probe.claimed:
 				case ack := <-acknowledged:
+					logPostgresForkEngineActivationFailure(t, backend, capability)
 					t.Fatalf("fork returned before its controlled engine claim: %+v err=%v", ack.result, ack.err)
 				case <-forkCtx.Done():
 					t.Fatalf("fork did not reach engine claim: %v", forkCtx.Err())
@@ -391,6 +392,7 @@ WHERE es.run_id=$1 AND es.entity_id=$2 AND es.flow_instance='consumer'`, claim.R
 						ack.result.Materialization.SelectedContractBinding.BindingID != proofRequest.BindingID || proof == nil || proof.SourceRunID != runID ||
 						proof.ForkRunID != claim.RunID() || proof.RuntimeExecutionID != proofRequest.ExecutionID || proof.RuntimeGeneration != proofRequest.Generation ||
 						proof.Owner != runfork.RunForkSelectedContractForkLocalRuntimeContainerOwner {
+						logPostgresForkEngineActivationFailure(t, backend, capability)
 						t.Fatalf("fork outcome lost its exact pre-ACK engine ownership: %+v err=%v", ack.result, ack.err)
 					}
 					if missing {
@@ -401,10 +403,12 @@ WHERE es.run_id=$1 AND es.entity_id=$2 AND es.flow_instance='consumer'`, claim.R
 						want := fmt.Sprintf("%s: constructed projection run=%s entity=%s instance=consumer: constructed header projection disagrees with its declared field row", prefix, claim.RunID(), target.EntityID)
 						want += "\nlive handoff was not acknowledged; selected work remains recoverable\ninspect construction-scoped dynamic flow readiness: corrupt flow construction run= flow=consumer instance=consumer: constructed workflow consumer is missing its declared field row"
 						if ack.err == nil || ack.err.Error() != want || ack.result.Activation.Activated {
+							logPostgresForkEngineActivationFailure(t, backend, capability)
 							t.Fatalf("missing companion escaped exact native handoff refusal: activated=%t error=%v want=%s", ack.result.Activation.Activated, ack.err, want)
 						}
 					} else {
 						if ack.err != nil || !ack.result.Activation.Activated || proofRequest != forkEngineExecutionProofRequest(t, ack.result, frontier, observed.id, claim) {
+							logPostgresForkEngineActivationFailure(t, backend, capability)
 							t.Fatalf("fork lost its post-settlement handoff ACK: %+v err=%v", ack.result, ack.err)
 						}
 						assertForkEngineCommittedEvidence(t, settledProof, ack.result, frontier)

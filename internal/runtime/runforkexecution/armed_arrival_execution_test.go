@@ -255,6 +255,13 @@ func logForkProcessCapabilityOnFailure(t *testing.T, capability startupownership
 	}
 }
 
+func logPostgresForkActivationFailure(t *testing.T, backend string, capability startupownership.ProcessCapability) {
+	t.Helper()
+	if backend == "postgres" {
+		logForkProcessCapabilityOnFailure(t, capability)
+	}
+}
+
 func TestIssue642ArmedArrivalTimeoutContinuesExactDeliveryBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
