@@ -39,17 +39,21 @@ func TestPlanCICoreWithChannelPreservesCanonicalObligations(t *testing.T) {
 		}
 		plans[selection.id] = plan
 	}
-	fullChannel, err := plans["full"].Unit("serveapp-channel")
-	if err != nil {
-		t.Fatal(err)
-	}
-	actual, err := plans["core-channel"].Unit("serveapp-channel")
-	if err != nil {
-		t.Fatal(err)
-	}
-	actual.WeightSeconds = fullChannel.WeightSeconds
-	if !reflect.DeepEqual(actual, fullChannel) {
-		t.Fatal("PR-body supplement differs from the canonical full channel recipe/obligations")
+	var fullChannel []testplanning.ProofUnit
+	for _, id := range []string{"serveapp-channel", "serveapp-channel-journeys"} {
+		want, err := plans["full"].Unit(id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		actual, err := plans["core-channel"].Unit(id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		actual.WeightSeconds = want.WeightSeconds
+		if !reflect.DeepEqual(actual, want) {
+			t.Fatalf("PR-body supplement differs from the full channel recipe for %s", id)
+		}
+		fullChannel = append(fullChannel, want)
 	}
 	union := func(plan testplanning.RunPlan, extra ...testplanning.ProofUnit) map[testplanning.TestRoot][]string {
 		roots := map[testplanning.TestRoot][]string{}
@@ -62,7 +66,7 @@ func TestPlanCICoreWithChannelPreservesCanonicalObligations(t *testing.T) {
 		}
 		return roots
 	}
-	if !reflect.DeepEqual(union(plans["core"], fullChannel), union(plans["core-channel"])) {
+	if !reflect.DeepEqual(union(plans["core"], fullChannel...), union(plans["core-channel"])) {
 		t.Fatal("actual emitted core/channel root and child obligations do not conserve their union")
 	}
 	if err := testplanning.CheckCurrentCISelection(plans["core-channel"], "CI-Tier: core"); err == nil {

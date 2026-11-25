@@ -77,7 +77,7 @@ func TestServeappLateSplitPreservesOriginalRootPartition(t *testing.T) {
 	policy := loadPersistenceDebtPolicy(t)
 	old := regexp.MustCompile(originalServeappLateSelection)
 	matchers := []func(string) bool{func(name string) bool { return !old.MatchString(name) }}
-	for _, id := range []string{"serveapp-other-late", "serveapp-delayed-commit-preservation", "serveapp-channel", "serveapp-channel-neutral"} {
+	for _, id := range []string{"serveapp-other-late", "serveapp-delayed-commit-preservation", channelUnit, channelJourneys, "serveapp-channel-neutral"} {
 		pattern := regexp.MustCompile(policy.Units[id].Run)
 		matchers = append(matchers, func(name string) bool { return old.MatchString(name) && pattern.MatchString(name) })
 	}
