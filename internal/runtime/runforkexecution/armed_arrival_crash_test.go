@@ -145,7 +145,7 @@ func testArmedArrivalTimeoutCrashRestartBothStores(t *testing.T, phase string) {
 					selected = s
 					construct = func() SelectedContractExecutionOwner { return newSelectedContractExecutionOwnerForTest(t, s) }
 				}
-				checkpoint := killSelectedForkAtCheckpoint(t, backend, dsn, cut)
+				checkpoint := killSelectedForkAtObservedActivationCheckpoint(t, backend, dsn, cut)
 				operations := selected.(interface {
 					LoadForkOperation(context.Context, string, string, string) (runfork.ForkOperationRecord, bool, error)
 				})
@@ -310,6 +310,7 @@ func testArmedArrivalTimeoutCrashRestartBothStores(t *testing.T, phase string) {
 					wantDisposition = runfork.SelectedForkRecoveryResume
 				}
 				if err != nil || len(recovered) != 1 || recovered[0].RunID != child || recovered[0].Disposition != wantDisposition {
+					logPostgresForkActivationFailure(t, backend, capability)
 					t.Fatalf("armed arrival successor recovery: %+v err=%v", recovered, err)
 				}
 				rebootGrant, err := ordinary.CurrentStartupGrantEvidence()

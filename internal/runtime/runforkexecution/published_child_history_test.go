@@ -35,7 +35,7 @@ func TestIssue642PublishedChildRemainsHistoricallyPlannableBothStores(t *testing
 				s, _ := storetest.StartPostgresRuntimeStoreWithReopen(t, dsn)
 				selected = s
 			}
-			checkpoint := killSelectedForkAtCheckpoint(t, backend, dsn, "retained_join_event_committed")
+			checkpoint := killSelectedForkAtObservedActivationCheckpoint(t, backend, dsn, "retained_join_event_committed")
 			source, err := selected.PlanRunFork(t.Context(), runfork.RunForkPlanRequest{SourceRunID: checkpoint.SourceRun})
 			if err != nil || len(source.JoinSchedules) != 1 {
 				t.Fatalf("source control: joins=%d err=%v", len(source.JoinSchedules), err)
@@ -65,7 +65,7 @@ func TestIssue642PublishedChildHistoricalClosureBothStores(t *testing.T) {
 					selected = s
 					construct = func() SelectedContractExecutionOwner { return newSelectedContractExecutionOwnerForTest(t, s) }
 				}
-				checkpoint := killSelectedForkAtCheckpoint(t, backend, dsn, cut)
+				checkpoint := killSelectedForkAtObservedActivationCheckpoint(t, backend, dsn, cut)
 				lifecycle := selected.(SelectedContractForkLifecycle)
 				source, err := lifecycle.PlanRunFork(t.Context(), runfork.RunForkPlanRequest{SourceRunID: checkpoint.SourceRun})
 				if err != nil || len(source.JoinSchedules) != 1 {
@@ -121,6 +121,7 @@ func TestIssue642PublishedChildHistoricalClosureBothStores(t *testing.T) {
 					wantRecovery = runfork.SelectedForkRecoveryResume
 				}
 				if err != nil || len(recovered) != 1 || recovered[0].RunID != checkpoint.ForkRun || recovered[0].Disposition != wantRecovery {
+					logPostgresForkActivationFailure(t, backend, capability)
 					t.Fatalf("recover exact transferred work: %+v err=%v", recovered, err)
 				}
 				waitPublishedChildCompletion(t, selected, owner, process, baseline, checkpoint.ForkRun)
@@ -162,6 +163,7 @@ func TestIssue642PublishedChildHistoricalClosureBothStores(t *testing.T) {
 					LiveRuntime: ordinary, LiveContexts: contexts, LiveRuns: selected.(runlifecycle.LiveRunReader),
 					AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability}})
 				if err != nil || !result.Activation.Activated {
+					logPostgresForkActivationFailure(t, backend, capability)
 					t.Fatalf("child-as-source exact owed delivery: %+v err=%v", result, err)
 				}
 				grandchild := result.Materialization.ForkRunID

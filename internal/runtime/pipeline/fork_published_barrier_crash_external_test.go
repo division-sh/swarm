@@ -256,6 +256,7 @@ func verifyBarrierCrashRestartBothStores(t *testing.T, pendingSource bool) {
 			select {
 			case observed = <-probe.claim:
 			case <-recoveryDone:
+				logPostgresForkEngineActivationFailure(t, backend, capability)
 				t.Fatalf("published barrier recovery returned before its controlled claim: %+v err=%v", recovered, recoveryErr)
 			case <-wait.Done():
 				t.Fatal("successor did not acquire the exact published barrier delivery")
@@ -276,6 +277,7 @@ func verifyBarrierCrashRestartBothStores(t *testing.T, pendingSource bool) {
 			select {
 			case <-recoveryDone:
 				if recoveryErr != nil {
+					logPostgresForkEngineActivationFailure(t, backend, capability)
 					t.Fatalf("published barrier native successor: %+v err=%v", recovered, recoveryErr)
 				}
 			case <-wait.Done():

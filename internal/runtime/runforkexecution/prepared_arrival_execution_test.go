@@ -189,6 +189,7 @@ func TestIssue642PreparedArrivalTimeoutContinuesExactDeliveryBothStores(t *testi
 				AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: owner.ports.contexts.capability},
 			})
 			if err != nil || !result.Activation.Activated {
+				logPostgresForkActivationFailure(t, backend, owner.ports.contexts.capability)
 				t.Fatalf("selected prepared arrival activation must succeed: %+v err=%v", result, err)
 			}
 			child := result.Materialization.ForkRunID

@@ -15,11 +15,12 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	storeselected "github.com/division-sh/swarm/internal/store/selected"
 	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
-func verifyPublishedBarrierCompletionFailure(t *testing.T, ctx context.Context, selected *storeselected.Owner, family storeselected.RunFork, proofRequest storetest.SelectedForkReceiverExecutionProofRequest, acknowledged <-chan forkEngineAcknowledgment, plan runfork.RunForkPlan, original, observed forkEngineObservation, probe *publishedBarrierClaimProbe, sourceRun string, sourceBefore operatorread.OperatorEntityFull, proof publishedBarrierCompletionProof) {
+func verifyPublishedBarrierCompletionFailure(t *testing.T, backend string, capability startupownership.ProcessCapability, ctx context.Context, selected *storeselected.Owner, family storeselected.RunFork, proofRequest storetest.SelectedForkReceiverExecutionProofRequest, acknowledged <-chan forkEngineAcknowledgment, plan runfork.RunForkPlan, original, observed forkEngineObservation, probe *publishedBarrierClaimProbe, sourceRun string, sourceBefore operatorread.OperatorEntityFull, proof publishedBarrierCompletionProof) {
 	t.Helper()
 	claim, valid := deliverylifecycle.ClaimFromContext(observed.ctx)
 	if !valid {
@@ -109,9 +110,11 @@ func verifyPublishedBarrierCompletionFailure(t *testing.T, ctx context.Context, 
 	case ack := <-acknowledged:
 		if proof == publishedBarrierCompletionSQLFailure {
 			if ack.err != nil || !ack.result.Activation.Activated {
+				logPostgresForkEngineActivationFailure(t, backend, capability)
 				t.Fatalf("terminal SQL-rollback receipt did not acknowledge activation: activated=%t err=%v", ack.result.Activation.Activated, ack.err)
 			}
 		} else if ack.err == nil || ack.err.Error() != "startup source observation context differs from runtime source" || ack.result.Activation.Activated {
+			logPostgresForkEngineActivationFailure(t, backend, capability)
 			t.Fatalf("failed completion lost its actual pre-ACK handoff refusal: activated=%t err=%v", ack.result.Activation.Activated, ack.err)
 		}
 	case <-ctx.Done():

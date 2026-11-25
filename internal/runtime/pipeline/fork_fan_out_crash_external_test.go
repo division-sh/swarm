@@ -204,6 +204,7 @@ func TestIssue642MixedFanOutCrashRestartBothStores(t *testing.T) {
 				select {
 				case observed = <-probe.claimed:
 				case <-recoveryDone:
+					logPostgresForkEngineActivationFailure(t, backend, capability)
 					t.Fatalf("mixed recovery returned before its controlled claim: %+v err=%v", recovered, recoveryErr)
 				case <-wait.Done():
 					t.Fatal("recovery did not claim the exact pending receiver")
@@ -241,6 +242,7 @@ func TestIssue642MixedFanOutCrashRestartBothStores(t *testing.T) {
 				select {
 				case <-recoveryDone:
 					if recoveryErr != nil || len(recovered) != 1 || recovered[0].RunID != checkpoint.Proof.ChildRunID || recovered[0].ExecutionID != checkpoint.Proof.ExecutionID || recovered[0].Disposition != runfork.SelectedForkRecoveryResume {
+						logPostgresForkEngineActivationFailure(t, backend, capability)
 						t.Fatalf("mixed handler recovery: %+v err=%v", recovered, recoveryErr)
 					}
 				case <-wait.Done():

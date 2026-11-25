@@ -247,6 +247,7 @@ func verifyPublishedFanOutBarrierContinuation(t *testing.T, proof publishedBarri
 			select {
 			case childClaim = <-childProbe.claim:
 			case ack := <-acknowledged:
+				logPostgresForkEngineActivationFailure(t, backend, capability)
 				t.Fatalf("published barrier execution returned before the controlled claim: %+v err=%v", ack.result, ack.err)
 			case <-phase.Done():
 				t.Fatal(phase.Err())
@@ -260,7 +261,7 @@ func verifyPublishedFanOutBarrierContinuation(t *testing.T, proof publishedBarri
 				publishBarrierCrashCheckpoint(t, phase, selected, proofRequest, childClaim, forkFixtureEntityRevision(t, before.Entity.Revision))
 			}
 			if failingCompletion {
-				verifyPublishedBarrierCompletionFailure(t, phase, selected, family, proofRequest, acknowledged, plan, original, childClaim, childProbe, runID, before, proof)
+				verifyPublishedBarrierCompletionFailure(t, backend, capability, phase, selected, family, proofRequest, acknowledged, plan, original, childClaim, childProbe, runID, before, proof)
 				// 6392246365 / 6465532293: ordinary observation remains live, so a process-wide count is not a selected-work oracle.
 				after, err := storetest.ReadSelectedForkSourceDomain(phase, selected.RuntimeDeps().DeliveryStore, runID)
 				if err != nil || !reflect.DeepEqual(sourceDomain, after) {
@@ -272,6 +273,7 @@ func verifyPublishedFanOutBarrierContinuation(t *testing.T, proof publishedBarri
 			select {
 			case ack := <-acknowledged:
 				if ack.err != nil || !ack.result.Activation.Activated || ack.result.ForkLocalRuntimeContainer == nil {
+					logPostgresForkEngineActivationFailure(t, backend, capability)
 					t.Fatalf("published barrier selected activation: %+v err=%v", ack.result, ack.err)
 				}
 				result = ack.result
