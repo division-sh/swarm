@@ -18,20 +18,26 @@ type ProofBatch struct {
 	TimeoutMinutes int      `json:"timeout_minutes"`
 }
 
+const otherLateUnit, otherLateLifecycle = "serveapp-other-late", "serveapp-other-late-lifecycle"
+
+var serialProofCompanions = map[string]string{channelUnit: channelJourneys, otherLateUnit: otherLateLifecycle}
+
+func serialProofPrivate(id string) bool { return id == channelJourneys || id == otherLateLifecycle }
+
 func buildBatches(units []ProofUnit, policy Policy, model WeightModel, profile string) []ProofBatch {
 	var batches []ProofBatch
 	var short []ProofUnit
-	channel := slices.IndexFunc(units, func(u ProofUnit) bool { return u.ID == channelUnit })
-	journeys := slices.IndexFunc(units, func(u ProofUnit) bool { return u.ID == channelJourneys })
-	if channel >= 0 && journeys >= 0 {
-		batch := singleBatch(units[channel])
-		// This exact serial pair keeps the pre-split runner limit and shares setup.
-		batch.Units = append(batch.Units, channelJourneys)
-		batch.WeightSeconds += units[journeys].WeightSeconds
-		batches = append(batches, batch)
-	}
 	for _, unit := range units {
-		if channel >= 0 && journeys >= 0 && (unit.ID == channelUnit || unit.ID == channelJourneys) {
+		if peer := serialProofCompanions[unit.ID]; peer != "" {
+			batch := singleBatch(unit)
+			if i := slices.IndexFunc(units, func(u ProofUnit) bool { return u.ID == peer }); i >= 0 {
+				batch.Units = append(batch.Units, peer)
+				batch.WeightSeconds += units[i].WeightSeconds
+			}
+			batches = append(batches, batch)
+			continue
+		}
+		if serialProofPrivate(unit.ID) {
 			continue
 		}
 		_, measured := model.UnitSeconds(profile, unit)
@@ -85,9 +91,9 @@ func (p RunPlan) validateBatches() error {
 			return fmt.Errorf("empty/duplicate/oversized proof batch %q", batch.ID)
 		}
 		seenIDs[batch.ID] = true
-		channel := batch.ID == channelUnit || slices.Contains(batch.Units, channelUnit) || slices.Contains(batch.Units, channelJourneys)
-		if channel && (batch.ID != channelUnit || !slices.Equal(batch.Units, []string{channelUnit, channelJourneys})) {
-			return fmt.Errorf("channel batch must run both complete members in order")
+		peer := serialProofCompanions[batch.ID]
+		if peer != "" && !slices.Equal(batch.Units, []string{batch.ID, peer}) {
+			return fmt.Errorf("serial proof batch %s must run both complete members in order", batch.ID)
 		}
 		var weight float64
 		deadline := 0
@@ -96,12 +102,12 @@ func (p RunPlan) validateBatches() error {
 			if err != nil || owners[id] || unit.BudgetClass != batch.BudgetClass || len(batch.Units) > 1 && unit.BudgetClass == "soak" {
 				return fmt.Errorf("invalid/duplicate proof batch ownership: %s/%s", batch.ID, id)
 			}
-			if channel && !validChannelInvocation(unit, p.Venue) {
-				return fmt.Errorf("channel batch member %s changed its complete-root execution envelope", id)
+			if (serialProofCompanions[id] != "" || serialProofPrivate(id)) && (peer == "" || !validSerialInvocation(unit, p.Venue)) {
+				return fmt.Errorf("serial proof member %s changed its complete-root execution envelope", id)
 			}
 			owners[id] = true
 			weight += unit.WeightSeconds
-			if !channel || id == channelUnit {
+			if peer == "" || id == batch.ID {
 				deadline += singleBatch(unit).TimeoutMinutes
 			}
 		}
@@ -115,7 +121,7 @@ func (p RunPlan) validateBatches() error {
 	return nil
 }
 
-func validChannelInvocation(unit ProofUnit, venue string) bool {
+func validSerialInvocation(unit ProofUnit, venue string) bool {
 	wantEnv := "ci-postgres-gateway-empty-v1"
 	if venue == VenueLocal {
 		wantEnv = "local-postgres-gateway-empty-v1"

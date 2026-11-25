@@ -246,7 +246,7 @@ func TestServeappChannelCompositionRefusesPolicyDrift(t *testing.T) {
 			t.Log(err)
 		})
 	}
-	for _, ids := range [][]string{{channelComplement}, {channelJourneys}, {channelUnit, channelJourneys}, {channelUnit, channelUnit}, {channelUnit, "foreign"}, {channelUnit, "serveapp-channel-neutral"}, {channelUnit, "serveapp-other-late"}} {
+	for _, ids := range [][]string{{channelComplement}, {channelJourneys}, {otherLateLifecycle}, {channelUnit, channelJourneys}, {channelUnit, channelUnit}, {channelUnit, "foreign"}, {channelUnit, "serveapp-channel-neutral"}, {channelUnit, otherLateUnit}} {
 		t.Run(strings.Join(ids, "+"), func(t *testing.T) {
 			plan, err := BuildPlan(f.policy, f.model, f.packages, ProfileCore, "invalid supplement", "same-head", BuildOptions{ExtraUnits: ids})
 			if err == nil {
