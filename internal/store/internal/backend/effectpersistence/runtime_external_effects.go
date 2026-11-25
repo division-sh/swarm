@@ -145,7 +145,9 @@ func (s *EffectPostgresOwner) ReconcileExternalEffectAttempts(ctx context.Contex
 			if err := recordRecoveredExternalEffectStories(txctx, mutation, tx, candidates, request.Now(), true); err != nil {
 				return err
 			}
-			summary.UncalledAgentClaimsDeadLettered, err = settleUncalledStartupClaims(txctx, mutation, s.delivery, uncalled, request.Now())
+			counts, err := settleUncalledStartupClaims(txctx, mutation, s.delivery, uncalled, request.Now())
+			summary.UncalledAgentClaimsDeadLettered = counts.uncalled
+			summary.UncalledRetryExhaustedClaimsDeadLettered = counts.retryExhausted
 			return err
 		})
 		return summary, err
@@ -188,7 +190,9 @@ func (s *EffectSQLiteOwner) ReconcileExternalEffectAttempts(ctx context.Context,
 			if err := recordRecoveredExternalEffectStories(txctx, mutation, tx, candidates, request.Now(), false); err != nil {
 				return err
 			}
-			summary.UncalledAgentClaimsDeadLettered, err = settleUncalledStartupClaims(txctx, mutation, s.delivery, uncalled, request.Now())
+			counts, err := settleUncalledStartupClaims(txctx, mutation, s.delivery, uncalled, request.Now())
+			summary.UncalledAgentClaimsDeadLettered = counts.uncalled
+			summary.UncalledRetryExhaustedClaimsDeadLettered = counts.retryExhausted
 			return err
 		})
 		return summary, err

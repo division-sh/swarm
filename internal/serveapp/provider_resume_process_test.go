@@ -19,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/operatorread"
 	credentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -257,6 +258,7 @@ func TestInterruptedReadOnlyProviderTurnResumesOnlyInterruptedCallBothStores(t *
 		return
 	}
 	t.Run("nested_receiver", requireNestedReceiverProviderResume)
+	t.Run("claim_only_retry", requireRetryClaimExhaustedAtStartup)
 	for _, scenario := range []string{"openai_compatible", "openai_responses", "anthropic", "projected_initial"} {
 		profile := scenario
 		projected := scenario == "projected_initial"
@@ -493,6 +495,245 @@ func TestInterruptedReadOnlyProviderTurnResumesOnlyInterruptedCallBothStores(t *
 				}
 			}
 		}
+	}
+}
+
+func requireRetryClaimExhaustedAtStartup(t *testing.T) {
+	t.Helper()
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			isolateCLIAPIConfigEnv(t)
+			unsetStoreSelectorEnv(t)
+			received := make(chan struct{})
+			release := make(chan struct{})
+			var released sync.Once
+			unblock := func() { released.Do(func() { close(release) }) }
+			const profile = "openai_compatible"
+			provider := llmapi.New(t, llmapi.Protocol(profile), "/v1/chat/completions", "restart-key", func(req llmapi.Request) (llmapi.Reply, error) {
+				if req.Number == 1 {
+					close(received)
+					<-release
+					return llmapi.Reply{StatusCode: 503}, nil
+				}
+				return llmapi.Reply{}, fmt.Errorf("restart dispatched another provider request")
+			})
+			t.Cleanup(unblock)
+			source := writeProviderResumeSource(t, provider.URL+"/unused-tool", false)
+			root := t.TempDir()
+			location := filepath.Join(root, "resume.sqlite")
+			var config string
+			if backend == "postgres" {
+				location = testutil.StartEmptyPostgresDSN(t)
+				config = writeChannelOnboardingPostgresRuntimeConfig(t, location)
+			} else {
+				config = writeStandingMockRuntimeConfig(t, backend, location)
+			}
+			configureProviderResume(t, config, profile, provider.URL)
+			t.Setenv("SWARM_CREDENTIALS_FILE", filepath.Join(root, "credentials.json"))
+			secrets, err := credentials.NewFileStore(os.Getenv("SWARM_CREDENTIALS_FILE"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			selection, err := llmselection.ResolveActiveBackend(profile)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := secrets.Set(t.Context(), selection.Credential.EnvVar, "restart-key"); err != nil {
+				t.Fatal(err)
+			}
+			request, err := json.Marshal(map[string]any{"ConfigPath": config, "Source": source, "Live": true, "Store": backend, "Token": apiv1.DefaultLoopbackAPIToken, "ShutdownGrace": int64(5 * time.Second)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			requestEnv := "SWARM_TEST_INTERNAL_MOCK_LIFECYCLE_REQUEST=" + string(request)
+			normal := []string{providerResumeProcessEnv + "=" + provider.URL, "SWARM_TEST_PROVIDER_RESUME_ROOT=" + root, requestEnv}
+			first := startServedCrashProcess(t, "TestInterruptedReadOnlyProviderTurnResumesOnlyInterruptedCallBothStores", normal)
+			endpoint := first.endpoint(t) + "/v1/rpc"
+			seed := requireServedEventPublishRPCResult(t, endpoint, map[string]any{"event_name": "item.received", "bundle_hash": servedEventPublishFixtureBundleHash(t, source), "payload": map[string]any{"item_id": "restart-claim-only"}, "idempotency_key": "restart-claim-only-seed"})
+			waitProviderResumeSeedDelivery(t, endpoint, seed.EventID)
+			input := requireServedEventPublishRPCResult(t, endpoint, map[string]any{"event_name": "item.agent_hold", "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": map[string]any{"note": "interrupted initial call"}, "idempotency_key": "restart-claim-only-input"})
+			select {
+			case <-received:
+			case <-time.After(servedEventPublishLifecycleProbeWaitTimeout):
+				t.Fatal("first provider call not reached")
+			}
+			if err := first.kill(); err != nil {
+				t.Fatal(err)
+			}
+			unblock()
+			second, claims := startUncalledAgentTurnChild(t, []string{uncalledAgentTurnChildEnv + "=" + root, requestEnv})
+			var claim uncalledAgentClaim
+			select {
+			case claim = <-claims:
+			case <-time.After(servedEventPublishLifecycleProbeWaitTimeout):
+				t.Fatalf("retry claim not reached: %s", second.output.String())
+			}
+			if claim.Version != 2 || claim.Event != input.EventID || claim.Run != seed.RunID || claim.Delivery == "" {
+				t.Fatalf("wrong interrupted claim: %+v", claim)
+			}
+			reader, err := storetest.OpenReleaseProcessReadOnlyInspection(backend, location)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := reader.Close(); err != nil {
+					t.Error(err)
+				}
+			})
+			snapshot := func() (attempts []storetest.DeliveryAttemptDiagnosticRow, effects storetest.ManagedTurnEffectStorage) {
+				t.Helper()
+				if err := reader.InspectSnapshot(t.Context(), func(ctx context.Context) error {
+					var err error
+					attempts, err = storetest.ReadDeliveryAttemptDiagnosticRows(ctx, reader, claim.Delivery)
+					if err != nil {
+						return err
+					}
+					effects, err = storetest.ReadManagedTurnEffectStorage(ctx, reader, seed.RunID, "")
+					return err
+				}); err != nil {
+					t.Fatal(err)
+				}
+				return attempts, effects
+			}
+			attempts, effects := snapshot()
+			if len(attempts) != 2 || attempts[0].Version != 1 || attempts[0].Closure != "settled" ||
+				attempts[0].Outcome != "retry_scheduled" || attempts[0].Reason != "effect_recovery_outcome_unconfirmed" ||
+				attempts[1].Version != 2 || attempts[1].Closure != "open" || effects.ProviderAttempts != 1 ||
+				effects.ActiveProviderAttempts != 0 || len(provider.Requests()) != 1 || effects.Attempts == nil ||
+				len(*effects.Attempts) != 1 || (*effects.Attempts)[0].AttemptState != "outcome_uncertain" ||
+				(*effects.Attempts)[0].OriginDeliveryID != claim.Delivery || (*effects.Attempts)[0].OriginEventID != input.EventID {
+				t.Fatalf("did not reach v2 claimed with only the closed v1 attempt: delivery=%+v provider_attempts=%d calls=%d", attempts, effects.ProviderAttempts, len(provider.Requests()))
+			}
+			firstAttempt := (*effects.Attempts)[0]
+			firstClaim := attempts[0]
+			const attemptWarning = "runtime.warn component=startup-recovery message=0 attempts abandoned before launch; 1 attempts whose outcome is unconfirmed. List dead-lettered deliveries with swarm event list --delivery-status dead_letter"
+			const retryWarning = "runtime.warn component=startup-recovery message=Agent turns dead-lettered at restart at their retry limit, before the interrupted call was issued again: 1; they are not run again. List dead-lettered deliveries with swarm event list --delivery-status dead_letter"
+			if err := second.kill(); err != nil {
+				t.Fatal(err)
+			}
+			if output := second.output.String(); strings.Contains(output, "Agent turns dead-lettered at restart") ||
+				(strings.Contains(output, "attempts abandoned before launch") && strings.Count(output, attemptWarning) != 1) {
+				t.Errorf("first restart reported a claim dead letter or changed the attempt warning:\n%s", output)
+			}
+
+			third := startServedCrashProcess(t, "TestInterruptedReadOnlyProviderTurnResumesOnlyInterruptedCallBothStores", normal)
+			endpoint = third.endpoint(t) + "/v1/rpc"
+			delivery, letter := awaitExhaustedRetryClaim(t, endpoint, claim)
+			if err := third.stop(); err != nil {
+				t.Fatal(err)
+			}
+			attempts, effects = snapshot()
+			if delivery.Status != "dead_letter" || delivery.RetryCount != 1 || letter.RetryCount != 1 ||
+				len(provider.Requests()) != 1 || effects.ProviderAttempts != 1 || effects.ActiveProviderAttempts != 0 ||
+				effects.Attempts == nil || len(*effects.Attempts) != 1 {
+				t.Fatalf("restart changed dead-letter outcome, retry count, or physical calls: delivery=%+v letter=%+v effects=%+v wire_calls=%d", delivery, letter, effects, len(provider.Requests()))
+			}
+			physical := (*effects.Attempts)[0]
+			if physical.AttemptID != firstAttempt.AttemptID || physical.OperationID != firstAttempt.OperationID ||
+				physical.OriginDeliveryID != firstAttempt.OriginDeliveryID || physical.OriginEventID != firstAttempt.OriginEventID ||
+				physical.AttemptState != "outcome_uncertain" || physical.OperationState != "outcome_uncertain" {
+				t.Fatalf("restart changed the sole recorded provider attempt: before=%+v after=%+v", firstAttempt, physical)
+			}
+			if len(attempts) != 2 || attempts[0] != firstClaim || attempts[1].Version != 2 ||
+				attempts[1].Closure != "settled" || attempts[1].Outcome != "dead_letter" || letter.ClaimVersion != 2 {
+				t.Errorf("startup did not settle v2 without a third claim: attempts=%+v letter_claim=%d", attempts, letter.ClaimVersion)
+			}
+			if delivery.ReasonCode != "retry_exhausted" || delivery.Failure == nil ||
+				delivery.Failure.Class != runtimefailures.ClassRetryExhausted || delivery.Failure.Detail.Code != "delivery_retry_exhausted" {
+				t.Errorf("wrong retry-bound reason: reason=%s failure=%+v", delivery.ReasonCode, delivery.Failure)
+			} else if len(attempts) == 2 {
+				requireExhaustedRetryHistory(t, attempts[0], attempts[1], delivery, letter)
+			}
+			if output := third.output.String(); strings.Count(output, retryWarning+"\n") != 1 ||
+				strings.Contains(output, "attempts abandoned before launch") || strings.Contains(output, "Agent turns dead-lettered at restart before any provider call:") {
+				t.Errorf("second restart did not report exactly one exhausted claim separately:\n%s", output)
+			}
+		})
+	}
+}
+
+func awaitExhaustedRetryClaim(t *testing.T, endpoint string, claim uncalledAgentClaim) (operatorread.OperatorEventDelivery, operatorread.OperatorDeadLetterRecord) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(t.Context(), servedEventPublishLifecycleProbeWaitTimeout)
+	defer cancel()
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		var event operatorread.OperatorEventFull
+		requireServedJSONRPCResult(t, endpoint, "event.get", map[string]any{"event_id": claim.Event}, &event)
+		for _, delivery := range event.Deliveries {
+			if delivery.DeliveryID != claim.Delivery || !delivery.Terminal {
+				continue
+			}
+			for _, letter := range event.DeadLetters {
+				if letter.DeliveryID == claim.Delivery {
+					return delivery, letter
+				}
+			}
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("no terminal delivery and dead letter for the interrupted retry: %+v", event.Deliveries)
+		case <-tick.C:
+		}
+	}
+}
+
+func requireExhaustedRetryHistory(t *testing.T, first, second storetest.DeliveryAttemptDiagnosticRow, delivery operatorread.OperatorEventDelivery, letter operatorread.OperatorDeadLetterRecord) {
+	t.Helper()
+	if second.Reason != delivery.ReasonCode {
+		t.Errorf("persisted reason %q differs from delivery reason %q", second.Reason, delivery.ReasonCode)
+	}
+	native, err := runtimefailures.UnmarshalEnvelope([]byte(second.Failure))
+	if err != nil {
+		t.Fatalf("read native exhaustion failure: %v", err)
+	}
+	raw, err := runtimefailures.MarshalEnvelope(native)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, observed := range []runtimefailures.Envelope{*delivery.Failure, letter.Failure} {
+		got, err := runtimefailures.MarshalEnvelope(observed)
+		if err != nil || !bytes.Equal(got, raw) {
+			t.Fatalf("exhaustion failure differs across native and public readback: %s / %s, err=%v", raw, got, err)
+		}
+	}
+
+	attributes, err := json.Marshal(native.Detail.Attributes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var detail struct {
+		MaxRetries int `json:"max_retries"`
+		History    []struct {
+			ClaimVersion int64           `json:"claim_version"`
+			Failure      json.RawMessage `json:"failure"`
+		} `json:"retry_history"`
+	}
+	if err := json.Unmarshal(attributes, &detail); err != nil || detail.MaxRetries != 1 || len(detail.History) != 2 ||
+		detail.History[0].ClaimVersion != 1 || detail.History[1].ClaimVersion != 2 {
+		t.Fatalf("wrong canonical retry history: %s, err=%v", attributes, err)
+	}
+	firstFailure, err := runtimefailures.UnmarshalEnvelope([]byte(first.Failure))
+	if err != nil {
+		t.Fatal(err)
+	}
+	prior, err := runtimefailures.MarshalEnvelope(firstFailure)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recordedFirst, err := runtimefailures.UnmarshalEnvelope(detail.History[0].Failure)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorded, err := runtimefailures.MarshalEnvelope(recordedFirst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	abandoned, err := runtimefailures.UnmarshalEnvelope(detail.History[1].Failure)
+	if !bytes.Equal(prior, recorded) || err != nil || abandoned.Class != runtimefailures.ClassLifecycleConflict ||
+		abandoned.Detail.Code != "effect_recovery_prelaunch_abandoned" {
+		t.Fatalf("retry history does not preserve v1 and report v2's true cause: %s, err=%v", attributes, err)
 	}
 }
 
