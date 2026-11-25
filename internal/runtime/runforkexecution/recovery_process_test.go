@@ -314,13 +314,19 @@ func TestSelectedForkCrashProcessHelper(t *testing.T) {
 			TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), TargetRootReference: loaded.RootedSource.Admission().Reference(), ContractSelection: request.ContractSelection,
 		}
 	}
-	result, err := ExecuteSelectedContractRunFork(ctx, request)
+	traceCut := backend == "postgres" && cut == "retained_armed_join_after_activation" && os.Getenv(armedArrivalPreparationEnv) == ""
+	forkCtx, trace := beginForkCancelDiagnostic(ctx, capability, traceCut)
+	defer trace.Close()
+	result, err := ExecuteSelectedContractRunFork(forkCtx, request)
 	if err != nil {
-		if backend == "postgres" && cut == "retained_armed_join_after_activation" && os.Getenv(armedArrivalPreparationEnv) == "" {
+		if traceCut {
 			logForkProcessCapabilityOnFailure(t, capability)
+			trace.Note("crash helper executor refused before checkpoint", nil, nil, ctx, err, false)
+			t.Logf("fork cancellation diagnostic:\n%s", trace.Output())
 		}
 		t.Fatal(err)
 	}
+	trace.Close()
 	if cut == "retained_event_committed" || cut == "retained_timer_occurrence_committed" || cut == "retained_join_event_committed" || cut == "retained_armed_join_occurrence_committed" {
 		<-ctx.Done()
 		t.Fatal("retained execution stopped before its publication checkpoint")

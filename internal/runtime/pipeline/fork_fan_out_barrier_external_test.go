@@ -22,12 +22,14 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 	"github.com/google/uuid"
@@ -193,7 +195,14 @@ func TestIssue642FanOutBarrierFrontierBothStores(t *testing.T) {
 					SourceRunID: runID, ForkEventID: cutID, TargetBundleHash: executionRequest.ExpectedBundleHash,
 					TargetRootReference: rooted.Admission().Reference(), ContractSelection: executionRequest.ContractSelection,
 				}
-				result, err := family.Execute(phase, forkEngineLiveRequest(t, rt, selected, executionRequest))
+				forkCtx := phase
+				var trace *forkcancelcapture.Capture
+				if backend == "postgres" && retained == fanoutobligation.InheritedDeadLettered {
+					forkCtx, trace = forkcancelcapture.Start(phase)
+					startupownership.BindForkCancelCapture(capability, trace)
+				}
+				defer trace.Close()
+				result, err := family.Execute(forkCtx, forkEngineLiveRequest(t, rt, selected, executionRequest))
 				if err != nil || !result.Activation.Activated || result.ForkLocalRuntimeContainer == nil {
 					if backend == "postgres" && retained == fanoutobligation.InheritedDeadLettered {
 						readAt := time.Now().UTC().Format(time.RFC3339Nano)
@@ -204,9 +213,12 @@ func TestIssue642FanOutBarrierFrontierBothStores(t *testing.T) {
 						default:
 							t.Logf("the capability's terminal state as read by the test: read_at=%s done_closed=false; Done also closes on a clean release; read_at is when the test looked", readAt)
 						}
+						trace.Note("barrier executor refused", nil, nil, phase, err, false)
+						t.Logf("fork cancellation diagnostic:\n%s", trace.Output())
 					}
 					t.Fatalf("barrier child did not acknowledge activation: %+v err=%v", result, err)
 				}
+				trace.Close()
 				proof := result.ForkLocalRuntimeContainer
 				defer func() {
 					cleanup, stop := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)

@@ -147,7 +147,9 @@ func TestIssue642ArmedTemplateArrivalTimeoutContinuesExactDeliveryBothStores(t *
 			if err != nil {
 				t.Fatal(err)
 			}
-			result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
+			forkCtx, trace := beginForkCancelDiagnostic(ctx, owner.ports.contexts.capability, backend == "postgres")
+			defer trace.Close()
+			result, err := ExecuteSelectedContractRunFork(forkCtx, SelectedContractExecutionRequest{
 				SourceRunID: sourceRun, At: marker, Owner: owner, ForkOperation: &operation,
 				LiveRuntime: liveRuntime, LiveContexts: liveContexts, LiveRuns: selected.(runlifecycle.LiveRunReader),
 				SourceLoader: loader, ContractSelection: selection,
@@ -155,8 +157,13 @@ func TestIssue642ArmedTemplateArrivalTimeoutContinuesExactDeliveryBothStores(t *
 			})
 			if err != nil || !result.Activation.Activated {
 				logForkProcessCapabilityOnFailure(t, owner.ports.contexts.capability)
+				if trace != nil {
+					trace.Note("armed template arrival executor refused", nil, nil, ctx, err, false)
+					t.Logf("fork cancellation diagnostic:\n%s", trace.Output())
+				}
 				t.Fatalf("selected armed template arrival activation must succeed: %+v err=%v", result, err)
 			}
+			trace.Close()
 			child := result.Materialization.ForkRunID
 			projected, err := runfork.ProjectConstructionIdentity(sourceRun, child, receipt.Identity)
 			if err != nil {

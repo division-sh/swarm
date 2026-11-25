@@ -26,6 +26,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	"github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -255,6 +256,15 @@ func logForkProcessCapabilityOnFailure(t *testing.T, capability startupownership
 	}
 }
 
+func beginForkCancelDiagnostic(ctx context.Context, capability startupownership.ProcessCapability, enable bool) (context.Context, *forkcancelcapture.Capture) {
+	if !enable {
+		return ctx, nil
+	}
+	traceCtx, trace := forkcancelcapture.Start(ctx)
+	startupownership.BindForkCancelCapture(capability, trace)
+	return traceCtx, trace
+}
+
 func TestIssue642ArmedArrivalTimeoutContinuesExactDeliveryBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
@@ -329,7 +339,9 @@ func TestIssue642ArmedArrivalTimeoutContinuesExactDeliveryBothStores(t *testing.
 			if err != nil {
 				t.Fatal(err)
 			}
-			result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
+			forkCtx, trace := beginForkCancelDiagnostic(ctx, owner.ports.contexts.capability, backend == "postgres")
+			defer trace.Close()
+			result, err := ExecuteSelectedContractRunFork(forkCtx, SelectedContractExecutionRequest{
 				SourceRunID: sourceRun, At: marker, Owner: owner, ForkOperation: &operation,
 				LiveRuntime: liveRuntime, LiveContexts: liveContexts, LiveRuns: selected.(runlifecycle.LiveRunReader),
 				SourceLoader: loader, ContractSelection: selection,
@@ -338,8 +350,13 @@ func TestIssue642ArmedArrivalTimeoutContinuesExactDeliveryBothStores(t *testing.
 			// The source callback is held; only the selected child may fire this arm.
 			if err != nil || !result.Activation.Activated {
 				logForkProcessCapabilityOnFailure(t, owner.ports.contexts.capability)
+				if trace != nil {
+					trace.Note("armed arrival executor refused", nil, nil, ctx, err, false)
+					t.Logf("fork cancellation diagnostic:\n%s", trace.Output())
+				}
 				t.Fatalf("selected armed arrival activation must succeed: %+v err=%v", result, err)
 			}
+			trace.Close()
 			child := result.Materialization.ForkRunID
 			operations := selected.(interface {
 				LoadForkOperation(context.Context, string, string, string) (runfork.ForkOperationRecord, bool, error)
