@@ -17,7 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
-func proveMixedFanOutChildRefork(t *testing.T, ctx context.Context, selected *storeselected.Owner, request runforkexecution.SelectedContractExecutionRequest, parent operatorread.OperatorEntityFull, retained fanoutobligation.InheritedTerminalDisposition) {
+func proveMixedFanOutChildRefork(t *testing.T, backend string, ctx context.Context, selected *storeselected.Owner, request runforkexecution.SelectedContractExecutionRequest, parent operatorread.OperatorEntityFull, retained fanoutobligation.InheritedTerminalDisposition) {
 	t.Helper()
 	family, ok := selected.RunFork()
 	if !ok {
@@ -37,9 +37,11 @@ func proveMixedFanOutChildRefork(t *testing.T, ctx context.Context, selected *st
 	defer cancel()
 	acknowledged := make(chan forkEngineAcknowledgment, 1)
 	done := make(chan struct{})
+	activationCtx, activationTrace := armForkEngineActivation(forkCtx, backend, request.AgentRuntime.ProcessCapability)
+	defer activationTrace.Close()
 	go func() {
 		defer close(done)
-		result, err := family.Execute(forkCtx, request)
+		result, err := family.Execute(activationCtx, request)
 		acknowledged <- forkEngineAcknowledgment{result: result, err: err}
 	}()
 	t.Cleanup(func() {
@@ -56,6 +58,8 @@ func proveMixedFanOutChildRefork(t *testing.T, ctx context.Context, selected *st
 	select {
 	case observed = <-probe.claimed:
 	case ack := <-acknowledged:
+		logPostgresForkEngineActivationFailure(t, backend, request.AgentRuntime.ProcessCapability)
+		logForkEngineActivationTrace(t, activationTrace, "second-generation fork activation refused", forkCtx, ack.err)
 		t.Fatalf("second-generation fork returned before its controlled claim: %+v err=%v", ack.result, ack.err)
 	case <-forkCtx.Done():
 		t.Fatalf("second-generation receiver claim did not start: %v", forkCtx.Err())
@@ -100,6 +104,8 @@ func proveMixedFanOutChildRefork(t *testing.T, ctx context.Context, selected *st
 	select {
 	case ack := <-acknowledged:
 		if ack.err != nil || !ack.result.Activation.Activated || observationRequest != forkEngineExecutionProofRequest(t, ack.result, request.At, observed.id, claim) {
+			logPostgresForkEngineActivationFailure(t, backend, request.AgentRuntime.ProcessCapability)
+			logForkEngineActivationTrace(t, activationTrace, "second-generation fork activation refused", forkCtx, ack.err)
 			t.Fatalf("second-generation fork lost its actual post-settlement handoff: %+v err=%v", ack.result, ack.err)
 		}
 		assertForkEngineCommittedEvidence(t, physical, ack.result, request.At)

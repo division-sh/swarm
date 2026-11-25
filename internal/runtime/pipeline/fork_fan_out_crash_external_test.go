@@ -183,9 +183,11 @@ func TestIssue642MixedFanOutCrashRestartBothStores(t *testing.T) {
 				recoveryDone := make(chan struct{})
 				var recovered []runfork.SelectedForkRecoveryResult
 				var recoveryErr error
+				activationCtx, activationTrace := armForkEngineActivation(wait, backend, capability)
+				defer activationTrace.Close()
 				go func() {
 					defer close(recoveryDone)
-					recovered, recoveryErr = family.RecoverSelectedForkContexts(wait, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.Live), runforkexecution.SelectedForkRecoveryEnvironment{
+					recovered, recoveryErr = family.RecoverSelectedForkContexts(activationCtx, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.Live), runforkexecution.SelectedForkRecoveryEnvironment{
 						SourceLoader: runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, Store: selected.SourceArtifactStore()}, AgentRuntime: options,
 						AcquireLiveRuntime: live.AcquireLiveRuntime, LiveContexts: live.LiveContexts, LiveRuns: live.LiveRuns,
 					})
@@ -204,6 +206,8 @@ func TestIssue642MixedFanOutCrashRestartBothStores(t *testing.T) {
 				select {
 				case observed = <-probe.claimed:
 				case <-recoveryDone:
+					logPostgresForkEngineActivationFailure(t, backend, capability)
+					logForkEngineActivationTrace(t, activationTrace, "mixed fan-out successor activation refused", wait, recoveryErr)
 					t.Fatalf("mixed recovery returned before its controlled claim: %+v err=%v", recovered, recoveryErr)
 				case <-wait.Done():
 					t.Fatal("recovery did not claim the exact pending receiver")
@@ -241,6 +245,8 @@ func TestIssue642MixedFanOutCrashRestartBothStores(t *testing.T) {
 				select {
 				case <-recoveryDone:
 					if recoveryErr != nil || len(recovered) != 1 || recovered[0].RunID != checkpoint.Proof.ChildRunID || recovered[0].ExecutionID != checkpoint.Proof.ExecutionID || recovered[0].Disposition != runfork.SelectedForkRecoveryResume {
+						logPostgresForkEngineActivationFailure(t, backend, capability)
+						logForkEngineActivationTrace(t, activationTrace, "mixed fan-out successor activation refused", wait, recoveryErr)
 						t.Fatalf("mixed handler recovery: %+v err=%v", recovered, recoveryErr)
 					}
 				case <-wait.Done():

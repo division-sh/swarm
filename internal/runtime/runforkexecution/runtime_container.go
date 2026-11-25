@@ -30,6 +30,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	"github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
@@ -431,13 +432,21 @@ func (c *selectedContractForkLocalRuntimeContainer) PrepareAttachment(ctx contex
 	runCtx = runtimeeffects.WithAuthority(runCtx, c.authority)
 	runCtx = runtimeeffects.WithController(runCtx, controller)
 	runCtx = managedexecution.WithAdmission(runCtx, c.admission)
+	childParent := runCtx
 	runCtx, cancelRuntime := context.WithCancelCause(runCtx)
+	trace := forkcancelcapture.From(runCtx)
+	lease.BindForkCancelCapture("selected child attachment")
+	trace.Note("child admission derived from selected lease", childParent, lease.Context(), childParent, nil, false)
+	trace.Note("child cancel context", runCtx, childParent, runCtx, nil, false)
+	cancelRuntime = trace.Wrap("child attachment", runCtx, cancelRuntime)
+	child := runCtx
 	runCtx, agentRuntime, admission, err := c.prepareServingScope(runCtx, req, bus, pipeline)
 	if err != nil {
 		cancelRuntime(err)
 		return errors.Join(err, lease.Done())
 	}
 	runCtx = managedexecution.WithAdmission(agentRuntime.operationContext, admission)
+	trace.Note("serving context derived from child", runCtx, child, runCtx, nil, false)
 	if agentRuntime == nil || agentRuntime.manager == nil || agentRuntime.generationGrant == nil {
 		cancelRuntime(errors.New("selected lifecycle manager missing"))
 		return errors.Join(errors.New("selected-contract fork-local lifecycle manager was not materialized"), lease.Done())

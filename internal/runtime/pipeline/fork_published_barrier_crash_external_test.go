@@ -236,9 +236,11 @@ func verifyBarrierCrashRestartBothStores(t *testing.T, pendingSource bool) {
 			var recovered []runfork.SelectedForkRecoveryResult
 			var recoveryErr error
 			recoveryDone := make(chan struct{})
+			activationCtx, activationTrace := armForkEngineActivation(wait, backend, capability)
+			defer activationTrace.Close()
 			go func() {
 				defer close(recoveryDone)
-				recovered, recoveryErr = family.RecoverSelectedForkContexts(wait, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.Live), runforkexecution.SelectedForkRecoveryEnvironment{
+				recovered, recoveryErr = family.RecoverSelectedForkContexts(activationCtx, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.Live), runforkexecution.SelectedForkRecoveryEnvironment{
 					SourceLoader: runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, Store: selected.SourceArtifactStore()}, AgentRuntime: options,
 					AcquireLiveRuntime: live.AcquireLiveRuntime, LiveContexts: live.LiveContexts, LiveRuns: live.LiveRuns,
 				})
@@ -256,6 +258,8 @@ func verifyBarrierCrashRestartBothStores(t *testing.T, pendingSource bool) {
 			select {
 			case observed = <-probe.claim:
 			case <-recoveryDone:
+				logPostgresForkEngineActivationFailure(t, backend, capability)
+				logForkEngineActivationTrace(t, activationTrace, "published barrier successor activation refused", wait, recoveryErr)
 				t.Fatalf("published barrier recovery returned before its controlled claim: %+v err=%v", recovered, recoveryErr)
 			case <-wait.Done():
 				t.Fatal("successor did not acquire the exact published barrier delivery")
@@ -276,6 +280,8 @@ func verifyBarrierCrashRestartBothStores(t *testing.T, pendingSource bool) {
 			select {
 			case <-recoveryDone:
 				if recoveryErr != nil {
+					logPostgresForkEngineActivationFailure(t, backend, capability)
+					logForkEngineActivationTrace(t, activationTrace, "published barrier successor activation refused", wait, recoveryErr)
 					t.Fatalf("published barrier native successor: %+v err=%v", recovered, recoveryErr)
 				}
 			case <-wait.Done():
