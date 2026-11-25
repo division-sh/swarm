@@ -10,6 +10,7 @@ import (
 
 const (
 	channelUnit        = "serveapp-channel"
+	channelJourneys    = "serveapp-channel-journeys"
 	channelParityUnit  = "parity-connected-channel-onboarding-surface"
 	serveappCanaryUnit = "local-serveapp-canaries"
 	channelComplement  = "local-serveapp-canaries-without-channel"
@@ -30,13 +31,15 @@ func (p Policy) composeServeappChannelCanaries(ids []string) ([]string, error) {
 	if _, ok := p.Units[channelComplement]; !ok {
 		return nil, fmt.Errorf("channel composition requires declared unit %s", channelComplement)
 	}
-	composed := make([]string, 0, len(ids)-1)
+	composed := make([]string, 0, len(ids))
 	for _, id := range ids {
 		switch id {
 		case channelParityUnit:
 			continue
 		case serveappCanaryUnit:
 			id = channelComplement
+		case channelUnit:
+			composed = append(composed, channelJourneys)
 		}
 		composed = append(composed, id)
 	}
@@ -66,10 +69,14 @@ func bindServeappChannelComposition(plan *RunPlan, full RunPlan, inventory RootI
 	if err != nil {
 		return err
 	}
-	if err := validateChannelTransfers(base, channel); err != nil {
+	journeys, err := full.Unit(channelJourneys)
+	if err != nil {
 		return err
 	}
-	expectedRequired, expectedDeferred := channelProofUnion(append(slices.Clone(base.Units), channel))
+	if err := validateChannelTransfers(base, channel, journeys); err != nil {
+		return err
+	}
+	expectedRequired, expectedDeferred := channelProofUnion(append(slices.Clone(base.Units), channel, journeys))
 	actualRequired, actualDeferred := channelProofUnion(plan.Units)
 	if !reflect.DeepEqual(expectedRequired, actualRequired) || !reflect.DeepEqual(expectedDeferred, actualDeferred) {
 		return fmt.Errorf("channel composition changed the core/channel proof obligation union")
@@ -95,6 +102,7 @@ func bindServeappChannelComposition(plan *RunPlan, full RunPlan, inventory RootI
 		wanted[unit.ID] = unit
 	}
 	wanted[channelUnit] = channel
+	wanted[channelJourneys] = journeys
 	var compared int
 	for _, actual := range plan.Units {
 		if strings.HasPrefix(actual.ID, "broad-") {
@@ -132,7 +140,7 @@ func channelProofUnion(units []ProofUnit) (map[TestRoot]RequiredTest, map[TestRo
 	return required, deferred
 }
 
-func validateChannelTransfers(base RunPlan, channel ProofUnit) error {
+func validateChannelTransfers(base RunPlan, channels ...ProofUnit) error {
 	approved := map[string]struct {
 		owner    string
 		children []string
@@ -140,9 +148,11 @@ func validateChannelTransfers(base RunPlan, channel ProofUnit) error {
 		channelOnboarding: {channelParityUnit, []string{"default_sqlite", "explicit_postgres"}},
 		channelReceiver:   {serveappCanaryUnit, []string{"postgres", "sqlite"}},
 	}
-	channelRoots := make(map[TestRoot]RequiredTest, len(channel.RequiredTests))
-	for _, required := range channel.RequiredTests {
-		channelRoots[required.TestRoot] = required
+	channelRoots := make(map[TestRoot]RequiredTest)
+	for _, channel := range channels {
+		for _, required := range channel.RequiredTests {
+			channelRoots[required.TestRoot] = required
+		}
 	}
 	transferred := map[string]bool{}
 	for _, unit := range base.Units {

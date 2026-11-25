@@ -3,7 +3,9 @@ package testplanning
 import (
 	"fmt"
 	"math"
+	"slices"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -19,7 +21,19 @@ type ProofBatch struct {
 func buildBatches(units []ProofUnit, policy Policy, model WeightModel, profile string) []ProofBatch {
 	var batches []ProofBatch
 	var short []ProofUnit
+	channel := slices.IndexFunc(units, func(u ProofUnit) bool { return u.ID == channelUnit })
+	journeys := slices.IndexFunc(units, func(u ProofUnit) bool { return u.ID == channelJourneys })
+	if channel >= 0 && journeys >= 0 {
+		batch := singleBatch(units[channel])
+		// This exact serial pair keeps the pre-split runner limit and shares setup.
+		batch.Units = append(batch.Units, channelJourneys)
+		batch.WeightSeconds += units[journeys].WeightSeconds
+		batches = append(batches, batch)
+	}
 	for _, unit := range units {
+		if channel >= 0 && journeys >= 0 && (unit.ID == channelUnit || unit.ID == channelJourneys) {
+			continue
+		}
 		_, measured := model.UnitSeconds(profile, unit)
 		if policy.Units[unit.ID].Packable && measured && unit.BudgetClass != "soak" && unit.WeightSeconds <= 120 {
 			short = append(short, unit)
@@ -71,6 +85,10 @@ func (p RunPlan) validateBatches() error {
 			return fmt.Errorf("empty/duplicate/oversized proof batch %q", batch.ID)
 		}
 		seenIDs[batch.ID] = true
+		channel := batch.ID == channelUnit || slices.Contains(batch.Units, channelUnit) || slices.Contains(batch.Units, channelJourneys)
+		if channel && (batch.ID != channelUnit || !slices.Equal(batch.Units, []string{channelUnit, channelJourneys})) {
+			return fmt.Errorf("channel batch must run both complete members in order")
+		}
 		var weight float64
 		deadline := 0
 		for _, id := range batch.Units {
@@ -78,9 +96,14 @@ func (p RunPlan) validateBatches() error {
 			if err != nil || owners[id] || unit.BudgetClass != batch.BudgetClass || len(batch.Units) > 1 && unit.BudgetClass == "soak" {
 				return fmt.Errorf("invalid/duplicate proof batch ownership: %s/%s", batch.ID, id)
 			}
+			if channel && !validChannelInvocation(unit, p.Venue) {
+				return fmt.Errorf("channel batch member %s changed its complete-root execution envelope", id)
+			}
 			owners[id] = true
 			weight += unit.WeightSeconds
-			deadline += singleBatch(unit).TimeoutMinutes
+			if !channel || id == channelUnit {
+				deadline += singleBatch(unit).TimeoutMinutes
+			}
 		}
 		if batch.WeightSeconds != weight || batch.TimeoutMinutes != deadline {
 			return fmt.Errorf("proof batch %s has wrong weight/deadline", batch.ID)
@@ -90,4 +113,15 @@ func (p RunPlan) validateBatches() error {
 		return fmt.Errorf("proof batches own %d units, want %d", len(owners), len(p.Units))
 	}
 	return nil
+}
+
+func validChannelInvocation(unit ProofUnit, venue string) bool {
+	wantEnv := "ci-postgres-gateway-empty-v1"
+	if venue == VenueLocal {
+		wantEnv = "local-postgres-gateway-empty-v1"
+	}
+	return slices.Equal(unit.Packages, []string{ServedReporterPackage}) &&
+		unit.Run != "" && !strings.Contains(unit.Run, "/") && unit.Skip == "" &&
+		unit.GoTimeout == "" && unit.CountMode == "count-1" &&
+		unit.EnvironmentID == wantEnv && unit.BudgetClass == "full"
 }

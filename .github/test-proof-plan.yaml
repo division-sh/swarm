@@ -86,6 +86,7 @@ profiles:
     - runtime-full
     - delivery-continuation-full
     - serveapp-channel
+    - serveapp-channel-journeys
     - serveapp-channel-neutral
     - serveapp-channel-delivery
     - serveapp-channel-process-temporal
@@ -168,6 +169,7 @@ profiles:
     - runtime-full
     - delivery-continuation-full
     - serveapp-channel
+    - serveapp-channel-journeys
     - serveapp-channel-neutral
     - serveapp-channel-delivery
     - serveapp-channel-process-temporal
@@ -870,11 +872,17 @@ units:
   serveapp-channel:
     packages:
       - github.com/division-sh/swarm/internal/serveapp
-    # 36644617733 exhausted the unchanged 600s budget after passing whole
-    # delivery families. Keep complete journeys together in distinct units.
-    run: '^Test(Canonical.*|Channel(Connect.*|Draft.*|Duplicate.*|Effect.*|Listener.*|OneBot.*|Onboarding(Admitted.*|Early.*|E2E.*|Crash.*|PendingResetRestartToReadyE2E))|Claude.*|CLI_.*|Composed.*|Configure.*|Connected.*|Create.*|Receiver.*)$'
+    # The second member runs on the same runner with its own unchanged 600s budget.
+    run: '^Test(Channel(Connect.*|Effect.*|Listener.*|Onboarding(Admitted.*|Early.*|E2E.*|Crash.*|PendingResetRestartToReadyE2E))|Claude.*|CLI_.*|Composed.*|Configure.*|Connected.*|Create.*|Receiver.*)$'
     required_children:
       TestReceiverCompositionRestartBothStores: [sqlite, postgres]
+    count_mode: count-1
+    environment_ids: *postgres_gateway_empty
+    budget_class: full
+  serveapp-channel-journeys:
+    packages:
+      - github.com/division-sh/swarm/internal/serveapp
+    run: '^Test(Canonical.*|Channel(Draft.*|Duplicate.*|OneBot.*))$'
     count_mode: count-1
     environment_ids: *postgres_gateway_empty
     budget_class: full
