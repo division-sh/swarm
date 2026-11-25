@@ -56,25 +56,50 @@ func prepareNormalStartupRecoveryTx(ctx context.Context, tx *sql.Tx, mutation *m
 	if !slices.Equal(claims, locked) {
 		return nil, nil, fmt.Errorf("uncalled startup claims changed under the turn ownership prefix")
 	}
-	return ctx, locked, nil
+	// A delivery lock is acquired after its candidate read. Recheck while both
+	// the actor/source ownership prefix and those delivery locks are held.
+	rechecked, err := delivery.UncalledStartupClaims(ctx, mutation, false)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !slices.Equal(locked, rechecked) {
+		return nil, nil, fmt.Errorf("uncalled startup claims changed under the delivery lock")
+	}
+	return ctx, rechecked, nil
 }
 
-func settleUncalledStartupClaims(ctx context.Context, mutation *mutationprotocol.Attempt, delivery providerDrainDeliveryOwner, claims []storedelivery.UncalledStartupClaim, now time.Time) (int, error) {
+type deliveryClaimRecoveryCounts struct {
+	uncalled, retryExhausted int
+}
+
+func settleUncalledStartupClaims(ctx context.Context, mutation *mutationprotocol.Attempt, delivery providerDrainDeliveryOwner, claims []storedelivery.UncalledStartupClaim, now time.Time) (deliveryClaimRecoveryCounts, error) {
+	var counts deliveryClaimRecoveryCounts
 	if len(claims) == 0 {
-		return 0, nil
+		return counts, nil
 	}
 	const reason = "effect_recovery_prelaunch_abandoned"
 	failure, ok := failures.EnvelopeFromError(failures.New(failures.ClassLifecycleConflict, reason, "external-effects", "startup_reconcile",
 		map[string]any{"recovered_at": now.UTC().Format(time.RFC3339Nano)}))
 	if !ok {
-		return 0, fmt.Errorf("construct uncalled startup recovery failure")
+		return counts, fmt.Errorf("construct uncalled startup recovery failure")
 	}
 	settlement := deliverylifecycle.Settlement{Disposition: deliverylifecycle.FailureDeadLetter, Failure: &failure, ReasonCode: reason,
 		RuleSelection: deliverylifecycle.NotApplicableHandlerRuleObservation()}
 	for _, candidate := range claims {
+		settlement := settlement
+		if candidate.RetryExhausted {
+			// The locked claim has no budget left, so the existing retry
+			// settlement dead-letters it without advancing retry_count.
+			settlement.Disposition = deliverylifecycle.FailureRetry
+		}
 		if err := delivery.SettleProviderOriginRecoveryFailureTx(ctx, mutation, candidate.Claim, settlement, ""); err != nil {
-			return 0, err
+			return deliveryClaimRecoveryCounts{}, err
+		}
+		if candidate.RetryExhausted {
+			counts.retryExhausted++
+		} else {
+			counts.uncalled++
 		}
 	}
-	return len(claims), nil
+	return counts, nil
 }

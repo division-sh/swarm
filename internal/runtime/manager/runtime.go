@@ -1217,6 +1217,10 @@ func (am *AgentManager) ReconcileExternalEffectsForStartup(ctx context.Context) 
 			diaglog.ProcessLog(diaglog.LevelWarn, "startup-recovery",
 				fmt.Sprintf("Agent turns dead-lettered at restart before any provider call: %d; they are not run again. List dead-lettered deliveries with swarm event list --delivery-status dead_letter", summary.UncalledAgentClaimsDeadLettered))
 		}
+		if summary.UncalledRetryExhaustedClaimsDeadLettered != 0 {
+			diaglog.ProcessLog(diaglog.LevelWarn, "startup-recovery",
+				fmt.Sprintf("Agent turns dead-lettered at restart at their retry limit, before the interrupted call was issued again: %d; they are not run again. List dead-lettered deliveries with swarm event list --delivery-status dead_letter", summary.UncalledRetryExhaustedClaimsDeadLettered))
+		}
 		if err := am.reconcileCanceledTurnsForStartup(ctx, request); err != nil {
 			return fmt.Errorf("reconcile canceled agent turns: %w", err)
 		}
