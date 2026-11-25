@@ -1075,6 +1075,10 @@ func waitForGoldenCrashCheckpoint(t *testing.T, process *releaseServeProcess, st
 		if countGoldenEvents(events, "candidate.requested") != len(candidateIDs) {
 			return false, nil
 		}
+		deliveries := goldenCrashCandidateDeliveries(events, candidateIDs)
+		if len(deliveries) != len(candidateIDs) {
+			return false, nil
+		}
 		if err := rpc.call(ctx, "run.diagnose", map[string]any{"run_id": runID}, &last); err != nil {
 			return false, err
 		}
@@ -1096,7 +1100,7 @@ func waitForGoldenCrashCheckpoint(t *testing.T, process *releaseServeProcess, st
 				log.stringField("parent_event_id") == "" || log.stringField("source") == "" || log.stringField("agent_id") == "" {
 				continue
 			}
-			if ready, err := stopAtGoldenLaunchedCrashCut(t, ctx, process, store, runID); err != nil || !ready {
+			if ready, err := stopAtGoldenLaunchedCrashCut(t, ctx, process, store, runID, deliveries); err != nil || !ready {
 				return false, err
 			}
 			selected = log
@@ -1113,13 +1117,39 @@ func waitForGoldenCrashCheckpoint(t *testing.T, process *releaseServeProcess, st
 	return selected
 }
 
-func stopAtGoldenLaunchedCrashCut(t *testing.T, ctx context.Context, process *releaseServeProcess, store goldenStoreSelection, runID string) (bool, error) {
+func goldenCrashCandidateDeliveries(events []goldenEvent, candidateIDs []string) map[string]string {
+	deliveries := make(map[string]string, len(candidateIDs))
+	for _, candidateID := range candidateIDs {
+		found := false
+		for _, event := range events {
+			if !strings.HasSuffix(event.EventName, "/candidate.work.requested") || event.Payload["candidate_id"] != candidateID {
+				continue
+			}
+			if found || len(event.Deliveries) != 1 {
+				return nil
+			}
+			delivery := event.Deliveries[0]
+			if delivery.SubscriberType != "agent" || delivery.SubscriberID != "candidate-worker" || delivery.DeliveryID == "" {
+				return nil
+			}
+			deliveries[event.EventID] = delivery.DeliveryID
+			found = true
+		}
+	}
+	return deliveries
+}
+
+func stopAtGoldenLaunchedCrashCut(t *testing.T, ctx context.Context, process *releaseServeProcess, store goldenStoreSelection, runID string, deliveries map[string]string) (bool, error) {
 	t.Helper()
 	if err := process.cmd.Process.Signal(syscall.SIGSTOP); err != nil {
 		return false, err
 	}
 	observed, readErr := readGoldenCrashObservation(ctx, process, store, runID)
+	ready := false
 	if readErr == nil && observed.Active > 0 && observed.Launched == observed.Active {
+		ready, readErr = observed.candidatesLaunched(deliveries)
+	}
+	if readErr == nil && ready {
 		evidence, _ := json.Marshal(observed)
 		t.Logf("forced-kill stopped-cut observation run=%s: %s", runID, evidence)
 		return true, nil
@@ -1132,6 +1162,36 @@ type goldenCrashObservation struct {
 	Active, Launched int
 	ObservedAt       time.Time
 	Storage          json.RawMessage
+}
+
+func (o goldenCrashObservation) candidatesLaunched(deliveries map[string]string) (bool, error) {
+	var storage struct {
+		Attempts []struct {
+			OriginEventID, OriginDeliveryID, AttemptState, DeliveryState string
+			LaunchedAt                                                   struct{ Valid bool }
+		}
+	}
+	if err := json.Unmarshal(o.Storage, &storage); err != nil {
+		return false, err
+	}
+	seen := make(map[string]bool, len(deliveries))
+	for _, a := range storage.Attempts {
+		if a.OriginDeliveryID == "" || a.OriginDeliveryID != deliveries[a.OriginEventID] || !a.LaunchedAt.Valid {
+			continue
+		}
+		switch a.AttemptState {
+		case "launched", "response_observed":
+			seen[a.OriginEventID] = a.DeliveryState == "in_progress" || seen[a.OriginEventID]
+		case "settled":
+			seen[a.OriginEventID] = a.DeliveryState == "delivered" || seen[a.OriginEventID]
+		}
+	}
+	for id := range deliveries {
+		if !seen[id] {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 func readGoldenCrashObservation(ctx context.Context, process *releaseServeProcess, store goldenStoreSelection, runID string) (goldenCrashObservation, error) {
