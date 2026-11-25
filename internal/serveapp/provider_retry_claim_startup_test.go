@@ -48,13 +48,14 @@ type ordinaryRetryCrashCut struct {
 }
 
 type ordinaryRetryCut struct {
-	Claim    uncalledAgentClaim
-	Status   deliverylifecycle.Status
-	Retries  int
-	Reason   string
-	Attempts []storetest.DeliveryAttemptDiagnosticRow
-	Effects  storetest.ManagedTurnEffectStorage
-	Turns    int
+	Claim                    uncalledAgentClaim
+	Status                   deliverylifecycle.Status
+	Retries                  int
+	Reason                   string
+	Attempts                 []storetest.DeliveryAttemptDiagnosticRow
+	Effects                  storetest.ManagedTurnEffectStorage
+	ProviderHistoryInspected bool
+	Turns                    int
 }
 
 func TestServedOrdinaryUncalledRetrySettlesAtStartupBothStores(t *testing.T) {
@@ -188,10 +189,8 @@ func (cut *ordinaryRetryCut) inspect(ctx context.Context, selected any) (err err
 	if err != nil {
 		return err
 	}
-	// Preserve the distinction between an inspected empty list and an omitted list across the child pipe.
-	if cut.Effects.Attempts != nil && *cut.Effects.Attempts == nil {
-		*cut.Effects.Attempts = []storetest.ManagedTurnEffectStorageAttempt{}
-	}
+	// An inspected empty list encodes as null across the child pipe.
+	cut.ProviderHistoryInspected = cut.Effects.Attempts != nil
 	turns, err := storetest.ReadManagedAgentTurnStorage(ctx, selected, cut.Claim.Run, "load-agent")
 	cut.Turns = len(turns)
 	return err
@@ -224,8 +223,9 @@ func requireOrdinaryRetryHistory(t *testing.T, cut ordinaryRetryCut) {
 	if t.Failed() {
 		t.FailNow()
 	}
-	if effects.ProviderAttempts != 0 || effects.ActiveProviderAttempts != 0 || effects.LaunchedCandidateWorkAttempts != 0 ||
-		effects.Attempts == nil || len(*effects.Attempts) != 0 || effects.Settled != 0 || effects.Projected != 0 || effects.ResponseConsumed != 0 || cut.Turns != 0 {
+	if !cut.ProviderHistoryInspected || (effects.Attempts != nil && len(*effects.Attempts) != 0) ||
+		effects.ProviderAttempts != 0 || effects.ActiveProviderAttempts != 0 || effects.LaunchedCandidateWorkAttempts != 0 ||
+		effects.Settled != 0 || effects.Projected != 0 || effects.ResponseConsumed != 0 || cut.Turns != 0 {
 		t.Fatalf("expected inspected absence of provider attempts and results: attempts=%d active=%d saved_turns=%d", effects.ProviderAttempts, effects.ActiveProviderAttempts, cut.Turns)
 	}
 }
