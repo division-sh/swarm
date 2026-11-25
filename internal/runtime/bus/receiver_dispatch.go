@@ -11,6 +11,7 @@ import (
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 )
 
 // receiverDispatchProjection is the complete process-local handoff retained by
@@ -71,7 +72,7 @@ func (eb *EventBus) beginReceiverDispatch(parent context.Context, projection rec
 	)
 	if admission, ok := runtimeWorkAdmissionFromContext(parent); ok && admission.owner == projection.occurrence {
 		var closeContext func()
-		ctx, closeContext = eventreceiver.NewContext(admission.context)
+		ctx, closeContext = eventreceiver.NewContext(admission.context, parent)
 		ctx = worklifetime.CarryAcceptedLease(ctx, admission.context)
 		closeReceiver = func() error {
 			closeContext()
@@ -83,7 +84,7 @@ func (eb *EventBus) beginReceiverDispatch(parent context.Context, projection rec
 			return receiverDispatchContext{}, nil, err
 		}
 		var closeContext func()
-		ctx, closeContext = eventreceiver.NewContext(lease.Context())
+		ctx, closeContext = eventreceiver.NewContext(lease.Context(), parent)
 		ctx = worklifetime.CarryAcceptedLease(ctx, lease.Context())
 		closeReceiver = func() error {
 			closeContext()
@@ -95,7 +96,7 @@ func (eb *EventBus) beginReceiverDispatch(parent context.Context, projection rec
 	}
 	// Nested committed output remains part of this admitted dispatch. Keep its
 	// lifetime, not the caller value tree, when rebuilding the next receiver.
-	ctx = context.WithValue(ctx, runtimeWorkAdmissionContextKey{}, runtimeWorkAdmission{
+	ctx = forkcancelcapture.WithValue(ctx, runtimeWorkAdmissionContextKey{}, runtimeWorkAdmission{
 		owner: projection.occurrence, context: ctx,
 	})
 	ctx = worklifetime.WithOccurrence(ctx, projection.occurrence)
@@ -140,7 +141,7 @@ func (eb *EventBus) receiverRouteContext(parent context.Context, evt events.Even
 	completion := localDeliveryCompletionGroupFromContext(parent)
 	runtimeInstanceID, _ := runtimecorrelation.RuntimeInstanceIDFromContext(parent)
 	sourceArtifactFact, _ := runtimecorrelation.SourceArtifactFactFromContext(parent)
-	ctx, cleanup := eventreceiver.NewContext(context.Background())
+	ctx, cleanup := eventreceiver.NewContext(context.Background(), parent)
 	if eb.carryMutationContext != nil {
 		ctx = eb.carryMutationContext(ctx, parent)
 	}

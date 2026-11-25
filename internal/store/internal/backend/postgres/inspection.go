@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"sync/atomic"
+
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 )
 
 type inspectionContextKey struct{}
@@ -38,12 +40,12 @@ func (b *Backend) inspectTransaction(ctx context.Context, tx *sql.Tx, inspect fu
 	active := &atomic.Bool{}
 	active.Store(true)
 	defer active.Store(false)
-	return inspect(context.WithValue(ctx, inspectionContextKey{}, inspectionSnapshot{backend: b, tx: tx, active: active}))
+	return inspect(forkcancelcapture.WithValue(ctx, inspectionContextKey{}, inspectionSnapshot{backend: b, tx: tx, active: active}))
 }
 
 func (b *Backend) inspectionSQLContext(ctx context.Context) context.Context {
 	if b.inspectionDialer != nil {
-		return context.WithoutCancel(ctx)
+		return forkcancelcapture.WithoutCancel(ctx)
 	}
 	return ctx
 }

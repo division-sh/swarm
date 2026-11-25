@@ -7,6 +7,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 )
 
 type preparedPublicationOwnerKey struct{}
@@ -20,7 +21,7 @@ type preparedPublicationOwner struct {
 
 func withPreparedPublicationOwner(ctx context.Context, prepared PreparedOccurrence) context.Context {
 	source, _ := correlation.SourceArtifactFactFromContext(ctx)
-	return context.WithValue(ctx, preparedPublicationOwnerKey{}, preparedPublicationOwner{prepared: prepared, source: source})
+	return forkcancelcapture.WithValue(ctx, preparedPublicationOwnerKey{}, preparedPublicationOwner{prepared: prepared, source: source})
 }
 
 // PublicationContext carries only the exact acknowledged occurrence's owner.

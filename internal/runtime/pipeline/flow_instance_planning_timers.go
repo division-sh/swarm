@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 )
 
 // FlowInstancePlanningInitialTimerReader composes only the constructor's
@@ -22,7 +23,7 @@ func WithFlowInstancePlanningInitialTimerReader(ctx context.Context, reader Flow
 	if err := ctx.Err(); err != nil {
 		return ctx, err
 	}
-	return context.WithValue(ctx, flowInstancePlanningInitialTimerReaderKey{}, reader), nil
+	return forkcancelcapture.WithValue(ctx, flowInstancePlanningInitialTimerReaderKey{}, reader), nil
 }
 
 func (pc *PipelineCoordinator) readWorkflowPlanningTimers(ctx context.Context, runID string, route flowidentity.Route, entityID string, cause workflowTimerCause) ([]WorkflowTimerActivation, error) {

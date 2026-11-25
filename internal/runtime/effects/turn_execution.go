@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	"github.com/google/uuid"
 )
 
@@ -76,7 +77,7 @@ func newTurnExecution(ctx context.Context, timer func(time.Time) (<-chan time.Ti
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	turnCtx, cancel := context.WithCancelCause(ctx)
+	turnCtx, cancel := forkcancelcapture.WithCancelCause(ctx)
 	owner := &TurnExecution{parent: ctx, cancel: cancel, timer: timer, stop: make(chan struct{}), done: make(chan struct{})}
 	claim, hasDelivery := deliverylifecycle.ClaimFromContext(ctx)
 	directive, hasDirective := directiveCompletionOriginFromContext(ctx)
@@ -87,7 +88,7 @@ func newTurnExecution(ctx context.Context, timer func(time.Time) (<-chan time.Ti
 			owner.result.Attempt.Origin, _ = DirectiveCompletionOrigin(directive)
 		}
 	}
-	return context.WithValue(turnCtx, turnExecutionContextKey{}, owner), owner
+	return forkcancelcapture.WithValue(turnCtx, turnExecutionContextKey{}, owner), owner
 }
 
 func observeTurnLaunch(ctx context.Context, handle *Handle, clock LogicalTurnClock) error {

@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 )
 
 func (eb *EventBus) PrepareTurnTimeoutReaction(ctx context.Context, turn effects.TurnExecutionResult) (effects.TurnReactionPlan, error) {
@@ -65,7 +66,7 @@ func WithTurnTimeoutRecoveryDeliveryAuthority(ctx context.Context, authority del
 	if authority.Kind() != deliverylifecycle.ExecutionAuthorityNormalRuntime {
 		return nil, errors.New("normal startup timeout preparation requires a normal generation stamp")
 	}
-	return context.WithValue(ctx, turnTimeoutRecoveryDeliveryAuthorityKey{}, authority), nil
+	return forkcancelcapture.WithValue(ctx, turnTimeoutRecoveryDeliveryAuthorityKey{}, authority), nil
 }
 
 func (eb *EventBus) prepareTurnTimeoutReaction(ctx context.Context, turn effects.TurnExecutionResult, recovery bool) (effects.TurnReactionPlan, error) {
@@ -106,18 +107,18 @@ func (eb *EventBus) prepareTurnTimeoutReaction(ctx context.Context, turn effects
 		return nil, err
 	}
 	if recovery {
-		ctx = context.WithValue(ctx, startupTurnTimeoutPublicationKey{}, startupTurnTimeoutPublication{eventID: event.ID(), runID: event.RunID()})
+		ctx = forkcancelcapture.WithValue(ctx, startupTurnTimeoutPublicationKey{}, startupTurnTimeoutPublication{eventID: event.ID(), runID: event.RunID()})
 	}
 	// The validated launch/cancellation owns this exact control publication, but
 	// does not imply that its actor belongs to a constructed instance.
 	fact, _ := correlation.SourceArtifactFactFromContext(ctx)
-	ctx = context.WithValue(ctx, turnTimeoutPublicationOwnerKey{}, turnTimeoutPublicationOwner{event: event.Clone(), actor: target.AgentIdentity, source: fact})
+	ctx = forkcancelcapture.WithValue(ctx, turnTimeoutPublicationOwnerKey{}, turnTimeoutPublicationOwner{event: event.Clone(), actor: target.AgentIdentity, source: fact})
 	plans, err := eb.PrepareEnginePublications(ctx, []engine.EmitIntent{{Event: event}})
 	if err != nil {
 		return nil, err
 	}
 	if len(plans) != 1 {
-		return nil, errors.Join(fmt.Errorf("timeout reaction requires exactly one admitted publication"), eb.ReleaseEnginePublications(context.WithoutCancel(ctx), plans))
+		return nil, errors.Join(fmt.Errorf("timeout reaction requires exactly one admitted publication"), eb.ReleaseEnginePublications(forkcancelcapture.WithoutCancel(ctx), plans))
 	}
 	return plans[0], nil
 }

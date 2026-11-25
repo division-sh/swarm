@@ -8,6 +8,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 )
 
 // This stack-owned scope carries the result of one election through direct
@@ -74,7 +75,7 @@ func (eb *EventBus) beginDeliveryDispatch(ctx context.Context, evt events.Event,
 		}
 		scope.entries[id] = e
 	}
-	return context.WithValue(ctx, deliveryDispatchScopeKey{}, scope), scope, closeScope, nil
+	return forkcancelcapture.WithValue(ctx, deliveryDispatchScopeKey{}, scope), scope, closeScope, nil
 }
 
 func (s *deliveryDispatchScope) entry(evt events.Event, route events.DeliveryRoute) (*deliveryDispatchEntry, error) {

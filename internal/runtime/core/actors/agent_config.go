@@ -12,6 +12,7 @@ import (
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	"github.com/division-sh/swarm/internal/runtime/mockperformance"
 	"github.com/google/cel-go/cel"
 )
@@ -266,7 +267,7 @@ func normalizeStringList(values []string) []string {
 type actorContextKey struct{}
 
 func WithActor(ctx context.Context, actor AgentConfig) context.Context {
-	return context.WithValue(ctx, actorContextKey{}, actor)
+	return forkcancelcapture.WithValue(ctx, actorContextKey{}, actor)
 }
 
 func ActorFromContext(ctx context.Context) (AgentConfig, bool) {

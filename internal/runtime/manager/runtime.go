@@ -26,6 +26,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -170,7 +171,7 @@ func (am *AgentManager) shutdownWithBudget(opts ShutdownOptions, budget context.
 	drainCtx := budget
 	if drainCtx == nil {
 		var cancelDrain context.CancelFunc
-		drainCtx, cancelDrain = context.WithTimeout(context.Background(), grace)
+		drainCtx, cancelDrain = forkcancelcapture.WithTimeout(context.Background(), grace)
 		defer cancelDrain()
 	}
 	transition := am.lifecycle.prepareShutdownTransitionWithBudget(true, grace, budget)
@@ -180,7 +181,7 @@ func (am *AgentManager) shutdownWithBudget(opts ShutdownOptions, budget context.
 			dependencyErr = am.lifecycle.shutdownJoin.JoinManagerShutdownDependencies(drainCtx)
 		}
 		// A joined run can retain exact activation cleanup after a failed settlement.
-		return errors.Join(dependencyErr, am.retireDynamicFlowAttemptsAfterJoin(context.WithoutCancel(am.runtimeContext())))
+		return errors.Join(dependencyErr, am.retireDynamicFlowAttemptsAfterJoin(forkcancelcapture.WithoutCancel(am.runtimeContext())))
 	}
 	executor, claimed, err := am.lifecycle.claimUnwatchedTransition(transition, runtimeLifecycleTransitionShutdown)
 	if err != nil {
@@ -193,7 +194,7 @@ func (am *AgentManager) shutdownWithBudget(opts ShutdownOptions, budget context.
 }
 
 func waitForRuntimeLifecycleTransition(transition *runtimeLifecycleTransition, grace time.Duration, operation string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), grace)
+	ctx, cancel := forkcancelcapture.WithTimeout(context.Background(), grace)
 	defer cancel()
 	return waitForRuntimeLifecycleTransitionContext(ctx, transition, grace, operation)
 }
@@ -642,7 +643,7 @@ func (am *AgentManager) logDirectivePostcommitError(ctx context.Context, action,
 	if am.bus == nil {
 		return
 	}
-	_ = am.bus.LogRuntime(context.WithoutCancel(ctx), runtimepipeline.RuntimeLogEntry{
+	_ = am.bus.LogRuntime(forkcancelcapture.WithoutCancel(ctx), runtimepipeline.RuntimeLogEntry{
 		Level: "warn", Component: "agent-manager", Action: action,
 		Failure: failureEnvelope(err, "agent-manager", action),
 		Detail:  map[string]any{"operation_id": operationID},
@@ -765,7 +766,7 @@ func (am *AgentManager) executePreparedDirectiveOperation(ctx context.Context, s
 	if err != nil {
 		return runtimeagentcontrol.SendDirectiveResult{}, err
 	}
-	heartbeatCtx, stopHeartbeat := context.WithCancel(heartbeatLease.Context())
+	heartbeatCtx, stopHeartbeat := forkcancelcapture.WithCancel(heartbeatLease.Context())
 	heartbeatDone := make(chan struct{})
 	go func() {
 		defer func() { _ = heartbeatLease.Done() }()
@@ -884,7 +885,7 @@ func runDirectiveExecutionHeartbeat(ctx context.Context, done chan<- struct{}, s
 		case <-ctx.Done():
 			return
 		case now := <-ticker.C:
-			renewCtx, cancel := context.WithTimeout(ctx, config.renewalTimeout)
+			renewCtx, cancel := forkcancelcapture.WithTimeout(ctx, config.renewalTimeout)
 			_ = store.RenewDirectiveExecutionLease(renewCtx, operationID, ownerID, now.UTC(), directiveExecutionLease)
 			cancel()
 		}
@@ -1095,7 +1096,7 @@ func (am *AgentManager) completeClaimedShutdownTransition(transition *runtimeLif
 	for _, wait := range done {
 		<-wait
 	}
-	cleanupCtx := context.WithoutCancel(am.runtimeContext())
+	cleanupCtx := forkcancelcapture.WithoutCancel(am.runtimeContext())
 	runSettleErr := am.lifecycle.retireRunOwner(cleanupCtx)
 	if runSettleErr == nil {
 		runSettleErr = am.retireDynamicFlowAttemptsAfterJoin(cleanupCtx)
@@ -1822,7 +1823,7 @@ func (am *AgentManager) replaceExecutionTargetConfigWithTopology(
 		if am.workspaceGatewayAdmission != nil {
 			admissionCtx := runtimeactors.WithActor(loopCtx, candidate.Config)
 			if attempt := readinessAttemptFromContext(parent); attempt != nil {
-				admissionCtx = context.WithValue(admissionCtx, readinessRetirementWaitersKey{}, attempt)
+				admissionCtx = forkcancelcapture.WithValue(admissionCtx, readinessRetirementWaitersKey{}, attempt)
 			}
 			if err := am.observeUnpublishedActivation(admissionCtx, token, candidate.Config); err != nil {
 				abortErr := am.lifecycle.abortUnlaunchedLoopLocked(parent, identity, token, done, cell)
@@ -1870,9 +1871,9 @@ func (am *AgentManager) launchExecutionLoop(parent context.Context, execution *a
 	ch := execution.route
 	token := execution.token
 	eventWorkOwner := executionOwner
-	_ = am.projectLifecycleDiagnostics(context.WithoutCancel(parent))
+	_ = am.projectLifecycleDiagnostics(forkcancelcapture.WithoutCancel(parent))
 	go func() {
-		executionCtx, cancelExecution := context.WithCancel(workLease.Context())
+		executionCtx, cancelExecution := forkcancelcapture.WithCancel(workLease.Context())
 		stopGenerationCancel := context.AfterFunc(loopCtx, cancelExecution)
 		defer func() {
 			stopGenerationCancel()
@@ -1882,12 +1883,12 @@ func (am *AgentManager) launchExecutionLoop(parent context.Context, execution *a
 			}
 			if releaseErr := am.lifecycle.releaseLoop(token, done); releaseErr != nil && am.bus != nil {
 				failure := runtimefailures.FromError(releaseErr, "agent-manager", "release_agent_loop")
-				_ = am.bus.LogRuntime(context.WithoutCancel(parent), runtimepipeline.RuntimeLogEntry{
+				_ = am.bus.LogRuntime(forkcancelcapture.WithoutCancel(parent), runtimepipeline.RuntimeLogEntry{
 					Level: "error", Component: "agent-manager", Action: "agent_loop_release_failed",
 					AgentID: agent.ID(), Failure: &failure.Failure,
 				})
 			}
-			_ = am.projectLifecycleDiagnostics(context.WithoutCancel(parent))
+			_ = am.projectLifecycleDiagnostics(forkcancelcapture.WithoutCancel(parent))
 			if settleErr := workLease.Done(); settleErr != nil {
 				diaglog.ProcessLog(diaglog.LevelError, "agent-manager", "agent execution loop work settlement failed",
 					"agent_id", agent.ID(),
@@ -2139,7 +2140,7 @@ func (am *AgentManager) launchExecutionLoop(parent context.Context, execution *a
 							am.clearPoisonPanicCount(route.AgentIdentity, evt.ID())
 							consecutivePanics = 0
 							if err != nil && am.bus != nil {
-								am.bus.LogRuntime(context.WithoutCancel(evtCtx), runtimepipeline.RuntimeLogEntry{
+								am.bus.LogRuntime(forkcancelcapture.WithoutCancel(evtCtx), runtimepipeline.RuntimeLogEntry{
 									Level:     "error",
 									Component: "agent-manager",
 									Action:    "agent_event_failed",
@@ -2223,7 +2224,7 @@ func agentDeliveryExecutionContext(
 ) (context.Context, func(), error) {
 	runtimeInstanceID, _ := runtimecorrelation.RuntimeInstanceIDFromContext(deliveryCtx)
 	sourceArtifactFact, _ := runtimecorrelation.SourceArtifactFactFromContext(deliveryCtx)
-	ctx, cleanup := eventreceiver.NewContext(deliveryCtx)
+	ctx, cleanup := eventreceiver.NewContext(deliveryCtx, executionCtx)
 	if process, found := worklifetime.ProcessFromContext(loopCtx); found {
 		ctx = worklifetime.WithProcess(ctx, process)
 	}
@@ -2394,7 +2395,7 @@ func (am *AgentManager) handleAgentLoopPanic(ctx context.Context, identity runti
 	}
 
 	if ok {
-		if err := am.requestPanicRetirement(context.WithoutCancel(ctx), identity); err != nil && am.bus != nil {
+		if err := am.requestPanicRetirement(forkcancelcapture.WithoutCancel(ctx), identity); err != nil && am.bus != nil {
 			am.bus.LogRuntime(ctx, runtimepipeline.RuntimeLogEntry{
 				Level:     "error",
 				Component: "agent-manager",

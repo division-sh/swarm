@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	runtimeownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
@@ -236,13 +237,13 @@ func (b *Backend) runTransactionOutcome(ctx context.Context, opts *sql.TxOptions
 	// work. Logical operation cancellation is checked before COMMIT admission.
 	sqlCtx := ctx
 	if drain {
-		sqlCtx = context.WithoutCancel(ctx)
+		sqlCtx = forkcancelcapture.WithoutCancel(ctx)
 	}
 	beginStarted := time.Now()
 	// The owner must join rollback before Raw/discard/close. Read queries still
 	// use the caller context; only the SQL transaction's finalizer is owner-held.
 	beginAttempted = true
-	tx, err = conn.BeginTx(context.WithoutCancel(ctx), opts)
+	tx, err = conn.BeginTx(forkcancelcapture.WithoutCancel(ctx), opts)
 	probe.RecordAdmission(0, poolWait, time.Since(beginStarted))
 	if err != nil {
 		if callerErr := ctx.Err(); callerErr != nil {

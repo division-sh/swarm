@@ -7,6 +7,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 )
 
 type inboundEventContextKey struct{}
@@ -60,7 +61,7 @@ func WithRuntimeInstanceID(ctx context.Context, runtimeInstanceID string) contex
 	if runtimeInstanceID == "" {
 		return ctx
 	}
-	return context.WithValue(ctx, runtimeInstanceIDContextKey{}, runtimeInstanceID)
+	return forkcancelcapture.WithValue(ctx, runtimeInstanceIDContextKey{}, runtimeInstanceID)
 }
 
 func RuntimeInstanceIDFromContext(ctx context.Context) (string, bool) {
@@ -129,7 +130,7 @@ func WithRuntimeLineage(ctx context.Context, lineage RuntimeLineage) context.Con
 		!lineage.SelectedForkContext {
 		return ctx
 	}
-	return context.WithValue(ctx, runtimeLineageContextKey{}, lineage)
+	return forkcancelcapture.WithValue(ctx, runtimeLineageContextKey{}, lineage)
 }
 
 func RuntimeLineageFromContext(ctx context.Context) (RuntimeLineage, bool) {
@@ -214,7 +215,7 @@ func WithInboundEvent(ctx context.Context, evt events.Event) context.Context {
 		}
 		ctx = WithRuntimeLineage(ctx, lineage)
 	}
-	return context.WithValue(ctx, inboundEventContextKey{}, evt)
+	return forkcancelcapture.WithValue(ctx, inboundEventContextKey{}, evt)
 }
 
 func InboundEventFromContext(ctx context.Context) (events.Event, bool) {
@@ -238,7 +239,7 @@ func WithRunID(ctx context.Context, runID string) context.Context {
 	if runID == "" {
 		return ctx
 	}
-	return context.WithValue(ctx, runIDContextKey{}, runID)
+	return forkcancelcapture.WithValue(ctx, runIDContextKey{}, runID)
 }
 
 func RunIDFromContext(ctx context.Context) string {
@@ -257,7 +258,7 @@ func WithHandlerID(ctx context.Context, handlerID string) context.Context {
 	if handlerID == "" {
 		return ctx
 	}
-	return context.WithValue(ctx, handlerIDContextKey{}, handlerID)
+	return forkcancelcapture.WithValue(ctx, handlerIDContextKey{}, handlerID)
 }
 
 func HandlerIDFromContext(ctx context.Context) string {
@@ -275,7 +276,7 @@ func WithSourceArtifactFact(ctx context.Context, fact SourceArtifactFact) contex
 	if fact.Validate() != nil {
 		return ctx
 	}
-	return context.WithValue(ctx, sourceArtifactFactContextKey{}, fact)
+	return forkcancelcapture.WithValue(ctx, sourceArtifactFactContextKey{}, fact)
 }
 
 func SourceArtifactFactFromContext(ctx context.Context) (SourceArtifactFact, bool) {

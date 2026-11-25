@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 )
 
@@ -22,7 +23,7 @@ func (d engineDispatcher) DispatchCommittedPublication(ctx context.Context, valu
 	if !committed.committed.Acknowledged {
 		return errors.New("publication handoff requires selected-store commit acknowledgment")
 	}
-	ctx, err = d.bus.admitSourceArtifactFact(context.WithoutCancel(ctx))
+	ctx, err = d.bus.admitSourceArtifactFact(forkcancelcapture.WithoutCancel(ctx))
 	if err != nil {
 		return err
 	}

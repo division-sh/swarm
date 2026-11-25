@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -16,7 +17,7 @@ import (
 type connectPlanningPreviewKey struct{}
 
 func withConnectPlanningPreview(ctx context.Context) context.Context {
-	return context.WithValue(ctx, connectPlanningPreviewKey{}, true)
+	return forkcancelcapture.WithValue(ctx, connectPlanningPreviewKey{}, true)
 }
 
 func connectPlanningPreview(ctx context.Context) bool {

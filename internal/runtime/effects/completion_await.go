@@ -3,6 +3,8 @@ package effects
 import (
 	"context"
 	"encoding/json"
+
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 )
 
 // CompletionAwaitPublication is private native composition, not authored syntax
@@ -27,7 +29,7 @@ type completionAwaitPublicationContext struct {
 // This is scoped publication input, not admission or a replacement work context.
 // The native owners must still prove the original authority and exact emit.
 func WithCompletionAwaitPublication(ctx context.Context, eventID string, publication CompletionAwaitPublication) context.Context {
-	return context.WithValue(ctx, completionAwaitPublicationKey{}, completionAwaitPublicationContext{eventID, publication.Clone()})
+	return forkcancelcapture.WithValue(ctx, completionAwaitPublicationKey{}, completionAwaitPublicationContext{eventID, publication.Clone()})
 }
 
 func CompletionAwaitPublicationForEvent(ctx context.Context, eventID string) (CompletionAwaitPublication, bool) {

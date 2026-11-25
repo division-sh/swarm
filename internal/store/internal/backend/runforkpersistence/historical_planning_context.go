@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"sync/atomic"
 
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -45,7 +46,7 @@ func withHistoricalFlowInstancePlanningTx(ctx context.Context, tx *sql.Tx, sourc
 		resolver: capturedConstructionResolver{tx: tx, snapshots: make(map[constructionCut]*runForkRevisionSnapshot), active: make(map[string]bool)},
 	}
 	defer scope.closed.Store(true)
-	return prepare(context.WithValue(ctx, historicalPlanningContextKey{}, scope))
+	return prepare(forkcancelcapture.WithValue(ctx, historicalPlanningContextKey{}, scope))
 }
 
 func historicalPlanningForTx(ctx context.Context, tx *sql.Tx) (*historicalPlanningReconstruction, error) {
@@ -104,7 +105,7 @@ func beginHistoricalEvidenceRead(ctx context.Context, tx *sql.Tx, run runlifecyc
 		tx: tx, run: run,
 		resolver: capturedConstructionResolver{tx: tx, snapshots: make(map[constructionCut]*runForkRevisionSnapshot), active: make(map[string]bool)},
 	}
-	ctx = context.WithValue(ctx, historicalPlanningContextKey{}, scope)
+	ctx = forkcancelcapture.WithValue(ctx, historicalPlanningContextKey{}, scope)
 	done, err := beginHistoricalPlanningRead(ctx, tx, nil, run)
 	if err != nil {
 		scope.closed.Store(true)

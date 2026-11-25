@@ -6,6 +6,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 )
 
 type ProviderDrainTarget string
@@ -89,7 +91,7 @@ func WithCompletionSettlementObserver(ctx context.Context) (context.Context, fun
 		ctx = context.Background()
 	}
 	observer := &completionSettlementObserver{}
-	return context.WithValue(ctx, completionSettlementObserverKey{}, observer), func() CompletionSettlementObservation {
+	return forkcancelcapture.WithValue(ctx, completionSettlementObserverKey{}, observer), func() CompletionSettlementObservation {
 		observer.mu.Lock()
 		defer observer.mu.Unlock()
 		return cloneCompletionSettlementObservation(observer.observation)

@@ -12,6 +12,7 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 )
 
@@ -73,9 +74,9 @@ func (p *preparedFlowTopologyRetirement) retireWithDisposition(flow runtimeflowi
 		return retireErr
 	}
 	if terminal {
-		retireErr = errors.Join(retireErr, am.lifecycle.commitTerminalFlow(context.WithoutCancel(p.lease.Context()), set))
+		retireErr = errors.Join(retireErr, am.lifecycle.commitTerminalFlow(forkcancelcapture.WithoutCancel(p.lease.Context()), set))
 	} else {
-		retireErr = errors.Join(retireErr, am.lifecycle.fenceProcessFlowExecutions(context.WithoutCancel(p.lease.Context()), set))
+		retireErr = errors.Join(retireErr, am.lifecycle.fenceProcessFlowExecutions(forkcancelcapture.WithoutCancel(p.lease.Context()), set))
 	}
 	p.transferred = true
 	p.set = set
@@ -441,8 +442,8 @@ func (am *AgentManager) launchTerminalFlowCompletion(lease *worklifetime.Lease, 
 			set.result = errors.Join(result, leaseErr)
 			close(set.done)
 		}()
-		result = errors.Join(result, am.completeTerminalRetirements(context.WithoutCancel(lease.Context()), set.retirements))
-		diagnosticErr = am.projectLifecycleDiagnostics(context.WithoutCancel(lease.Context()))
+		result = errors.Join(result, am.completeTerminalRetirements(forkcancelcapture.WithoutCancel(lease.Context()), set.retirements))
+		diagnosticErr = am.projectLifecycleDiagnostics(forkcancelcapture.WithoutCancel(lease.Context()))
 	}()
 }
 

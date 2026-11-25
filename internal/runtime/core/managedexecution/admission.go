@@ -8,6 +8,7 @@ import (
 	"time"
 
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	"github.com/google/uuid"
 )
 
@@ -96,7 +97,7 @@ func WithAdmission(ctx context.Context, admission Admission) context.Context {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return context.WithValue(ctx, contextKey{}, admission)
+	return forkcancelcapture.WithValue(ctx, contextKey{}, admission)
 }
 
 func FromContext(ctx context.Context) (Admission, bool) {

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/google/uuid"
 )
@@ -114,7 +115,7 @@ func (c *agentLifecycleCoordinator) commitProcessTakeover(
 		target.ProcessAuthorityID, target.ProcessBootID, target.GenerationGrantID,
 	)
 	now := time.Now().UTC()
-	result, err := c.commitLifecycleTransition(context.WithoutCancel(ctx), store, AgentLifecycleTransition{
+	result, err := c.commitLifecycleTransition(forkcancelcapture.WithoutCancel(ctx), store, AgentLifecycleTransition{
 		OperationID: operationID, OperationKind: "process_takeover", RequestHash: requestHash,
 		Identity: identity, AgentID: identity.AgentID(), Trigger: "process_takeover",
 		ExpectedEpoch: state.RuntimeEpoch, ExpectedGeneration: state.Generation, ExpectedPhase: state.Phase,

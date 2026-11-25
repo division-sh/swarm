@@ -15,6 +15,7 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
@@ -331,7 +332,7 @@ func (am *AgentManager) activeRunDeliveryQuiesced(ctx context.Context, eventID s
 		return "", false, nil
 	}
 	route = route.Normalized()
-	reason, ok, err := reader.ActiveRunDeliveryQuiesced(context.WithoutCancel(ctx), eventID, route)
+	reason, ok, err := reader.ActiveRunDeliveryQuiesced(forkcancelcapture.WithoutCancel(ctx), eventID, route)
 	if err != nil {
 		if am.bus != nil {
 			am.bus.LogRuntime(ctx, runtimepipeline.RuntimeLogEntry{
@@ -577,7 +578,7 @@ func (am *AgentManager) writeReceipt(ctx context.Context, evt events.Event, stat
 			}
 		}
 	}
-	postCtx := context.WithoutCancel(ctx)
+	postCtx := forkcancelcapture.WithoutCancel(ctx)
 	if err != nil {
 		if am.bus != nil {
 			am.bus.LogRuntime(postCtx, runtimepipeline.RuntimeLogEntry{

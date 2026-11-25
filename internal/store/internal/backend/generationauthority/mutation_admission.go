@@ -8,6 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	runtimeownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 )
 
@@ -20,7 +21,7 @@ type AdmissionObservation struct{ attempts atomic.Uint64 }
 
 func ObserveMutationAdmission(ctx context.Context) (context.Context, *AdmissionObservation) {
 	observation := &AdmissionObservation{}
-	return context.WithValue(ctx, mutationAdmissionObservationKey{}, observation), observation
+	return forkcancelcapture.WithValue(ctx, mutationAdmissionObservationKey{}, observation), observation
 }
 
 func (o *AdmissionObservation) Attempts() uint64 { return o.attempts.Load() }
@@ -56,7 +57,7 @@ func AdmitMutationTx(ctx context.Context, tx *sql.Tx, sqlite bool) (context.Cont
 	}
 	admission := &nativeMutationAdmission{tx: tx, sqlite: sqlite, original: original}
 	admission.active.Store(true)
-	return context.WithValue(ctx, nativeMutationAdmissionKey{}, admission), func() { admission.active.Store(false) }, nil
+	return forkcancelcapture.WithValue(ctx, nativeMutationAdmissionKey{}, admission), func() { admission.active.Store(false) }, nil
 }
 
 func exactNativeMutationAdmission(ctx context.Context, tx *sql.Tx, sqlite bool) *nativeMutationAdmission {

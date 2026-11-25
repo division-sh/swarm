@@ -21,6 +21,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -2513,7 +2514,7 @@ func (m *RuntimeContextManager) deactivateAllWithOptions(ctx context.Context, ca
 		if err != nil {
 			return []RuntimeContextDeactivationResult{{ShutdownErr: err}}
 		}
-		drainCtx, cancel := context.WithTimeout(ctx, grace)
+		drainCtx, cancel := forkcancelcapture.WithTimeout(ctx, grace)
 		defer cancel()
 		deadline, _ = drainCtx.Deadline()
 	}

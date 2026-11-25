@@ -12,6 +12,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 )
 
 type ExecutionKind string
@@ -178,7 +179,7 @@ func (v ExecutionVariant) Bind(ctx context.Context, mode executionmode.Mode) (co
 		return nil, errors.New("receiver execution requires typed causal execution mode")
 	}
 	ctx = runtimeeffects.WithExecutionMode(ctx, mode)
-	ctx = context.WithValue(ctx, executionContextKey{}, v.Kind())
+	ctx = forkcancelcapture.WithValue(ctx, executionContextKey{}, v.Kind())
 	if v.Kind() == ExecutionNormal {
 		return ctx, nil
 	}
@@ -250,28 +251,42 @@ func (v ExecutionVariant) authorityForMode(mode executionmode.Mode) runtimeeffec
 }
 
 // NewContext mirrors only lifetime cancellation/deadline onto an empty value
-// tree. The returned cleanup releases the cancellation bridge.
-func NewContext(lifetime context.Context) (context.Context, func()) {
+// tree. The returned cleanup releases the cancellation bridge. The optional
+// dispatch context only locates the temporary capture and is not a parent.
+func NewContext(lifetime context.Context, dispatch ...context.Context) (context.Context, func()) {
+	trace := forkcancelcapture.Resolve(lifetime, lifetime)
+	if trace == nil && len(dispatch) != 0 {
+		trace = forkcancelcapture.Resolve(dispatch[0], dispatch[0])
+	}
 	if lifetime == nil {
 		lifetime = context.Background()
 	}
 	base := context.Background()
 	deadlineCancel := func() {}
 	if deadline, ok := lifetime.Deadline(); ok {
+		parent := base
 		var cancel context.CancelFunc
 		base, cancel = context.WithDeadline(base, deadline)
-		deadlineCancel = cancel
+		trace.Link("receiver deadline context (empty value parent)", base, parent)
+		trace.MirroredDeadline("receiver deadline copied from lifetime", base, lifetime, deadline)
+		deadlineCancel = trace.WrapPlain("receiver deadline cleanup", base, cancel)
 	}
 	ctx, cancel := context.WithCancelCause(base)
+	trace.Link("receiver cancel context (empty value tree)", ctx, base)
+	trace.Note("receiver lifetime bridge parent", ctx, lifetime, nil, nil, false)
+	cancel = trace.Wrap("receiver cancel", ctx, cancel)
 	stop := func() bool { return false }
 	if err := lifetime.Err(); err != nil {
+		trace.Note("receiver lifetime already cancelled", ctx, lifetime, nil, err, true)
 		cancel(context.Cause(lifetime))
 	} else {
 		stop = context.AfterFunc(lifetime, func() {
+			trace.Note("receiver lifetime bridge", ctx, lifetime, nil, nil, true)
 			cancel(context.Cause(lifetime))
 		})
 	}
 	cleanup := sync.OnceFunc(func() {
+		trace.Note("receiver cleanup stops lifetime bridge", ctx, lifetime, nil, nil, true)
 		stop()
 		cancel(context.Canceled)
 		deadlineCancel()

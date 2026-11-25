@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 )
 
 type localDeliveryCompletionGroup struct {
@@ -25,7 +26,7 @@ func withLocalDeliveryCompletionGroup(ctx context.Context, group *localDeliveryC
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return context.WithValue(ctx, localDeliveryCompletionContextKey{}, group)
+	return forkcancelcapture.WithValue(ctx, localDeliveryCompletionContextKey{}, group)
 }
 
 func localDeliveryCompletionGroupFromContext(ctx context.Context) *localDeliveryCompletionGroup {

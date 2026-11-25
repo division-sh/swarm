@@ -3,6 +3,8 @@ package activityresult
 import (
 	"context"
 	"fmt"
+
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 )
 
 type publishedInventoryKey struct{}
@@ -51,7 +53,7 @@ func (p PublishedInventory) Bind(ctx context.Context) (context.Context, error) {
 	if p.state == nil {
 		return nil, fmt.Errorf("activity publication inventory is not admitted")
 	}
-	return context.WithValue(ctx, publishedInventoryKey{}, p.state), nil
+	return forkcancelcapture.WithValue(ctx, publishedInventoryKey{}, p.state), nil
 }
 
 func (p PublishedInventory) RequireBound(ctx context.Context) error {

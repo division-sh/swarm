@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 )
 
@@ -129,7 +130,7 @@ func RegisterFanOutServing(ctx context.Context, grant GenerationGrant, occurrenc
 	if err != nil {
 		return nil, err
 	}
-	registrationCtx, cancel := context.WithCancel(standing.Context())
+	registrationCtx, cancel := forkcancelcapture.WithCancel(standing.Context())
 	workProcess, processPresent := worklifetime.ProcessFromContext(standing.Context())
 	if !processPresent {
 		cancel()
@@ -281,6 +282,7 @@ func (r *FanOutServingRegistration) Drain(ctx context.Context) error {
 	canceled := make(chan struct{})
 	stop := context.AfterFunc(ctx, func() {
 		defer close(canceled)
+		forkcancelcapture.Resolve(r.ctx, r.ctx).Note("fan-out drain deadline bridge", r.ctx, ctx, nil, nil, true)
 		r.cancel()
 	})
 	r.turns.Wait()
@@ -333,10 +335,12 @@ func (r *FanOutServingRegistration) BeginTurn(ctx context.Context) (*FanOutTurnP
 	budget.used++
 	r.turns.Add(1)
 	p.mu.Unlock()
-	turnCtx, cancel := context.WithCancel(lease.Context())
+	turnCtx, cancel := forkcancelcapture.WithCancel(lease.Context())
+	trace := forkcancelcapture.Resolve(turnCtx, turnCtx)
 	bridgeDone := make(chan struct{})
 	stop := context.AfterFunc(ctx, func() {
 		defer close(bridgeDone)
+		trace.Note("fan-out turn caller bridge", turnCtx, ctx, nil, nil, true)
 		cancel()
 	})
 	return &FanOutTurnPermit{registration: r, lease: lease, ctx: turnCtx, cancel: cancel, stop: stop, bridgeDone: bridgeDone}, true, nil

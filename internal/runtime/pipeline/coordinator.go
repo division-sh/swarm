@@ -30,6 +30,7 @@ import (
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
@@ -579,7 +580,7 @@ func (pc *PipelineCoordinator) expireHumanTaskCards(ctx context.Context, expiry 
 		return humanTaskExpiryFailure("prepare", err)
 	}
 	if len(plans) != len(intents) {
-		releaseErr := planner.ReleaseEnginePublications(context.WithoutCancel(ctx), plans)
+		releaseErr := planner.ReleaseEnginePublications(forkcancelcapture.WithoutCancel(ctx), plans)
 		return humanTaskExpiryFailure("plan_count", errors.Join(fmt.Errorf("human-task expiry planner returned %d plans for %d events", len(plans), len(intents)), releaseErr))
 	}
 	committed, err := expiry.CommitHumanTaskExpirations(ctx, HumanTaskExpiryCommand{ObservedAt: now, Limit: limit, Publications: plans})
@@ -587,7 +588,7 @@ func (pc *PipelineCoordinator) expireHumanTaskCards(ctx context.Context, expiry 
 		if err == nil {
 			err = errors.New("human-task expiry was not acknowledged")
 		}
-		return humanTaskExpiryFailure("commit", errors.Join(err, planner.ReleaseEnginePublications(context.WithoutCancel(ctx), plans)))
+		return humanTaskExpiryFailure("commit", errors.Join(err, planner.ReleaseEnginePublications(forkcancelcapture.WithoutCancel(ctx), plans)))
 	}
 	if validateErr := committed.Validate(); validateErr != nil {
 		return humanTaskExpiryFailure("validate_commit", errors.Join(err, validateErr))
@@ -601,7 +602,7 @@ func (pc *PipelineCoordinator) expireHumanTaskCards(ctx context.Context, expiry 
 	for _, publication := range committed.Publications {
 		committedIntents = append(committedIntents, publication.CommittedDurablePublicationIntent())
 	}
-	return errors.Join(err, humanTaskExpiryFailure("dispatch", dispatcher.DispatchPostCommit(context.WithoutCancel(ctx), committedIntents)))
+	return errors.Join(err, humanTaskExpiryFailure("dispatch", dispatcher.DispatchPostCommit(forkcancelcapture.WithoutCancel(ctx), committedIntents)))
 }
 
 func (pc *PipelineCoordinator) Intercept(ctx context.Context, evt events.Event) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
@@ -932,7 +933,7 @@ func (pc *PipelineCoordinator) transferCommittedHandlerFollowUp(ctx context.Cont
 		return errors.Join(activityErr, errors.New("committed handler follow-up requires post-commit dispatcher"))
 	}
 	dispatcher := pc.bus.EngineDispatcher()
-	postCommitCtx := context.WithoutCancel(ctx)
+	postCommitCtx := forkcancelcapture.WithoutCancel(ctx)
 	var emitErr, requestErr error
 	if len(followUp.Emissions) > 0 {
 		emitErr = dispatcher.DispatchPostCommit(postCommitCtx, followUp.Emissions)

@@ -18,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 )
 
@@ -395,7 +396,7 @@ func withSelectedTargetOwnerLookupScope(ctx context.Context, scope selectedTarge
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return context.WithValue(ctx, selectedTargetOwnerLookupScopeKey{}, scope)
+	return forkcancelcapture.WithValue(ctx, selectedTargetOwnerLookupScopeKey{}, scope)
 }
 
 func (eb *EventBus) targetOwnerCandidates(ctx context.Context) ([]runtimepipeline.DeliveryTargetOwnerCandidate, bool, error) {
@@ -851,7 +852,7 @@ func (eb *EventBus) DispatchDeliveryContinuation(ctx context.Context, evt events
 	}()
 	// Receiver admission rebuilds authority context. Transfer only this exact
 	// stack-owned election, not arbitrary caller context values.
-	ctx = context.WithValue(receiverCtx.Context, deliveryDispatchScopeKey{}, scope)
+	ctx = forkcancelcapture.WithValue(receiverCtx.Context, deliveryDispatchScopeKey{}, scope)
 	if route.Recipient.IsNode() {
 		interception, err := eb.runInterceptorsForDeliveryRoutes(ctx, evt, []events.DeliveryRoute{route})
 		if len(interception.Deferred) > 0 {
@@ -1097,7 +1098,7 @@ func returnDeliveryContinuation(ctx context.Context, continuation worklifetime.D
 	if continuation == nil {
 		return nil
 	}
-	resolution, err := continuation.Resolve(context.WithoutCancel(ctx), worklifetime.DeliveryContinuationReturnUnqueued)
+	resolution, err := continuation.Resolve(forkcancelcapture.WithoutCancel(ctx), worklifetime.DeliveryContinuationReturnUnqueued)
 	if err != nil {
 		return err
 	}

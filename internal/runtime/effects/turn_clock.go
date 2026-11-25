@@ -7,6 +7,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	"github.com/google/uuid"
 )
 
@@ -73,7 +74,7 @@ type turnTimeoutContextKey struct{}
 
 // WithTurnTimeout carries admitted configuration, not launch or cancel rights.
 func WithTurnTimeout(ctx context.Context, timeout *timeridentity.TurnTimeout) context.Context {
-	return context.WithValue(ctx, turnTimeoutContextKey{}, timeridentity.CloneTurnTimeout(timeout))
+	return forkcancelcapture.WithValue(ctx, turnTimeoutContextKey{}, timeridentity.CloneTurnTimeout(timeout))
 }
 
 func turnTimeoutFromContext(ctx context.Context) *timeridentity.TurnTimeout {

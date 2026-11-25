@@ -5,6 +5,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/agentcontrol"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 )
 
 type turnInstanceSourceKey struct{}
@@ -16,9 +17,9 @@ func WithTurnInstanceSource(ctx context.Context, source agentcontrol.TurnInstanc
 	if source == nil {
 		return ctx
 	}
-	return context.WithValue(ctx, turnInstanceSourceKey{}, source)
+	return forkcancelcapture.WithValue(ctx, turnInstanceSourceKey{}, source)
 }
 
 func WithTurnInstanceOwnership(ctx context.Context, ownership events.InstanceOwnership) context.Context {
-	return context.WithValue(ctx, turnInstanceOwnershipKey{}, ownership.Clone())
+	return forkcancelcapture.WithValue(ctx, turnInstanceOwnershipKey{}, ownership.Clone())
 }

@@ -9,6 +9,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 )
 
 type Operation string
@@ -257,7 +259,7 @@ func WithAttempt(ctx context.Context, attempt *Attempt) context.Context {
 	if attempt == nil && ctx.Value(attemptKey{}) == nil {
 		return ctx
 	}
-	return context.WithValue(ctx, attemptKey{}, attempt)
+	return forkcancelcapture.WithValue(ctx, attemptKey{}, attempt)
 }
 
 // Mark labels the actual transaction executing a semantic owner callback. A

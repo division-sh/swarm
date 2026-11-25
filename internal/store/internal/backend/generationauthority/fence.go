@@ -11,6 +11,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 )
 
 type lockMode uint8
@@ -57,7 +58,7 @@ func MutationContext(ctx context.Context, stamp processbinding.LeaseStamp, chang
 	if present && previous.mode > mode {
 		mode = previous.mode
 	}
-	return context.WithValue(ctx, originalProcessKey{}, originalProcess{stamp: stamp, mode: mode}), nil
+	return forkcancelcapture.WithValue(ctx, originalProcessKey{}, originalProcess{stamp: stamp, mode: mode}), nil
 }
 
 // AdmitTransaction is the single pre-domain process check. Missing attribution
@@ -128,7 +129,7 @@ func BindTransaction(caller, ctx context.Context, tx *sql.Tx, sqlite, readOnly b
 		caller = context.Background()
 	}
 	scope := &transaction{tx: tx, caller: caller, sqlite: sqlite, readOnly: readOnly, active: true}
-	return context.WithValue(ctx, transactionKey{}, scope), func() {
+	return forkcancelcapture.WithValue(ctx, transactionKey{}, scope), func() {
 		scope.Lock()
 		defer scope.Unlock()
 		scope.active = false

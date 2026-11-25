@@ -10,6 +10,7 @@ import (
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	"github.com/division-sh/swarm/internal/runtime/toolgateway"
 	"github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/runtime/workspace/worker"
@@ -96,7 +97,7 @@ func (r *MockRuntime) resolveWorkspace(ctx context.Context, actor models.AgentCo
 }
 
 func releaseMockTarget(ctx context.Context, target *workspace.Target) error {
-	cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	cleanup, cancel := forkcancelcapture.WithTimeout(forkcancelcapture.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
 	if err := target.Release(cleanup); err != nil {
 		return failures.Wrap(failures.ClassLifecycleConflict, "forkchat_workspace_release_failed", "mock-python-adapter", "release_target", nil, err)

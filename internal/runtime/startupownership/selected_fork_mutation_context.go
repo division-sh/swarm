@@ -8,6 +8,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 )
 
 // SelectedForkMutationContextOwner creates a distinct admitted child operation;
@@ -42,7 +43,7 @@ func (g *generationGrant) BindSelectedForkMutationContext(ctx context.Context) (
 	ctx = correlation.WithSourceArtifactFact(ctx, source)
 	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(evidence.RuntimeInstanceID, evidence.BundleHash))
 	// B currentness must not consume the inherited A mutation owner.
-	candidate := context.WithValue(ctx, mutationAuthorityContextKey{}, g)
+	candidate := forkcancelcapture.WithValue(ctx, mutationAuthorityContextKey{}, g)
 	if err := g.ProveCurrent(candidate); err != nil {
 		return nil, err
 	}
@@ -130,7 +131,13 @@ func (g *generationGrant) requireSelectedChildParent(ctx context.Context) error 
 	}
 	// Keep A's coherent custody while joining the incoming caller's cancellation.
 	read, cancel := context.WithCancelCause(g.issuingParent)
-	stop := context.AfterFunc(ctx, func() { cancel(context.Cause(ctx)) })
+	trace := forkcancelcapture.Resolve(ctx, g.owner)
+	trace.Link("selected parent proof context", read, g.issuingParent)
+	cancel = trace.Wrap("selected parent proof", read, cancel)
+	stop := context.AfterFunc(ctx, func() {
+		trace.Note("caller to selected parent proof bridge", read, ctx, nil, nil, true)
+		cancel(context.Cause(ctx))
+	})
 	defer func() { stop(); cancel(nil) }()
 	if parent == nil {
 		err = g.owner.ProveCurrent(read)

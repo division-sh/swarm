@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
 	"github.com/lib/pq"
 )
@@ -130,7 +131,7 @@ func (b *Backend) Close() error {
 		return nil
 	}
 	if b.inspectionDialer != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel := forkcancelcapture.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		return b.withInspectionIO(ctx, func(context.Context, func() error) error {
 			return b.db.Close()

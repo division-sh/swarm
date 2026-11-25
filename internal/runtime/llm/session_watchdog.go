@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 )
 
 const (
@@ -89,7 +90,7 @@ func newSessionWatchdogMonitorWriter(ctx context.Context, base MonitorTurnWriter
 	if err != nil {
 		return nil, err
 	}
-	loopCtx, cancel := context.WithCancel(worklifetime.WithOccurrence(lease.Context(), owner))
+	loopCtx, cancel := forkcancelcapture.WithCancel(worklifetime.WithOccurrence(lease.Context(), owner))
 	nowFn := time.Now
 	w := &sessionWatchdogMonitorWriter{
 		base:    base,

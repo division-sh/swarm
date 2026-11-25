@@ -21,6 +21,7 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
@@ -378,7 +379,7 @@ func (am *AgentManager) runtimePlatformControlEventContext(ctx context.Context) 
 		return am.runtimeContext()
 	}
 	if ctx.Err() != nil {
-		return context.WithoutCancel(ctx)
+		return forkcancelcapture.WithoutCancel(ctx)
 	}
 	return ctx
 }
@@ -519,7 +520,7 @@ func (am *AgentManager) registerExecutableAgentLifecycle(
 		return executableAgentReadiness{}, err
 	}
 	defer am.completeCommittedRouteTransition(transitionCell)
-	_ = am.projectLifecycleDiagnostics(context.WithoutCancel(ctx))
+	_ = am.projectLifecycleDiagnostics(forkcancelcapture.WithoutCancel(ctx))
 	return am.ensureExecutableAgentLifecycle(ctx, identity)
 }
 
@@ -802,7 +803,7 @@ func (am *AgentManager) teardownIdentityWithTopology(
 	if err != nil {
 		return err
 	}
-	_ = am.projectLifecycleDiagnostics(context.WithoutCancel(ctx))
+	_ = am.projectLifecycleDiagnostics(forkcancelcapture.WithoutCancel(ctx))
 	return nil
 }
 

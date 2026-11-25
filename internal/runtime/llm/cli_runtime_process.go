@@ -17,6 +17,7 @@ import (
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
@@ -73,7 +74,7 @@ func (r *ClaudeCLIRuntime) runWithPreparedInput(ctx context.Context, args []stri
 
 	providerCtx, stopProvider := completionProviderContext(ctx, heartbeatCtx)
 	defer stopProvider()
-	runCtx, cancel := context.WithTimeout(providerCtx, timeout)
+	runCtx, cancel := forkcancelcapture.WithTimeout(providerCtx, timeout)
 	defer cancel()
 
 	cmd, err := r.buildCommand(runCtx, args, target)
