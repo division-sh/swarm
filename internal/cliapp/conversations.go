@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/cli/argcount"
+	"github.com/division-sh/swarm/internal/operatorread"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/spf13/cobra"
@@ -120,6 +122,26 @@ type conversationTurn struct {
 	Failure                *runtimefailures.Envelope         `json:"failure,omitempty"`
 	AssistantVisibleOutput string                            `json:"assistant_visible_output,omitempty"`
 	RetryCount             int                               `json:"retry_count,omitempty"`
+
+	TokenCostEstimate conversationTokenCostEstimate `json:"token_cost_estimate,omitzero"`
+}
+
+type conversationTokenCostEstimate operatorread.OperatorTokenCostEstimate
+
+func (estimate *conversationTokenCostEstimate) UnmarshalJSON(raw []byte) error {
+	value, err := canonicaljson.Decode(raw)
+	if err != nil {
+		return fmt.Errorf("malformed token_cost_estimate: %w", err)
+	}
+	usdField, _ := value.Lookup("usd")
+	versionField, _ := value.Lookup("rate_version")
+	usd, number := usdField.Number()
+	version, label := versionField.String()
+	if value.Len() != 2 || !number || usd < 0 || !label || strings.TrimSpace(version) == "" {
+		return fmt.Errorf("malformed token_cost_estimate: expected nonnegative usd and a rate_version")
+	}
+	*estimate = conversationTokenCostEstimate{USD: usd, RateVersion: version}
+	return nil
 }
 
 type conversationTurnDetail struct {
@@ -771,6 +793,7 @@ func writeConversationTurnDetailResult(out io.Writer, result conversationTurnDet
 			{Label: "Task", Value: turn.TaskID},
 			{Label: "Tokens", Value: conversationTokenSummary(turn.Tokens)},
 			{Label: "Model evidence", Value: cliCompletionEvidenceSummary(turn.CompletionEvidence)},
+			{Literal: conversationTokenCostLine(turn.TokenCostEstimate)},
 			{Label: "Outcome", Value: conversationOutcomeSummary(turn)},
 			{Label: "Retries", Value: fmt.Sprintf("%d", turn.RetryCount)},
 			{Label: "Frame version", Value: result.Frame.Version},
@@ -781,6 +804,13 @@ func writeConversationTurnDetailResult(out io.Writer, result conversationTurnDet
 		},
 		Sections: sections,
 	})
+}
+
+func conversationTokenCostLine(estimate conversationTokenCostEstimate) string {
+	if estimate.RateVersion == "" {
+		return ""
+	}
+	return fmt.Sprintf("Estimated token cost (published rates): $%.6f USD [%s]", estimate.USD, cliSanitizeOneLineValue(estimate.RateVersion))
 }
 
 func conversationTurnTriggerSummary(turn conversationTurn) string {

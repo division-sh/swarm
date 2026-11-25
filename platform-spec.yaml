@@ -35515,6 +35515,21 @@ api_specification:
               $ref: '#/components/schemas/ConversationActivity'
           tokens:
             $ref: '#/components/schemas/ConversationTokenUsage'
+          token_cost_estimate:
+            type: object
+            additionalProperties: false
+            required: [usd, rate_version]
+            description: |
+              Detail-only estimate from published rates for the retained model and covered token terms.
+              This is not total billed cost or a historical tariff guarantee. The rate version is the table
+              used at read time. If the model, evidence, usage or a term is not covered, the estimate is absent.
+            properties:
+              usd:
+                type: number
+                minimum: 0
+              rate_version:
+                type: string
+                minLength: 1
           outcome:
             type: string
           parse_ok:

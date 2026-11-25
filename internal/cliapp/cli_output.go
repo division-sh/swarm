@@ -125,6 +125,8 @@ func formatCLIHumanCount(count int, singular, plural string) string {
 type cliLabeledDetailRow struct {
 	Label string
 	Value string
+	// Literal is a complete row that does not participate in label alignment.
+	Literal string
 }
 
 type cliLabeledDetailSection struct {
@@ -146,6 +148,10 @@ func writeCLILabeledDetail(out io.Writer, detail cliLabeledDetail) {
 	width := 0
 	rows := make([]cliLabeledDetailRow, 0, len(detail.Rows))
 	for _, row := range detail.Rows {
+		if row.Literal != "" {
+			rows = append(rows, row)
+			continue
+		}
 		row.Label = strings.TrimSpace(row.Label)
 		row.Value = strings.TrimSpace(row.Value)
 		if row.Label == "" || row.Value == "" {
@@ -157,6 +163,10 @@ func writeCLILabeledDetail(out io.Writer, detail cliLabeledDetail) {
 		}
 	}
 	for _, row := range rows {
+		if row.Literal != "" {
+			fmt.Fprintln(out, "  "+row.Literal)
+			continue
+		}
 		fmt.Fprintf(out, "  %s%s  %s\n", row.Label, strings.Repeat(" ", width-cliDisplayWidth(row.Label)), row.Value)
 	}
 	for _, section := range detail.Sections {

@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+
+	"github.com/division-sh/swarm/internal/runtime/effects"
 )
 
 func TestConversationsListUsesConversationListV1RPCWithFilters(t *testing.T) {
@@ -367,6 +369,92 @@ func TestConversationTurnOutputsOnlyAuthorSafeFrameFacts(t *testing.T) {
 			wantKeys := []string{"content_hash", "frame_id", "parent_frame_id", "turn_kind", "version"}
 			if !reflect.DeepEqual(gotKeys, wantKeys) {
 				t.Fatalf("JSON frame keys = %v, want exact safe whitelist %v", gotKeys, wantKeys)
+			}
+		})
+	}
+}
+
+func TestConversationTurnTokenCostOutput(t *testing.T) {
+	setCLIAPITestToken(t, "test-token")
+	const version = "anthropic-standard-2026-11-09"
+	const turnID = "00000000-0000-4000-8000-000000000002"
+	for _, tc := range []struct {
+		name, raw, amount string
+	}{
+		{"priced", `{"usd":0.0123,"rate_version":"` + version + `"}`, "0.012300"},
+		{"zero", `{"usd":0,"rate_version":"` + version + `"}`, "0.000000"},
+		{"absent", "", ""},
+		{"null", "null", ""},
+		{"missing_amount", `{"rate_version":"v1"}`, ""},
+		{"missing_version", `{"usd":0}`, ""},
+		{"extra", `{"usd":0,"rate_version":"v1","provider":"anthropic"}`, ""},
+		{"duplicate", `{"usd":0,"usd":1,"rate_version":"v1"}`, ""},
+		{"negative", `{"usd":-1,"rate_version":"v1"}`, ""},
+		{"nonnumeric", `{"usd":"0","rate_version":"v1"}`, ""},
+		{"nonfinite", `{"usd":1e309,"rate_version":"v1"}`, ""},
+		{"blank_version", `{"usd":0,"rate_version":" "}`, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result := validConversationTurnDetail("sess-1", 1)
+			turn := result["turn"].(map[string]any)
+			evidence := completionEvidenceFixtureForCLI()
+			evidence.CostProvenance = effects.CompletionCostEstimated
+			turn["completion_evidence"] = evidence
+			if tc.raw != "" {
+				turn["token_cost_estimate"] = json.RawMessage(tc.raw)
+			}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var request jsonRPCRequest
+				if err := json.NewDecoder(r.Body).Decode(&request); err != nil || request.Method != conversationGetTurnMethod {
+					t.Errorf("expected exact turn detail request: %+v, %v", request, err)
+					return
+				}
+				writeJSONRPCResult(t, w, request.ID, result)
+			}))
+			defer server.Close()
+
+			for _, asJSON := range []bool{false, true} {
+				args := []string{"conversation", "turn", "sess-1", turnID}
+				if asJSON {
+					args = append(args, "--json")
+				}
+				var stdout, stderr bytes.Buffer
+				code := executeRootCommandWithOptions(context.Background(), t.TempDir(), args, &stdout, &stderr, testRootCommandOptions(server))
+				if tc.raw != "" && tc.amount == "" {
+					if code == cliExitOK || stdout.Len() != 0 || !strings.Contains(stderr.String(), "token_cost_estimate") {
+						t.Fatalf("malformed estimate not refused: code=%d stdout=%q stderr=%q", code, &stdout, &stderr)
+					}
+					continue
+				}
+				if code != cliExitOK {
+					t.Fatalf("code=%d stderr=%q", code, &stderr)
+				}
+				if asJSON {
+					var got struct {
+						Turn map[string]json.RawMessage `json:"turn"`
+					}
+					if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+						t.Fatal(err)
+					}
+					var compact bytes.Buffer
+					if raw := got.Turn["token_cost_estimate"]; raw != nil {
+						if err := json.Compact(&compact, raw); err != nil {
+							t.Fatal(err)
+						}
+					}
+					if compact.String() != tc.raw || !bytes.Contains(got.Turn["completion_evidence"], []byte("locally_estimated")) {
+						t.Fatalf("JSON changed amount, presence or provenance: %s", &stdout)
+					}
+					continue
+				}
+				prefix := "Estimated token cost (published rates):"
+				text := stdout.String()
+				modelLine := strings.Index(text, "cost locally_estimated")
+				estimateLine := strings.Index(text, prefix)
+				if modelLine < 0 || tc.amount == "" && estimateLine >= 0 ||
+					tc.amount != "" && (estimateLine <= modelLine || !strings.Contains(text, prefix+" $"+tc.amount+" USD ["+version+"]\n")) {
+					t.Fatalf("text changed amount, order or provenance: %s", text)
+				}
 			}
 		})
 	}
