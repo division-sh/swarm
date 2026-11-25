@@ -410,6 +410,13 @@ func TestPostgresHistoricalReplayPreservesProducerIdentity(t *testing.T) {
 	if !replayed.Producer().Equal(producer) {
 		t.Fatalf("replayed producer = %q/%q, want %q/%q", replayed.ProducerType(), replayed.SourceAgent(), producer.Type(), producer.ID())
 	}
+	full, err := fixture.store.(routeSettlementOperatorStore).LoadOperatorEvent(ctx, replayedEventID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(full.Deliveries) != 1 || routeSettlementPlanJSON(t, full) != nil {
+		t.Fatalf("historical replay must show its delivery and omit unstored plans: %+v", full)
+	}
 	if replayed.TaskID() != "event-owned-task" || replayed.ExecutionMode() != executionmode.Mock || replayed.ChainDepth() != 0 || replayed.ParentEventID() != "" ||
 		!jsonSemanticallyEqual(replayed.Payload(), []byte(`{"task_id":"payload-owned-task"}`)) || replayed.Envelope().Source != sourceEnvelope.Source {
 		t.Fatalf("replayed complete snapshot changed: task=%q mode=%q depth=%d parent=%q payload=%s envelope=%#v", replayed.TaskID(), replayed.ExecutionMode(), replayed.ChainDepth(), replayed.ParentEventID(), replayed.Payload(), replayed.Envelope())

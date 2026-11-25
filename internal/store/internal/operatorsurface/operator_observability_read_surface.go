@@ -266,7 +266,7 @@ func (r *ObservabilityPostgres) loadOperatorEvent(ctx context.Context, tx *sql.T
 	if err != nil {
 		return operatorread.OperatorEventFull{}, err
 	}
-	return assembleOperatorEvent(decoded, settlement, deliveries, deadLetters)
+	return assembleOperatorEventDetail(decoded, settlement, deliveries, deadLetters)
 }
 
 func (r *ObservabilityPostgres) loadOperatorEventDeliveries(ctx context.Context, tx *sql.Tx, eventID string) ([]operatorread.OperatorEventDelivery, error) {
@@ -309,6 +309,15 @@ func operatorEventDeliveryFromSnapshot(snapshot runtimedelivery.Snapshot) operat
 	return item
 }
 
+func assembleOperatorEventDetail(admitted events.AdmittedEvent, settlement events.RouteSettlement, deliveries []operatorread.OperatorEventDelivery, deadLetters []operatorread.OperatorDeadLetterRecord) (operatorread.OperatorEventFull, error) {
+	event, err := assembleOperatorEvent(admitted, settlement, deliveries, deadLetters)
+	if err == nil && settlement.Delivered() && settlement.Ledger().Present() {
+		plans := projectConnectPlanEvaluations(settlement.Ledger())
+		event.ConnectPlans = &plans
+	}
+	return event, err
+}
+
 func applyRouteSettlement(e *operatorread.OperatorEventFull, settlement events.RouteSettlement) error {
 	if e == nil {
 		return fmt.Errorf("operator event is required")
@@ -324,8 +333,17 @@ func applyRouteSettlement(e *operatorread.OperatorEventFull, settlement events.R
 	if settlement.Delivered() {
 		return nil
 	}
-	plans := make([]operatorread.OperatorConnectPlanEvaluation, 0, len(settlement.Ledger().Plans()))
-	for _, plan := range settlement.Ledger().Plans() {
+	e.NoDelivery = &operatorread.OperatorNoDelivery{
+		Reason: settlement.Reason().Code(),
+		Plans:  projectConnectPlanEvaluations(settlement.Ledger()),
+	}
+	return nil
+}
+
+func projectConnectPlanEvaluations(ledger events.ConnectEvaluationLedger) []operatorread.OperatorConnectPlanEvaluation {
+	evaluations := ledger.Plans()
+	plans := make([]operatorread.OperatorConnectPlanEvaluation, 0, len(evaluations))
+	for _, plan := range evaluations {
 		targets := make([]operatorread.OperatorConnectPlanTarget, 0, len(plan.Targets()))
 		for _, target := range plan.Targets() {
 			target = target.Normalized()
@@ -347,8 +365,7 @@ func applyRouteSettlement(e *operatorread.OperatorEventFull, settlement events.R
 			PlanSHA256: plan.PlanIdentity().String(), Resolution: plan.Resolution().Code(), Targets: targets, Candidates: candidates,
 		})
 	}
-	e.NoDelivery = &operatorread.OperatorNoDelivery{Reason: settlement.Reason().Code(), Plans: plans}
-	return nil
+	return plans
 }
 
 func (r *ObservabilityPostgres) loadOperatorEventDeadLetters(ctx context.Context, tx *sql.Tx, eventID string) ([]operatorread.OperatorDeadLetterRecord, error) {

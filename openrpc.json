@@ -19917,6 +19917,13 @@
       "EventFull": {
         "additionalProperties": false,
         "properties": {
+          "connect_plans": {
+            "description": "Recorded evaluations, not executable plans. Present only in event.get for an event with deliveries and a stored connect evaluation ledger; an empty stored ledger is an empty array. Omitted by event.list and event.subscribe.\n",
+            "items": {
+              "$ref": "#/components/schemas/EventConnectPlanEvaluation"
+            },
+            "type": "array"
+          },
           "created_at": {
             "$ref": "#/components/schemas/Timestamp"
           },

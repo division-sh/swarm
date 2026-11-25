@@ -202,7 +202,7 @@ func (s *ObservabilitySQLite) loadOperatorEvent(ctx context.Context, tx *sql.Tx,
 	if err != nil {
 		return operatorread.OperatorEventFull{}, err
 	}
-	return assembleOperatorEvent(decoded, settlement, deliveries, deadLetters)
+	return assembleOperatorEventDetail(decoded, settlement, deliveries, deadLetters)
 }
 
 func (s *ObservabilitySQLite) ListOperatorRuntimeLogs(ctx context.Context, opts operatorread.OperatorRuntimeLogListOptions) (operatorread.OperatorRuntimeLogListResult, error) {

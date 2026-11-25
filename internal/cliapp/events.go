@@ -90,6 +90,8 @@ type eventFull struct {
 	Deliveries               []eventDelivery   `json:"deliveries"`
 	NoDelivery               *eventNoDelivery  `json:"no_delivery,omitempty"`
 	DeadLetters              []eventDeadLetter `json:"dead_letters"`
+
+	ConnectPlans []eventConnectPlanEvaluation `json:"-"`
 }
 
 type eventDelivery struct {
@@ -162,7 +164,24 @@ func strictEventJSON(raw []byte, target any) error {
 
 func (e *eventFull) UnmarshalJSON(raw []byte) error {
 	type wire eventFull
-	return strictEventJSON(raw, (*wire)(e))
+	decoded := struct {
+		*wire
+		ConnectPlans json.RawMessage `json:"connect_plans"`
+	}{wire: (*wire)(e)}
+	if err := strictEventJSON(raw, &decoded); err != nil {
+		return err
+	}
+	e.ConnectPlans = nil
+	if decoded.ConnectPlans == nil {
+		return nil
+	}
+	if err := strictEventJSON(decoded.ConnectPlans, &e.ConnectPlans); err != nil {
+		return err
+	}
+	if e.ConnectPlans == nil {
+		return fmt.Errorf("malformed %s: plans is required", "connect_plans")
+	}
+	return nil
 }
 
 func (d *eventDelivery) UnmarshalJSON(raw []byte) error {
@@ -655,6 +674,11 @@ func validateEventFull(prefix string, event eventFull) error {
 			return err
 		}
 	}
+	if event.ConnectPlans != nil {
+		if err := validateEventConnectPlans(prefix+".connect_plans", event.ConnectPlans); err != nil {
+			return err
+		}
+	}
 	if event.DeadLetters == nil {
 		return fmt.Errorf("malformed %s: dead_letters is required", prefix)
 	}
@@ -771,13 +795,17 @@ func validateEventNoDelivery(prefix string, disposition eventNoDelivery) error {
 	if disposition.Plans == nil {
 		return fmt.Errorf("malformed %s: plans is required", prefix)
 	}
+	return validateEventConnectPlans(prefix+".plans", disposition.Plans)
+}
+
+func validateEventConnectPlans(prefix string, plans []eventConnectPlanEvaluation) error {
 	validResolutions := map[string]struct{}{
 		"resolved": {}, "runtime_resolution_required": {}, "resolution_blocker": {}, "no_registration": {},
 	}
 	validOutcomes := map[string]struct{}{"accepted": {}, "pin_mismatch": {}, "path_mismatch": {}}
 	seenPlans := map[string]struct{}{}
-	for index, plan := range disposition.Plans {
-		planPrefix := fmt.Sprintf("%s.plans[%d]", prefix, index)
+	for index, plan := range plans {
+		planPrefix := fmt.Sprintf("%s[%d]", prefix, index)
 		if !validSHA256(plan.PlanSHA256) {
 			return fmt.Errorf("malformed %s: plan_sha256 is invalid", planPrefix)
 		}
@@ -1154,15 +1182,9 @@ func writeEventDetailResult(out io.Writer, event eventFull) {
 	}
 	if event.NoDelivery != nil {
 		writeCLIFieldLine(out, cliDetailField{Key: "no_delivery.reason", Value: event.NoDelivery.Reason})
-		for index, plan := range event.NoDelivery.Plans {
-			prefix := fmt.Sprintf("no_delivery.plans[%d]", index)
-			writeCLIFieldLine(out,
-				cliDetailField{Key: prefix + ".plan_sha256", Value: plan.PlanSHA256},
-				cliDetailField{Key: prefix + ".resolution", Value: plan.Resolution},
-				cliDetailField{Key: prefix + ".targets", Value: fmt.Sprintf("%d", len(plan.Targets))},
-				cliDetailField{Key: prefix + ".candidates", Value: fmt.Sprintf("%d", len(plan.Candidates))},
-			)
-		}
+		writeEventConnectPlans(out, "no_delivery.plans", event.NoDelivery.Plans)
+	} else {
+		writeEventConnectPlans(out, "connect_plans", event.ConnectPlans)
 	}
 	if len(event.DeadLetters) == 0 {
 		fmt.Fprintln(out, "dead_letters: none")
@@ -1171,6 +1193,18 @@ func writeEventDetailResult(out io.Writer, event eventFull) {
 		for _, deadLetter := range event.DeadLetters {
 			writeEventDeadLetterLine(out, "  dead_letter", deadLetter)
 		}
+	}
+}
+
+func writeEventConnectPlans(out io.Writer, prefix string, plans []eventConnectPlanEvaluation) {
+	for index, plan := range plans {
+		key := fmt.Sprintf("%s[%d]", prefix, index)
+		writeCLIFieldLine(out,
+			cliDetailField{Key: key + ".plan_sha256", Value: plan.PlanSHA256},
+			cliDetailField{Key: key + ".resolution", Value: plan.Resolution},
+			cliDetailField{Key: key + ".targets", Value: fmt.Sprintf("%d", len(plan.Targets))},
+			cliDetailField{Key: key + ".candidates", Value: fmt.Sprintf("%d", len(plan.Candidates))},
+		)
 	}
 }
 
