@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/google/uuid"
 )
@@ -157,20 +158,9 @@ func TestOperatorEventReadbackSeparatesConnectTargetsFromDeliveryOwnership(t *te
 				t.Fatal(err)
 			}
 
-			receiver := events.AdmitConnectReceiverIdentity(sha256.Sum256([]byte("review-receiver")))
-			candidate, err := events.NewConnectCandidateEvidence(receiver, events.MustNodeDeliveryRecipient(mustPersistenceRootNode("reviewer")), "review", agentidentity.Plan{}, events.ConnectCandidateAccepted)
-			if err != nil {
-				t.Fatal(err)
-			}
 			target := events.RouteIdentity{FlowID: "review", FlowInstance: "review/one", EntityID: eventtest.UUID("review-one-owner")}
-			plan, err := events.NewConnectPlanEvaluation(events.AdmitConnectPlanIdentity(sha256.Sum256([]byte("review-plan"))), events.ConnectPlanResolved, []events.RouteIdentity{target}, []events.ConnectCandidateEvidence{candidate})
-			if err != nil {
-				t.Fatal(err)
-			}
-			ledger, err := events.NewConnectEvaluationLedger([]events.ConnectPlanEvaluation{plan})
-			if err != nil {
-				t.Fatal(err)
-			}
+			recipient := events.MustNodeDeliveryRecipient(mustPersistenceRootNode("reviewer"))
+			ledger := routeSettlementLedgerFixture(t, recipient, target)
 			settlement, err := events.NewNoDeliverySettlement(events.EventWriteNormalPublication, events.NoDeliveryMatchedNoRecipient, ledger)
 			if err != nil {
 				t.Fatal(err)
@@ -210,6 +200,24 @@ func TestOperatorEventReadbackSeparatesConnectTargetsFromDeliveryOwnership(t *te
 	}
 }
 
+func routeSettlementLedgerFixture(t *testing.T, recipient events.DeliveryRecipient, target events.RouteIdentity) events.ConnectEvaluationLedger {
+	t.Helper()
+	receiver := events.AdmitConnectReceiverIdentity(sha256.Sum256([]byte("review-receiver")))
+	candidate, err := events.NewConnectCandidateEvidence(receiver, recipient, target.FlowID, agentidentity.Plan{}, events.ConnectCandidateAccepted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := events.NewConnectPlanEvaluation(events.AdmitConnectPlanIdentity(sha256.Sum256([]byte("review-plan"))), events.ConnectPlanResolved, []events.RouteIdentity{target}, []events.ConnectCandidateEvidence{candidate})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ledger, err := events.NewConnectEvaluationLedger([]events.ConnectPlanEvaluation{plan})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ledger
+}
+
 func TestOperatorEventListRouteSettlementTotalityParity(t *testing.T) {
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
@@ -220,6 +228,7 @@ func TestOperatorEventListRouteSettlementTotalityParity(t *testing.T) {
 			ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 			base := time.Now().UTC().Truncate(time.Microsecond)
 			delivered := eventtest.ExistingRunRootIngress(uuid.NewString(), "review.delivered", "gateway", "", json.RawMessage(`{}`), 0, runID, events.EventEnvelope{}, base)
+			withPlans := eventtest.ExistingRunRootIngress(uuid.NewString(), "review.with_plans", "gateway", "", json.RawMessage(`{}`), 0, runID, events.EventEnvelope{}, base.Add(3*time.Second))
 			matchedEmpty := eventtest.ExistingRunRootIngress(uuid.NewString(), "review.empty", "gateway", "", json.RawMessage(`{}`), 0, runID, events.EventEnvelope{}, base.Add(time.Second))
 			deliberateEmpty := eventtest.DiagnosticDirect(uuid.NewString(), events.EventTypePlatformRuntimeLog, "runtime", "", json.RawMessage(`{"message":"proof"}`), 0, runID, "", events.EventEnvelope{}, base.Add(2*time.Second))
 			route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(mustPersistenceRootNode("review-finalize")), Target: events.MustExistingEntityTarget(events.RouteIdentity{
@@ -234,8 +243,58 @@ func TestOperatorEventListRouteSettlementTotalityParity(t *testing.T) {
 			if err := commitDiagnosticRuntimeLogFixture(ctx, fixture.store.(diagnosticRuntimeLogFixtureStore), deliberateEmpty); err != nil {
 				t.Fatal(err)
 			}
+			payloadAdmitted, err := bindSemanticEventFixturePayload(withPlans)
+			if err != nil {
+				t.Fatal(err)
+			}
+			admitted, err := events.AdmitForPersistence(payloadAdmitted, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			target := route.Target.Route()
+			ledger := routeSettlementLedgerFixture(t, route.Recipient, target)
+			settlement, err := events.NewDeliverySettlement(events.EventWriteNormalPublication, ledger)
+			if err != nil {
+				t.Fatal(err)
+			}
+			inserted, err := CommitSemanticEventFixtureForTest(ctx, fixture.store, admitted, settlement, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed, nil)
+			if err != nil || !inserted {
+				t.Fatalf("commit event with plans: inserted=%t err=%v", inserted, err)
+			}
 
 			selected := fixture.store.(routeSettlementOperatorStore)
+			readDetail := func(event events.Event) operatorread.OperatorEventFull {
+				t.Helper()
+				full, err := selected.LoadOperatorEvent(ctx, event.ID())
+				if err != nil {
+					t.Fatal(err)
+				}
+				return full
+			}
+			full := readDetail(withPlans)
+			proof := ledger.Plans()[0]
+			expected, err := json.Marshal([]operatorread.OperatorConnectPlanEvaluation{{
+				PlanSHA256: proof.PlanIdentity().String(),
+				Resolution: "resolved",
+				Targets:    []operatorread.OperatorConnectPlanTarget{{FlowID: target.FlowID, FlowInstance: target.FlowInstance, EntityID: target.EntityID}},
+				Candidates: []operatorread.OperatorConnectCandidateEvidence{{
+					ReceiverSHA256: proof.Candidates()[0].Receiver().String(), RecipientKind: "node", RecipientID: route.Recipient.ID(), Path: target.FlowID, Outcome: "accepted",
+				}},
+			}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := routeSettlementPlanJSON(t, full); !bytes.Equal(got, expected) || len(full.Deliveries) != 1 || full.NoDelivery != nil {
+				t.Fatalf("delivered detail: connect_plans=%s, want %s; delivery count=%d no_delivery=%+v", got, expected, len(full.Deliveries), full.NoDelivery)
+			}
+			if got := routeSettlementPlanJSON(t, readDetail(delivered)); string(got) != "[]" {
+				t.Fatalf("recorded empty plans = %s, want []", got)
+			}
+			empty := readDetail(matchedEmpty)
+			if empty.NoDelivery == nil || empty.NoDelivery.Reason != events.NoDeliveryDeclaredConsumerNoPlan.Code() ||
+				empty.NoDelivery.Plans == nil || len(empty.NoDelivery.Plans) != 0 || routeSettlementPlanJSON(t, empty) != nil {
+				t.Fatalf("no-delivery detail changed: %+v", empty)
+			}
 			seen := map[string]operatorread.OperatorEventFull{}
 			cursor := ""
 			for {
@@ -244,6 +303,9 @@ func TestOperatorEventListRouteSettlementTotalityParity(t *testing.T) {
 					t.Fatalf("ListOperatorEvents: %v", err)
 				}
 				for _, event := range page.Events {
+					if routeSettlementPlanJSON(t, event) != nil {
+						t.Fatalf("list leaked detail plans for %s", event.EventID)
+					}
 					seen[event.EventID] = event
 				}
 				if page.NextCursor == "" {
@@ -254,8 +316,8 @@ func TestOperatorEventListRouteSettlementTotalityParity(t *testing.T) {
 				}
 				cursor = page.NextCursor
 			}
-			if len(seen) != 3 {
-				t.Fatalf("paginated events = %#v, want exactly three", seen)
+			if len(seen) != 4 || seen[withPlans.ID()].EventID != withPlans.ID() {
+				t.Fatalf("paginated events = %#v, want exactly four including %s", seen, withPlans.ID())
 			}
 			if got := seen[delivered.ID()]; len(got.Deliveries) != 1 || got.NoDelivery != nil {
 				t.Fatalf("delivered union = %#v", got)
@@ -268,6 +330,19 @@ func TestOperatorEventListRouteSettlementTotalityParity(t *testing.T) {
 			}
 		})
 	}
+}
+
+func routeSettlementPlanJSON(t *testing.T, event operatorread.OperatorEventFull) json.RawMessage {
+	t.Helper()
+	raw, err := json.Marshal(event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &result); err != nil {
+		t.Fatal(err)
+	}
+	return result["connect_plans"]
 }
 
 func assertPersistedNoDeliverySettlement(t *testing.T, ctx context.Context, fixture authorActivityReceiptFixture, eventID string, wantClass events.EventWriteClass) {

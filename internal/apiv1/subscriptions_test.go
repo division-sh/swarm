@@ -309,6 +309,9 @@ func TestHandlerWebSocketEventSubscribeUsesOwnerFilterAndReplay(t *testing.T) {
 	if got := asMap(t, notification.Params.Result)["event_id"]; got != "evt-1" {
 		t.Fatalf("event notification result = %#v, want evt-1", notification.Params.Result)
 	}
+	if _, present := asMap(t, notification.Params.Result)["connect_plans"]; present {
+		t.Fatal("event notification includes detail-only connect_plans")
+	}
 	requireNoWSMessage(t, conn, apiv1WebSocketNoMessageTimeout, "payload-only event notification")
 	if observability.lastEventList.Filter.RunID != "run-1" ||
 		observability.lastEventList.Filter.EntityID != "entity-1" ||

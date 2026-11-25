@@ -210,7 +210,9 @@ type OperatorEventFull struct {
 	Deliveries               []OperatorEventDelivery       `json:"deliveries"`
 	NoDelivery               *OperatorNoDelivery           `json:"no_delivery,omitempty"`
 	DeadLetters              []OperatorDeadLetterRecord    `json:"dead_letters"`
-	event                    events.Event
+
+	ConnectPlans *[]OperatorConnectPlanEvaluation `json:"connect_plans,omitempty"`
+	event        events.Event
 }
 
 type OperatorEventDelivery struct {

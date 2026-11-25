@@ -190,17 +190,31 @@ func TestOperatorObservabilityHandlersExposePersistedReadMethods(t *testing.T) {
 	}
 	if events, _ := asMap(t, list.Result)["events"].([]any); len(events) != 1 {
 		t.Fatalf("event.list events = %#v", asMap(t, list.Result)["events"])
+	} else if _, present := asMap(t, events[0])["connect_plans"]; present {
+		t.Fatal("event.list includes detail-only connect_plans")
 	}
 	if observability.lastEventList.Filter.RunID != "run-1" || observability.lastEventList.Filter.EventName != "scan.requested" || observability.lastEventList.Filter.HasDeadLetter == nil || *observability.lastEventList.Filter.HasDeadLetter {
 		t.Fatalf("event.list filter = %#v", observability.lastEventList.Filter)
 	}
 
+	detail := observability.events["evt-1"]
+	plans := []operatorread.OperatorConnectPlanEvaluation{{
+		PlanSHA256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		Resolution: "no_registration",
+		Targets:    []operatorread.OperatorConnectPlanTarget{},
+		Candidates: []operatorread.OperatorConnectCandidateEvidence{},
+	}}
+	detail.ConnectPlans = &plans
+	observability.events["evt-1"] = detail
 	eventGet := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"event","method":"event.get","params":{"event_id":"evt-1"}}`)
 	if eventGet.Error != nil {
 		t.Fatalf("event.get error = %#v", eventGet.Error)
 	}
 	if got := asMap(t, eventGet.Result)["event_id"]; got != "evt-1" {
 		t.Fatalf("event.get event_id = %#v", got)
+	}
+	if got, _ := asMap(t, eventGet.Result)["connect_plans"].([]any); len(got) != 1 || asMap(t, got[0])["plan_sha256"] != plans[0].PlanSHA256 {
+		t.Fatalf("event.get connect_plans = %#v, want the stored plan", got)
 	}
 
 	bundleHash := "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"

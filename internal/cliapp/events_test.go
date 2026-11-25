@@ -195,6 +195,68 @@ func TestEventViewUsesEventGetV1RPC(t *testing.T) {
 	}
 }
 
+func TestEventViewRendersRecordedConnectPlans(t *testing.T) {
+	planID := strings.Repeat("a", 64)
+	var omittedText string
+	for _, tc := range []struct {
+		name    string
+		raw     string
+		wantErr string
+	}{
+		{name: "omitted"},
+		{name: "recorded_empty", raw: `[]`},
+		{name: "recorded_plan", raw: `[{"plan_sha256":"` + planID + `","resolution":"no_registration","targets":[],"candidates":[]}]`},
+		{name: "null", raw: `null`, wantErr: "plans is required"},
+		{name: "invalid_plan", raw: `[{"plan_sha256":"bad","resolution":"no_registration","targets":[],"candidates":[]}]`, wantErr: "plan_sha256 is invalid"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			setCLIAPITestToken(t, "test-token")
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+					t.Error(err)
+					return
+				}
+				result := validEventObservationEvent("event-1")
+				if tc.raw != "" {
+					result["connect_plans"] = json.RawMessage(tc.raw)
+				}
+				writeJSONRPCResult(t, w, req.ID, result)
+			}))
+			defer server.Close()
+
+			var stdout, stderr bytes.Buffer
+			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"event", "view", "event-1"}, &stdout, &stderr, testRootCommandOptions(server))
+			if tc.wantErr != "" {
+				if code != eventObservationExitRuntime || stdout.Len() != 0 || !strings.Contains(stderr.String(), tc.wantErr) {
+					t.Fatalf("malformed response: code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+				}
+				return
+			}
+			if code != 0 || stderr.Len() != 0 {
+				t.Fatalf("event view: code=%d stderr=%q", code, stderr.String())
+			}
+			switch tc.name {
+			case "omitted":
+				if strings.Contains(stdout.String(), "connect_plans") {
+					t.Fatalf("omitted plans rendered: %q", stdout.String())
+				}
+				omittedText = stdout.String()
+			case "recorded_empty":
+				if stdout.String() != omittedText {
+					t.Fatalf("recorded empty changed text: got %q want %q", stdout.String(), omittedText)
+				}
+			case "recorded_plan":
+				for _, want := range []string{"plan_sha256=" + planID, "resolution=no_registration", "targets=0", "candidates=0"} {
+					if !strings.Contains(stdout.String(), "connect_plans[0]."+want) {
+						t.Fatalf("missing plan member %q: %q", want, stdout.String())
+					}
+				}
+			}
+		})
+	}
+}
+
 func TestEventReplayUsesEventReplayV1RPCWithSubscribersAndIdempotencyKey(t *testing.T) {
 	setCLIAPITestToken(t, "test-token")
 	var captured jsonRPCRequest
