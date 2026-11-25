@@ -24170,6 +24170,25 @@
           "task_id": {
             "type": "string"
           },
+          "token_cost_estimate": {
+            "additionalProperties": false,
+            "description": "Detail-only estimate from published rates for the retained model and covered token terms.\nThis is not total billed cost or a historical tariff guarantee. The rate version is the table\nused at read time. If the model, evidence, usage or a term is not covered, the estimate is absent.\n",
+            "properties": {
+              "rate_version": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "usd": {
+                "minimum": 0,
+                "type": "number"
+              }
+            },
+            "required": [
+              "usd",
+              "rate_version"
+            ],
+            "type": "object"
+          },
           "tokens": {
             "$ref": "#/components/schemas/ConversationTokenUsage"
           },

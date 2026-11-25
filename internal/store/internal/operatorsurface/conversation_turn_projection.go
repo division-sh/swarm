@@ -455,6 +455,7 @@ func (s conversationProjection) loadOperatorConversationTurn(ctx context.Context
 	if err != nil {
 		return operatorread.OperatorPublicConversationTurnDetail{}, err
 	}
+	turn.TokenCostEstimate = projectConversationTokenCost(turn)
 	return operatorread.OperatorPublicConversationTurnDetail{Session: summary, Turn: turn, Frame: frame, ProviderRendering: &rendering}, nil
 }
 

@@ -93,6 +93,13 @@ type OperatorPublicConversationTurn struct {
 	AgentID                string                            `json:"-"`
 	SessionID              string                            `json:"-"`
 	RunID                  string                            `json:"-"`
+
+	TokenCostEstimate *OperatorTokenCostEstimate `json:"token_cost_estimate,omitempty"`
+}
+
+type OperatorTokenCostEstimate struct {
+	USD         float64 `json:"usd"`
+	RateVersion string  `json:"rate_version"`
 }
 
 type OperatorPublicConversationTurnDetail struct {

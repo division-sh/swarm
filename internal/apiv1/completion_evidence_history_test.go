@@ -2,6 +2,7 @@ package apiv1
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"reflect"
@@ -77,6 +78,103 @@ func TestCompletion2270SubNanodollarPublicHistoryBothStores(t *testing.T) {
 			}
 			for _, owner := range []completion2270PublicStore{selected, reopen()} {
 				proveCompletion2270FrozenPublicHistory(t, owner, identity, sessionID, turnID, frameHash, want, charged)
+			}
+		})
+	}
+}
+
+func TestConversationTurnTokenCostEstimateBothStores(t *testing.T) {
+	const version = "anthropic-standard-2026-11-09"
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			selected, reopen := completion2270HistoryStore(t, backend)
+			ctx := originalAPIFixtureContext(t, context.Background(), selected)
+			ctx = apiTestOriginalProcessContext(t, ctx, selected)
+			runID, sessionID := uuid.NewString(), uuid.NewString()
+			identity := sqliteAgentUsageIdentityForRun(t, runID, "token-cost")
+			storetest.RequireRun(t, ctx, selected, storetest.RunFixture{RunID: runID, Origin: storetest.ScenarioSetupOrigin()})
+			storetest.RequireStaticAgentFixture(t, ctx, selected, manager.PersistedAgent{
+				Config: withAPITestIntent(t, actors.AgentConfig{Identity: identity, ID: identity.AgentID(), Role: "researcher", Type: "managed", Model: "regular",
+					ExecutionMode: "live", ResolvedLLMBackend: "anthropic", FlowPath: identity.FlowInstance()}),
+				Status: "active", StartedAt: time.Now().UTC(),
+			})
+			input, output := int64(2300), int64(2000)
+			at := time.Now().UTC()
+			type fixtureTurn struct {
+				model, id    string
+				charge, want float64
+				evidence     effects.CompletionEvidence
+			}
+			fixtures := []fixtureTurn{
+				{model: "claude-3-5-sonnet", id: uuid.NewString(), charge: 0.0369, want: -1},
+				{model: "claude-haiku-4-5-20251001", id: uuid.NewString(), charge: 0.00984, want: 0.0123},
+			}
+			for i := range fixtures {
+				f := &fixtures[i]
+				f.evidence = effects.CompletionEvidence{
+					Request: effects.CompletionRequest{ModelAlias: "regular", RequestedModel: f.model, BackendProfile: "anthropic", Provider: "anthropic", Transport: "api"},
+					Models:  []effects.CompletionModelObservation{{Model: f.model, Source: effects.CompletionModelResponse}}, CostProvenance: effects.CompletionCostEstimated,
+				}.Canonical()
+				usage := effects.CompletionUsage{Evidence: f.evidence, ResolvedModel: f.model, Exactness: effects.CompletionUsageExact, InputTokens: &input, OutputTokens: &output}
+				when := at.Add(time.Duration(i) * time.Second)
+				event := eventtest.ExistingRunRootIngress(uuid.NewString(), "completion.history", "token-cost", "", []byte(`{}`), 0, runID, events.EventEnvelope{Scope: events.EventScopeGlobal}, when)
+				storetest.CommitSemanticEventWithRoutes(t, ctx, selected, event, nil, "subscribed")
+				storetest.PersistManagedAgentTurnFixture(t, ctx, storetest.ManagedAgentTurnFixture{Store: selected, Selected: selected, Identity: identity,
+					RunID: runID, SessionID: sessionID, TurnID: f.id, Event: storetest.LoadCanonicalEventRecord(t, ctx, selected, event.ID()),
+					Adapter: "anthropic_api", RequestedModel: f.model, Usage: &usage, CostUSD: f.charge, ParseOK: true, CreatedAt: when})
+			}
+			before, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, selected)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var priorUsage operatorread.OperatorAgentUsage
+			for i, owner := range []completion2270PublicStore{selected, reopen()} {
+				handler := testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: OperatorAgentConversationHandlers(AgentConversationHandlerOptions{Agents: owner, Conversations: owner, Usage: owner})})
+				for _, f := range fixtures {
+					response := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"conversation.get_turn","params":{"session_id":%q,"turn_id":%q}}`, sessionID, f.id))
+					var detail operatorread.OperatorPublicConversationTurnDetail
+					decodeCompletion2270RPC(t, response, &detail)
+					if detail.Turn.Tokens == nil || *detail.Turn.Tokens != (operatorread.OperatorConversationTokenUsage{Input: input, Output: output, Exactness: "exact"}) ||
+						!reflect.DeepEqual(detail.Turn.CompletionEvidence, f.evidence) {
+						t.Fatalf("detail changed the retained facts: %+v", detail.Turn)
+					}
+					estimate, present := asMap(t, asMap(t, response.Result)["turn"])["token_cost_estimate"]
+					if f.want < 0 && present || f.want >= 0 && (!present || !reflect.DeepEqual(estimate, map[string]any{"usd": f.want, "rate_version": version})) {
+						t.Fatalf("detail estimate for %s: %v, present=%v, want %v", f.model, estimate, present, f.want)
+					}
+				}
+				list := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":2,"method":"conversation.list_turns","params":{"session_id":%q,"limit":2}}`, sessionID))
+				rows, ok := asMap(t, list.Result)["turns"].([]any)
+				if !ok || len(rows) != len(fixtures) {
+					t.Fatalf("list: %+v", list)
+				}
+				for _, raw := range rows {
+					if _, present := asMap(t, raw)["token_cost_estimate"]; present {
+						t.Fatal("list included the detail-only estimate")
+					}
+				}
+				latest, err := owner.(interface {
+					LoadLatestPublicConversationTurn(context.Context, string) (*operatorread.OperatorPublicConversationTurn, error)
+				}).LoadLatestPublicConversationTurn(ctx, sessionID)
+				if err != nil || latest == nil || latest.TurnID != fixtures[1].id {
+					t.Fatalf("latest changed: %+v, %v", latest, err)
+				}
+				raw, err := json.Marshal(latest)
+				var latestFields map[string]json.RawMessage
+				if err != nil || json.Unmarshal(raw, &latestFields) != nil || latestFields["token_cost_estimate"] != nil {
+					t.Fatalf("latest leaked the detail estimate: %s, %v", raw, err)
+				}
+				var usage operatorread.OperatorAgentUsage
+				decodeCompletion2270RPC(t, rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":3,"method":"agent.usage","params":{"run_id":%q,"agent_id":%q}}`, runID, identity.AgentID())), &usage)
+				if usage.Usage.Exact.LedgerEntries != 2 || usage.Usage.Exact.InputTokens != 2*input || usage.Usage.Exact.OutputTokens != 2*output ||
+					usage.Usage.Exact.EstimatedCostUSD < 0.046739 || usage.Usage.Exact.EstimatedCostUSD > 0.046741 || (i > 0 && !reflect.DeepEqual(usage, priorUsage)) {
+					t.Fatalf("usage changed or used the detail estimate: %+v", usage)
+				}
+				priorUsage = usage
+			}
+			after, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, selected)
+			if err != nil || !reflect.DeepEqual(before, after) {
+				t.Fatalf("price projection mutated native storage: %v", err)
 			}
 		})
 	}
