@@ -94,14 +94,11 @@ func InspectServeCheckStage(ctx context.Context, in ServeCheckStageRequest) (out
 	backend, inspection, workspaceOK := inspectServeSourceAdmission(ctx, in, &out, preference)
 	intent := in.Options
 	intent.MCPListenAddr = WorkspaceMCPListenAddr(intent.MCPListenAddr, intent.MCPListenAddrSource, backend)
-	_, enabled, err := ResolveServePublicIngressMode(intent, in.Config.Config.Serve.PublicWebhook)
+	listenerIntent, err := serveCheckListenerIntent(intent, in.Config.Config.Serve.PublicWebhook)
 	if err != nil {
 		return out, errors.Join(retErr, err)
 	}
-	if !enabled {
-		intent.PublicWebhookListen = ""
-	}
-	inspectVerifyListeners(ctx, in.Repo, in.Config, &out.Validation, intent)
+	inspectVerifyListeners(ctx, in.Repo, in.Config, &out.Validation, listenerIntent)
 	inspectVerifyWorkspaceDependencies(ctx, in.Config, backend, workspaceOK, &out.Validation)
 	inspectVerifyPublicIngress(ctx, in.Config, &out.Validation, "source:"+out.Validation.BootReport.SourceArtifactHash, intent)
 	var retained *verifyRetainedAdmissionInventory
@@ -167,6 +164,19 @@ func InspectServeCheckStage(ctx context.Context, in ServeCheckStageRequest) (out
 	})
 	out.Validation.BootReport.Sort()
 	return out, ctx.Err()
+}
+
+func serveCheckListenerIntent(intent ServeOptions, webhook *config.PublicWebhookConfig) (ServeOptions, error) {
+	mode, enabled, err := ResolveServePublicIngressMode(intent, webhook)
+	if err != nil {
+		return intent, err
+	}
+	if !enabled {
+		intent.PublicWebhookListen = ""
+	} else if mode == publicingress.ModeNativeTLS {
+		_, intent.PublicWebhookListen, err = publicingress.NativeTLSAddresses(webhook)
+	}
+	return intent, err
 }
 
 func (r *ServeCheckStageResult) recordCompletionFailure(ctx context.Context, subject string, err error) error {
