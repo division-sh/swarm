@@ -31,6 +31,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	runtimepublicingress "github.com/division-sh/swarm/internal/runtime/publicingress"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/devscratch"
@@ -159,6 +160,10 @@ func runOwnedLifecycle(ctx context.Context, root, retainedRoot string, opts clia
 }
 
 func runOwnedLifecycleWithStopClock(ctx context.Context, root, retainedRoot string, opts cliapp.ServeOptions, auth apiv1.AuthTokenResolution, posture executionposture.Posture, storedHash string, clock serveStopClock, providerStore ...func(runtimecredentials.Store) runtimecredentials.Store) (int, error) {
+	return runOwnedLifecycleWithFlowReconciler(ctx, root, retainedRoot, opts, auth, posture, storedHash, clock, reconcileServeFlowRuns, providerStore...)
+}
+
+func runOwnedLifecycleWithFlowReconciler(ctx context.Context, root, retainedRoot string, opts cliapp.ServeOptions, auth apiv1.AuthTokenResolution, posture executionposture.Posture, storedHash string, clock serveStopClock, reconcile func(context.Context, runtimerunlifecycle.FlowRunOwner, []serveRuntimeBundleContext) error, providerStore ...func(runtimecredentials.Store) runtimecredentials.Store) (int, error) {
 	if storedHash != "" && (opts.SourceRoot != "" || opts.Dev) {
 		return 1, errors.New("retained artifact proof requires one exact stored hash, no directory or dev scratch")
 	}
@@ -290,7 +295,7 @@ func runOwnedLifecycleWithStopClock(ctx context.Context, root, retainedRoot stri
 		stopEvidence := startOwnedLifecycleEvidence(presenter, opts.ErrorOutput)
 		defer stopEvidence()
 	}
-	code := buildRuntimeComposition(ctx, runtimeCompositionRequest{
+	code := buildRuntimeHost(ctx, runtimeCompositionRequest{
 		Purpose: posture, ProviderIngress: true,
 		PublicIngressMode: publicMode, PublicIngressEnabled: publicEnabled,
 		AdmittedBundle: admitted,
@@ -304,7 +309,7 @@ func runOwnedLifecycleWithStopClock(ctx context.Context, root, retainedRoot stri
 		StopClock:     clock,
 		BootStartedAt: time.Now().UTC(), RuntimeInstanceID: runtimeID,
 		DataProjectionRoot: filepath.Join(swarmDir.Path, "lifecycle-data-projections"),
-	})
+	}, reconcile)
 	return code, nil
 }
 
