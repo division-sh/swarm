@@ -316,6 +316,9 @@ func TestSelectedForkCrashProcessHelper(t *testing.T) {
 	}
 	result, err := ExecuteSelectedContractRunFork(ctx, request)
 	if err != nil {
+		if backend == "postgres" && cut == "retained_armed_join_after_activation" && os.Getenv(armedArrivalPreparationEnv) == "" {
+			logForkProcessCapabilityOnFailure(t, capability)
+		}
 		t.Fatal(err)
 	}
 	if cut == "retained_event_committed" || cut == "retained_timer_occurrence_committed" || cut == "retained_join_event_committed" || cut == "retained_armed_join_occurrence_committed" {

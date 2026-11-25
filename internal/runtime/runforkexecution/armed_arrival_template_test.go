@@ -154,6 +154,7 @@ func TestIssue642ArmedTemplateArrivalTimeoutContinuesExactDeliveryBothStores(t *
 				AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: owner.ports.contexts.capability},
 			})
 			if err != nil || !result.Activation.Activated {
+				logForkProcessCapabilityOnFailure(t, owner.ports.contexts.capability)
 				t.Fatalf("selected armed template arrival activation must succeed: %+v err=%v", result, err)
 			}
 			child := result.Materialization.ForkRunID
