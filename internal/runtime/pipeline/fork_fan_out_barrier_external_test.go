@@ -195,6 +195,16 @@ func TestIssue642FanOutBarrierFrontierBothStores(t *testing.T) {
 				}
 				result, err := family.Execute(phase, forkEngineLiveRequest(t, rt, selected, executionRequest))
 				if err != nil || !result.Activation.Activated || result.ForkLocalRuntimeContainer == nil {
+					if backend == "postgres" && retained == fanoutobligation.InheritedDeadLettered {
+						readAt := time.Now().UTC().Format(time.RFC3339Nano)
+						select {
+						case <-capability.Done():
+							terminal, available := capability.TerminalResult()
+							t.Logf("the capability's terminal state as read by the test: read_at=%s done_closed=true terminal_result=%+v terminal_result_available=%t; Done also closes on a clean release; read_at is when the test looked", readAt, terminal, available)
+						default:
+							t.Logf("the capability's terminal state as read by the test: read_at=%s done_closed=false; Done also closes on a clean release; read_at is when the test looked", readAt)
+						}
+					}
 					t.Fatalf("barrier child did not acknowledge activation: %+v err=%v", result, err)
 				}
 				proof := result.ForkLocalRuntimeContainer

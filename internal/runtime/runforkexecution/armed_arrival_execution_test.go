@@ -243,6 +243,18 @@ func seedArmedArrivalSource(t *testing.T, ctx context.Context, selected any, own
 	return marker.ID(), source, join
 }
 
+func logForkProcessCapabilityOnFailure(t *testing.T, capability startupownership.ProcessCapability) {
+	t.Helper()
+	readAt := time.Now().UTC().Format(time.RFC3339Nano)
+	select {
+	case <-capability.Done():
+		terminal, available := capability.TerminalResult()
+		t.Logf("the capability's terminal state as read by the test: read_at=%s done_closed=true terminal_result=%+v terminal_result_available=%t; Done also closes on a clean release; read_at is when the test looked", readAt, terminal, available)
+	default:
+		t.Logf("the capability's terminal state as read by the test: read_at=%s done_closed=false; Done also closes on a clean release; read_at is when the test looked", readAt)
+	}
+}
+
 func TestIssue642ArmedArrivalTimeoutContinuesExactDeliveryBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
@@ -325,6 +337,7 @@ func TestIssue642ArmedArrivalTimeoutContinuesExactDeliveryBothStores(t *testing.
 			})
 			// The source callback is held; only the selected child may fire this arm.
 			if err != nil || !result.Activation.Activated {
+				logForkProcessCapabilityOnFailure(t, owner.ports.contexts.capability)
 				t.Fatalf("selected armed arrival activation must succeed: %+v err=%v", result, err)
 			}
 			child := result.Materialization.ForkRunID
