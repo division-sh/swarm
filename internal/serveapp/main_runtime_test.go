@@ -801,6 +801,7 @@ func TestRunServeRuntimeEventPublishExistingRunActiveLoadServedPathDefaultSQLite
 }
 
 func TestRunServeRuntimeEventPublishExistingRunActiveLoadServedPathPostgres(t *testing.T) {
+	setDoctorProviderSecret(t, "ANTHROPIC_API_KEY", "active-load-provider-fixture")
 	useDeclaredServePostgresTarget(t)
 	_, db, _ := installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
@@ -980,6 +981,7 @@ type servedSessionCleanupProof struct {
 
 func startServedSessionCleanupProof(t *testing.T) servedSessionCleanupProof {
 	t.Helper()
+	setDoctorProviderSecret(t, "ANTHROPIC_API_KEY", "session-cleanup-provider-fixture")
 	useDeclaredServePostgresTarget(t)
 	_, db, pg := installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
@@ -1579,9 +1581,7 @@ func runServedRunForkBackendProof(t *testing.T, backend servedparity.Backend) {
 
 func runServedLiveAgentEventReplayBackendProof(t *testing.T, backend servedparity.Backend) {
 	t.Helper()
-	if backend == servedparity.BackendDefaultSQLite {
-		setDoctorProviderSecret(t, "ANTHROPIC_API_KEY", "agent-replay-provider-fixture")
-	}
+	setDoctorProviderSecret(t, "ANTHROPIC_API_KEY", "agent-replay-provider-fixture")
 	if backend == servedparity.BackendExplicitPostgres {
 		useDeclaredServePostgresTarget(t)
 	}
@@ -1591,9 +1591,7 @@ func runServedLiveAgentEventReplayBackendProof(t *testing.T, backend servedparit
 
 func runServedAgentRestartBackendProof(t *testing.T, backend servedparity.Backend) {
 	t.Helper()
-	if backend == servedparity.BackendDefaultSQLite {
-		setDoctorProviderSecret(t, "ANTHROPIC_API_KEY", "agent-restart-provider-fixture")
-	}
+	setDoctorProviderSecret(t, "ANTHROPIC_API_KEY", "agent-restart-provider-fixture")
 	if backend == servedparity.BackendExplicitPostgres {
 		useDeclaredServePostgresTarget(t)
 	}
@@ -1603,9 +1601,7 @@ func runServedAgentRestartBackendProof(t *testing.T, backend servedparity.Backen
 
 func runServedAgentDirectiveBackendProof(t *testing.T, backend servedparity.Backend) {
 	t.Helper()
-	if backend == servedparity.BackendDefaultSQLite {
-		setDoctorProviderSecret(t, "ANTHROPIC_API_KEY", "directive-provider-fixture")
-	}
+	setDoctorProviderSecret(t, "ANTHROPIC_API_KEY", "directive-provider-fixture")
 	if backend == servedparity.BackendExplicitPostgres {
 		useDeclaredServePostgresTarget(t)
 	}
