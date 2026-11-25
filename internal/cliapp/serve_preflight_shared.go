@@ -20,6 +20,13 @@ func ListenServeHTTPListenerInContext(ctx context.Context, name, addr string) (n
 	if err := ValidateServeListenAddr("--"+name+"-listen-addr", addr); err != nil {
 		return nil, err
 	}
+	return bindServeHTTPListener(ctx, name, addr)
+}
+
+func bindServeHTTPListener(ctx context.Context, name, addr string) (net.Listener, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	var listen net.ListenConfig
 	listener, err := listen.Listen(ctx, "tcp", addr)
 	if err != nil {
