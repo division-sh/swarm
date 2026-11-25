@@ -101,6 +101,12 @@ func (r *verifyCountedPackResolver) CurrentPlatformPackBase() (*packartifact.Pla
 	return r.PlatformPackBaseResolver.CurrentPlatformPackBase()
 }
 
+type verifyReportPackResolver func() (*packartifact.PlatformPackInventory, error)
+
+func (resolve verifyReportPackResolver) CurrentPlatformPackBase() (*packartifact.PlatformPackInventory, error) {
+	return resolve()
+}
+
 func (r verifyPackGenerationArtifactReader) LoadRunBundleAvailability(context.Context, string) (runbundle.Availability, error) {
 	return r.availability, nil
 }
@@ -233,14 +239,18 @@ func TestVerifyRetainedSourceConsumerSharesFrozenConfiguredPackGeneration(t *tes
 
 func verifyRetainedReportCells(t *testing.T, bases packartifact.PlatformPackBaseResolver) {
 	t.Helper()
-	rooted := func(state, directory string) sourceartifact.RootedSource {
+	rooted := func(state, directory string, agents ...string) sourceartifact.RootedSource {
 		t.Helper()
-		artifact, err := sourceartifact.AdmitMembers(map[string][]byte{
+		members := map[string][]byte{
 			"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
 			"schema.yaml":   []byte("stages: []\n"),
 			"types.yaml":    []byte("Profile:\n  name: text\n"),
 			"state.yaml":    []byte(state),
-		})
+		}
+		if len(agents) != 0 {
+			members["agents.yaml"] = []byte(agents[0])
+		}
+		artifact, err := sourceartifact.AdmitMembers(members)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -254,13 +264,38 @@ func verifyRetainedReportCells(t *testing.T, bases packartifact.PlatformPackBase
 	invalid := rooted("x: \"text\"\n", "quoted")
 	invalidRecord := rooted("x: 'Profile'\n", "record")
 	otherRoot, _ := sourceartifactfixture.Rooted(t, "other", valid.Artifact())
-	for _, name := range []string{"mixed_active", "same_source_runs", "different_roots", "missing_source", "corrupt_source", "crossed_root", "cancel_before", "cancel_after", "missing_generation"} {
+	postPackRefusal := rooted("x: text\n", "missing-data", "worker:\n  role: worker\n  intent: {inline: Read static data.}\n  flow_data_access: [missing.md]\n")
+	t.Run("exact_compile_inputs", func(t *testing.T) {
+		verdicts := make(verifyRetainedCompileVerdicts)
+		sameBase, err := bases.CurrentPlatformPackBase()
+		if err != nil {
+			t.Fatal(err)
+		}
+		anotherBase := packfixture.EmbeddedBase(t)
+		resolveAnother := verifyReportPackResolver(func() (*packartifact.PlatformPackInventory, error) { return anotherBase, nil })
+		for _, source := range []sourceartifact.RootedSource{valid, otherRoot, rooted("y: text\n", "kept")} {
+			if err := verdicts.compile(context.Background(), RepoRoot(), source, bases); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := verdicts.compile(context.Background(), RepoRoot(), valid, resolveAnother); err != nil {
+			t.Fatal(err)
+		}
+		key := verifyRetainedCompileInput{valid.Admission().Reference(), string(valid.Artifact().LogicalBlob())}
+		_, first := verdicts[key][sameBase]
+		_, second := verdicts[key][anotherBase]
+		if len(verdicts) != 3 || len(verdicts[key]) != 2 || !first || !second {
+			t.Fatal("different root, bytes or immutable pack selection reused a verdict")
+		}
+	})
+	for _, name := range []string{"mixed_active", "same_source_runs", "same_source_refusal", "early_refusal", "cancel_hit", "resolver_error", "unreadable_hit", "different_roots", "missing_source", "corrupt_source", "crossed_root", "cancel_before", "cancel_after", "missing_generation"} {
 		t.Run(name, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			reader := &verifyRetainedReportReader{}
 			want := map[string]bootverify.AdmissionObservationStatus{}
 			resolver := bases
+			unavailable := errors.New("pack generation unavailable during retained inspection")
 			switch name {
 			case "mixed_active":
 				want[reader.add(t, "running", invalid)] = bootverify.AdmissionFailed
@@ -269,6 +304,32 @@ func verifyRetainedReportCells(t *testing.T, bases packartifact.PlatformPackBase
 			case "same_source_runs":
 				want[reader.add(t, "running", valid)] = bootverify.AdmissionPassed
 				want[reader.add(t, "paused", valid)] = bootverify.AdmissionPassed
+			case "same_source_refusal", "cancel_hit", "resolver_error":
+				want[reader.add(t, "running", postPackRefusal)] = bootverify.AdmissionFailed
+				second := reader.add(t, "paused", postPackRefusal)
+				want[second] = bootverify.AdmissionFailed
+				if name != "same_source_refusal" {
+					if name == "cancel_hit" {
+						want[second] = bootverify.AdmissionUnavailable
+					}
+					resolver = verifyReportPackResolver(func() (*packartifact.PlatformPackInventory, error) {
+						if reader.reads == 2 {
+							if name == "resolver_error" {
+								return nil, unavailable
+							}
+							cancel()
+						}
+						return bases.CurrentPlatformPackBase()
+					})
+				}
+			case "early_refusal":
+				want[reader.add(t, "running", invalid)] = bootverify.AdmissionFailed
+				want[reader.add(t, "paused", invalid)] = bootverify.AdmissionFailed
+			case "unreadable_hit":
+				want[reader.add(t, "running", valid)] = bootverify.AdmissionPassed
+				second := reader.add(t, "paused", valid)
+				want[second] = bootverify.AdmissionNotRun
+				delete(reader.roots, second)
 			case "different_roots":
 				first := reader.add(t, "running", valid)
 				second := reader.add(t, "paused", otherRoot)
@@ -323,8 +384,34 @@ func verifyRetainedReportCells(t *testing.T, bases packartifact.PlatformPackBase
 				if observation.Status == bootverify.AdmissionNotRun && observation.FailureClass != failures.ClassDependencyUnavailable {
 					t.Fatalf("unchecked source was nonblocking: %+v", observation)
 				}
-				if observation.Status == bootverify.AdmissionFailed && (!strings.Contains(observation.Reason, "remove the quotes") || !strings.Contains(observation.Reason, "state.yaml")) {
+				if observation.Status == bootverify.AdmissionFailed && name != "same_source_refusal" && name != "cancel_hit" && name != "resolver_error" &&
+					(!strings.Contains(observation.Reason, "remove the quotes") || !strings.Contains(observation.Reason, "state.yaml")) {
 					t.Fatalf("compiler refusal lost original location/teaching: %+v", observation)
+				}
+			}
+			switch name {
+			case "same_source_refusal", "early_refusal", "cancel_hit", "resolver_error":
+				first, second := report.BootReport.Observations[1], report.BootReport.Observations[2]
+				if name != "early_refusal" && !strings.Contains(first.Reason, "missing.md") {
+					t.Fatalf("expected real post-pack static-data refusal: %+v", first)
+				}
+				switch name {
+				case "same_source_refusal":
+					if first.Cause != second.Cause || first.Reason != second.Reason || reader.reads != 2 {
+						t.Fatal("equal inputs did not reuse the real refusal for both observed runs")
+					}
+				case "early_refusal":
+					if first.Cause == second.Cause {
+						t.Fatal("early refusal reused without having resolved its pack input")
+					}
+				case "cancel_hit":
+					if !errors.Is(second.Cause, context.Canceled) || errors.Is(second.Cause, first.Cause) || !strings.Contains(second.Reason, "missing.md") {
+						t.Fatalf("cancellation reused a verdict or lost the original compiler refusal: %+v", second)
+					}
+				case "resolver_error":
+					if !errors.Is(second.Cause, unavailable) || errors.Is(second.Cause, first.Cause) {
+						t.Fatalf("resolver refusal reused the earlier compiler verdict: %+v", second)
+					}
 				}
 			}
 			decision := report.BootReport.AdmissionDecision(bootverify.AdmissionFindingPolicy{})
