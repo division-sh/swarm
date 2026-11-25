@@ -19,7 +19,7 @@ func debtReviewedNativeSelectedImport(path, alias string, file *ast.File) bool {
 	case "internal/runtime/pipeline/fork_fan_out_crash_external_test.go":
 		pins = map[string]string{"TestIssue642MixedFanOutCrashRestartBothStores": "b451555fab08deea56a83f724f7cf0077d78821eee240d253b6568e93a2e19f0"}
 	case "internal/runtime/pipeline/fork_fan_out_refork_external_test.go":
-		pins = map[string]string{"proveMixedFanOutChildRefork": "ee5d1ddc90f8d518bd58a34dfa1ebd0462ac0f8b969c9e28167877e18d53dbe9"}
+		pins = map[string]string{"proveMixedFanOutChildRefork": "bd4b3c2d792ae7bf49a883af009a6a44f5d4faeb2307b0c2a93c44337fa1d530"}
 	case "internal/runtime/pipeline/fork_published_barrier_crash_external_test.go":
 		pins = map[string]string{
 			"publishBarrierCrashCheckpoint":       "3e68bccee6ade3f449a47c7b4fe147082dc2e03f1afb3a1366d852381ddd2fc0",
@@ -57,13 +57,13 @@ func debtReviewedNativeSelectedImport(path, alias string, file *ast.File) bool {
 		if digest != pins[fn.Name.Name] && !(path == "internal/runtime/pipeline/fork_fan_out_crash_external_test.go" &&
 			fn.Name.Name == "TestIssue642MixedFanOutCrashRestartBothStores" &&
 			(digest == "c183201c71250e318f7729b79a03aff654808fdadfd25e7597daa6220f782646" ||
-				digest == "4849633c665d959004143ed4397f35e0c90ac3cb5152137d95408ae3a6778c74")) &&
+				digest == "8be66c2ad6ed9bfce1730f19459bd332fb4259e290dcb0db7ad987e97e499d4f")) &&
 			!(path == "internal/runtime/pipeline/fork_published_barrier_failure_external_test.go" &&
 				fn.Name.Name == "verifyPublishedBarrierCompletionFailure" &&
-				digest == "b90175cd26c9c8019b43ccb0705a8a27e5e26bbb28f26e711fd7724715ee22aa") &&
+				digest == "137b7ff3b434f4113cbdc96a50cc147e862fcd3759ca619bdaef7f317b70d921") &&
 			!(path == "internal/runtime/pipeline/fork_published_barrier_crash_external_test.go" &&
 				fn.Name.Name == "verifyBarrierCrashRestartBothStores" &&
-				digest == "b50acc5f065717e346be2c4c1b31ec536ca2d9040d2a3129cbc353bc3daa99f0") {
+				digest == "e341243fef59ac40e8b0cd13c75deb91a3ff0f27e83ac2a7d784f1dca3735ebc") {
 			return false
 		}
 		seen[fn.Name.Name] = true
