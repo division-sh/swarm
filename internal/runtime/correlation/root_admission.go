@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 )
 
@@ -15,7 +16,7 @@ func WithRootAdmission(ctx context.Context, admission sourceartifact.RootAdmissi
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return context.WithValue(ctx, rootAdmissionContextKey{}, admission)
+	return forkcancelcapture.WithValue(ctx, rootAdmissionContextKey{}, admission)
 }
 
 // CarryRootAdmission copies the existing fact without interpreting it. In

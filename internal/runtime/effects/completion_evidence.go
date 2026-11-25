@@ -12,13 +12,14 @@ import (
 	"unicode/utf8"
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 )
 
 type completionRequestContextKey struct{}
 
 func WithCompletionRequest(ctx context.Context, request CompletionRequest) context.Context {
-	return context.WithValue(ctx, completionRequestContextKey{}, request)
+	return forkcancelcapture.WithValue(ctx, completionRequestContextKey{}, request)
 }
 
 // BindCompletionRequest freezes the authoritative frame or explicit fork request.

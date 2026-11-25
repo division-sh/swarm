@@ -8,6 +8,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -259,7 +260,7 @@ func withAPIEventPublicationAdmission(ctx context.Context, admission apiEventPub
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return context.WithValue(ctx, apiEventPublicationAdmissionContextKey{}, admission)
+	return forkcancelcapture.WithValue(ctx, apiEventPublicationAdmissionContextKey{}, admission)
 }
 
 func apiEventPublicationAdmissionFromContext(ctx context.Context) (apiEventPublicationAdmission, bool) {
@@ -310,7 +311,7 @@ func withPublicInputAdmission(ctx context.Context, admission publicInputAdmissio
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return context.WithValue(ctx, publicInputAdmissionContextKey{}, admission)
+	return forkcancelcapture.WithValue(ctx, publicInputAdmissionContextKey{}, admission)
 }
 
 func publicInputAdmissionFromContext(ctx context.Context) (publicInputAdmission, bool) {

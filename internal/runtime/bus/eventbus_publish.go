@@ -30,6 +30,7 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
@@ -127,7 +128,7 @@ func dispatchMetadataReadContext(ctx context.Context) context.Context {
 	if _, owned := runtimeWorkAdmissionFromContext(ctx); owned {
 		// The accepted lease joins only these metadata reads. Neither a late
 		// result nor the SQL context grants uncancellable receiver execution.
-		return context.WithoutCancel(ctx)
+		return forkcancelcapture.WithoutCancel(ctx)
 	}
 	return ctx
 }
@@ -512,7 +513,7 @@ func (eb *EventBus) commitPublish(ctx context.Context, plan eventBusCommitPublis
 func publicationHandoffContext(ctx context.Context, commitErr error) context.Context {
 	if commitErr != nil {
 		// A committed publication still owns its local handoff after request cancellation.
-		return context.WithoutCancel(ctx)
+		return forkcancelcapture.WithoutCancel(ctx)
 	}
 	return ctx
 }
@@ -557,7 +558,7 @@ func (eb *EventBus) applyCommittedPublication(ctx context.Context, prepared Prep
 	}
 	consequences, err := eb.finalizeCommittedPublicationConsequences(ctx, prepared, committed, false)
 	if !consequences.dispatchable() {
-		return consequences.prepared, false, errors.Join(err, claim.Release(context.WithoutCancel(ctx)))
+		return consequences.prepared, false, errors.Join(err, claim.Release(forkcancelcapture.WithoutCancel(ctx)))
 	}
 	return consequences.prepared, true, err
 }
@@ -1759,7 +1760,9 @@ func (eb *EventBus) canTransferPreparedNodeDeliveries(prepared PreparedPublish) 
 }
 
 func (eb *EventBus) transferPreparedNodeDeliveries(ctx context.Context, prepared PreparedPublish) (outcome runtimepipelineobligation.SettlementOutcome, err error) {
-	defer func() { err = errors.Join(err, prepared.publicationClaim.Release(context.WithoutCancel(ctx))) }()
+	defer func() {
+		err = errors.Join(err, prepared.publicationClaim.Release(forkcancelcapture.WithoutCancel(ctx)))
+	}()
 	if !eb.canTransferPreparedNodeDeliveries(prepared) {
 		return outcome, errors.New("committed publication is not eligible for node continuation handoff")
 	}
@@ -2750,7 +2753,7 @@ func bindWorkContext(ctx context.Context, lease *worklifetime.Lease, owner workl
 	if activationLease, ok := runtimechannelactivation.ExecutionLeaseFromContext(ctx); ok {
 		workCtx = runtimechannelactivation.WithExecutionLease(workCtx, activationLease)
 	}
-	return context.WithValue(workCtx, runtimeWorkAdmissionContextKey{}, runtimeWorkAdmission{
+	return forkcancelcapture.WithValue(workCtx, runtimeWorkAdmissionContextKey{}, runtimeWorkAdmission{
 		owner: owner, context: workCtx,
 	})
 }
@@ -2791,7 +2794,7 @@ func acceptedWorkExecutionContext(accepted context.Context, carryOriginal func(c
 	if carryOriginal != nil {
 		ctx = carryOriginal(ctx, accepted)
 	}
-	ctx = context.WithValue(ctx, runtimeWorkAdmissionContextKey{}, admission)
+	ctx = forkcancelcapture.WithValue(ctx, runtimeWorkAdmissionContextKey{}, admission)
 	return ctx, closeContext, nil
 }
 

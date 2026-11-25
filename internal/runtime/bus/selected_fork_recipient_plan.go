@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/forkrecipient"
 	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	"github.com/division-sh/swarm/internal/runtime/replycontext"
 )
 
@@ -36,7 +37,7 @@ func WithSelectedForkRecipientPlan(ctx context.Context, event events.Event, reci
 	if err != nil || len(canonical) == 0 {
 		return nil, fmt.Errorf("selected recipient plan requires its complete unfinished partition: %v", err)
 	}
-	return context.WithValue(ctx, selectedForkRecipientPlanKey{}, selectedForkRecipientPlan{
+	return forkcancelcapture.WithValue(ctx, selectedForkRecipientPlanKey{}, selectedForkRecipientPlan{
 		eventID: event.ID(), lineage: lineage, recipients: canonical,
 	}), nil
 }
@@ -66,7 +67,7 @@ func WithSelectedForkRequestReplies(ctx context.Context, event events.Event, rec
 		seen[record.ID] = true
 		plan.requests = append(plan.requests, record.Normalized())
 	}
-	return context.WithValue(ctx, selectedForkRecipientPlanKey{}, plan), nil
+	return forkcancelcapture.WithValue(ctx, selectedForkRecipientPlanKey{}, plan), nil
 }
 
 func selectedForkRequestReply(ctx context.Context, event events.Event, draft replycontext.Record) (replycontext.Record, bool, error) {
@@ -112,7 +113,7 @@ func WithSelectedForkReplyReturn(ctx context.Context, event events.Event, record
 	}
 	record = record.Normalized()
 	plan.returnReply = &record
-	ctx = context.WithValue(ctx, selectedForkRecipientPlanKey{}, plan)
+	ctx = forkcancelcapture.WithValue(ctx, selectedForkRecipientPlanKey{}, plan)
 	return events.WithDeliveryContext(ctx, events.DeliveryContext{Reply: &events.ReplyContextRef{ID: record.ID}}), nil
 }
 
@@ -165,7 +166,7 @@ func WithSelectedForkRecipientContexts(ctx context.Context, event events.Event, 
 		}
 		plan.contexts[key] = route.Context.Normalized()
 	}
-	return context.WithValue(ctx, selectedForkRecipientPlanKey{}, plan), nil
+	return forkcancelcapture.WithValue(ctx, selectedForkRecipientPlanKey{}, plan), nil
 }
 
 func selectedForkContextRouteIdentity(route events.DeliveryRoute) (events.DeliveryRouteIdentity, error) {

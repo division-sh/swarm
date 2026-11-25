@@ -17,6 +17,7 @@ import (
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -132,24 +133,24 @@ func (pc *PipelineCoordinator) handleProposedEffectDecisionCard(ctx context.Cont
 		return nil, runtimepipelineobligation.Continue(), err
 	}
 	if len(plans) != 1 {
-		releaseErr := planner.ReleaseEnginePublications(context.WithoutCancel(ctx), plans)
+		releaseErr := planner.ReleaseEnginePublications(forkcancelcapture.WithoutCancel(ctx), plans)
 		return nil, runtimepipelineobligation.Continue(), errors.Join(fmt.Errorf("proposed-effect route planner returned %d plans", len(plans)), releaseErr)
 	}
 	committed, err := pc.workflowStore.decisionRoutes.CommitProposedEffectRoute(ctx, ProposedEffectRouteCommand{
 		CardID: card.CardID, RouteEventID: evt.ID(), OccurredAt: card.DecidedAt, Publication: plans[0],
 	})
 	if committed.Publication == nil {
-		return nil, runtimepipelineobligation.Continue(), errors.Join(err, committed.Validate(), planner.ReleaseEnginePublications(context.WithoutCancel(ctx), plans))
+		return nil, runtimepipelineobligation.Continue(), errors.Join(err, committed.Validate(), planner.ReleaseEnginePublications(forkcancelcapture.WithoutCancel(ctx), plans))
 	}
 	if validationErr := committed.Validate(); validationErr != nil {
-		return nil, runtimepipelineobligation.ExecutionOutcome{Committed: true}, errors.Join(err, validationErr, planner.ReleaseEnginePublications(context.WithoutCancel(ctx), plans))
+		return nil, runtimepipelineobligation.ExecutionOutcome{Committed: true}, errors.Join(err, validationErr, planner.ReleaseEnginePublications(forkcancelcapture.WithoutCancel(ctx), plans))
 	}
 	err = errors.Join(err, planner.FinalizeEnginePublications(ctx, []runtimeengine.CommittedDurablePublication{committed.Publication}))
 	dispatcher := pc.bus.EngineDispatcher()
 	if dispatcher == nil {
 		return nil, runtimepipelineobligation.ExecutionOutcome{Committed: true}, errors.Join(err, fmt.Errorf("proposed-effect route requires post-commit dispatcher"))
 	}
-	return nil, runtimepipelineobligation.ExecutionOutcome{Committed: true}, errors.Join(err, dispatcher.DispatchPostCommit(context.WithoutCancel(ctx), []runtimeengine.EmitIntent{intent}))
+	return nil, runtimepipelineobligation.ExecutionOutcome{Committed: true}, errors.Join(err, dispatcher.DispatchPostCommit(forkcancelcapture.WithoutCancel(ctx), []runtimeengine.EmitIntent{intent}))
 }
 
 func activityIntentFromProposedEffect(continuation decisioncard.ProposedEffectContinuation, source events.RoutingSource) (runtimeengine.ActivityIntent, error) {
@@ -517,7 +518,7 @@ func (pc *PipelineCoordinator) commitHumanTaskRoute(
 		return false, err
 	}
 	if len(plans) != 1 {
-		releaseErr := planner.ReleaseEnginePublications(context.WithoutCancel(ctx), plans)
+		releaseErr := planner.ReleaseEnginePublications(forkcancelcapture.WithoutCancel(ctx), plans)
 		return false, errors.Join(fmt.Errorf("human-task route planner returned %d plans", len(plans)), releaseErr)
 	}
 	var committed CommittedHumanTaskRoute
@@ -531,17 +532,17 @@ func (pc *PipelineCoordinator) commitHumanTaskRoute(
 		})
 	}
 	if committed.Publication == nil {
-		return false, errors.Join(err, committed.Validate(), planner.ReleaseEnginePublications(context.WithoutCancel(ctx), plans))
+		return false, errors.Join(err, committed.Validate(), planner.ReleaseEnginePublications(forkcancelcapture.WithoutCancel(ctx), plans))
 	}
 	if validationErr := committed.Validate(); validationErr != nil {
-		return true, errors.Join(err, validationErr, planner.ReleaseEnginePublications(context.WithoutCancel(ctx), plans))
+		return true, errors.Join(err, validationErr, planner.ReleaseEnginePublications(forkcancelcapture.WithoutCancel(ctx), plans))
 	}
 	err = errors.Join(err, planner.FinalizeEnginePublications(ctx, []runtimeengine.CommittedDurablePublication{committed.Publication}))
 	dispatcher := pc.bus.EngineDispatcher()
 	if dispatcher == nil {
 		return true, errors.Join(err, fmt.Errorf("human-task route requires post-commit dispatcher"))
 	}
-	return true, errors.Join(err, dispatcher.DispatchPostCommit(context.WithoutCancel(ctx), []runtimeengine.EmitIntent{intent}))
+	return true, errors.Join(err, dispatcher.DispatchPostCommit(forkcancelcapture.WithoutCancel(ctx), []runtimeengine.EmitIntent{intent}))
 }
 
 func (pc *PipelineCoordinator) routeWorkflowGateDecision(ctx context.Context, card decisioncard.Card, evt events.Event, route gateruntime.Route, emitted *events.Event) (bool, error) {
@@ -608,7 +609,7 @@ func (pc *PipelineCoordinator) routeWorkflowGateDecisionAttempt(ctx context.Cont
 			return false, err
 		}
 		if len(publications) != 1 {
-			releaseErr := planner.ReleaseEnginePublications(context.WithoutCancel(ctx), publications)
+			releaseErr := planner.ReleaseEnginePublications(forkcancelcapture.WithoutCancel(ctx), publications)
 			return false, errors.Join(fmt.Errorf("gate route planner returned %d plans", len(publications)), releaseErr)
 		}
 	}
@@ -619,7 +620,7 @@ func (pc *PipelineCoordinator) routeWorkflowGateDecisionAttempt(ctx context.Cont
 			err = fmt.Errorf("workflow gate mutation has no acknowledged result")
 		}
 		if planner, ok := pc.bus.(EnginePublicationPlanner); ok {
-			err = errors.Join(err, planner.ReleaseEnginePublications(context.WithoutCancel(ctx), publications))
+			err = errors.Join(err, planner.ReleaseEnginePublications(forkcancelcapture.WithoutCancel(ctx), publications))
 		}
 		return false, err
 	}
@@ -634,7 +635,7 @@ func (pc *PipelineCoordinator) routeWorkflowGateDecisionAttempt(ctx context.Cont
 		if dispatcher == nil {
 			return true, errors.Join(err, fmt.Errorf("gate route requires the post-commit dispatcher"))
 		}
-		err = errors.Join(err, dispatcher.DispatchPostCommit(context.WithoutCancel(ctx), intents))
+		err = errors.Join(err, dispatcher.DispatchPostCommit(forkcancelcapture.WithoutCancel(ctx), intents))
 	}
 	pc.notifyTestEntityStateUpdated(anchor.EntityID, nextStage)
 	return true, err

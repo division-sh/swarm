@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	"github.com/division-sh/swarm/internal/store/internal/backend/agentpersistence"
 )
 
@@ -169,7 +170,7 @@ func bindRetainedTurnOwnershipTx(ctx context.Context, tx *sql.Tx, postgres bool,
 			return nil, fmt.Errorf("retained turn coordinates changed under the ownership prefix")
 		}
 	}
-	return context.WithValue(ctx, turnOwnershipContextKey{}, scope), nil
+	return forkcancelcapture.WithValue(ctx, turnOwnershipContextKey{}, scope), nil
 }
 
 func prepareCurrentTurnAttemptOwnershipTx(ctx context.Context, tx *sql.Tx, postgres bool, owner providerDrainDirectiveOwner, attempt effects.Attempt) (context.Context, effects.Attempt, error) {
@@ -184,7 +185,7 @@ func prepareCurrentTurnAttemptOwnershipTx(ctx context.Context, tx *sql.Tx, postg
 }
 
 func withAdmittedTurnOwnership(ctx context.Context, tx *sql.Tx, actor agentidentity.Identity, observed events.InstanceOwnership) context.Context {
-	return context.WithValue(ctx, turnOwnershipContextKey{}, &turnOwnershipObservation{tx: tx,
+	return forkcancelcapture.WithValue(ctx, turnOwnershipContextKey{}, &turnOwnershipObservation{tx: tx,
 		actors: map[agentidentity.Identity]events.InstanceOwnership{actor: observed.Clone()}})
 }
 

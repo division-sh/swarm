@@ -13,6 +13,7 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 )
 
@@ -152,7 +153,7 @@ func withNativeChannelActivityLaunch(ctx context.Context, started ActivityAttemp
 	launch := &nativeChannelActivityLaunch{ctx: ctx, activation: activation, requestID: started.RequestEventID,
 		toolHash: hash, inputHash: started.InputHash, input: intent.Input, current: current}
 	launch.live.Store(true)
-	return context.WithValue(ctx, nativeChannelActivityKey{}, launch), func() { launch.live.Store(false) }, nil
+	return forkcancelcapture.WithValue(ctx, nativeChannelActivityKey{}, launch), func() { launch.live.Store(false) }, nil
 }
 
 func admitNativeActivityDestination(ctx context.Context, intent runtimeengine.ActivityIntent, activation channelonboarding.CompiledActivation,

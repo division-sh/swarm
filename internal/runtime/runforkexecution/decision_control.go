@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/apiidempotency"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 )
@@ -161,15 +162,18 @@ func bindSelectedDecisionCaller(caller, owned context.Context) (context.Context,
 	ctx := owned
 	releaseDeadline := func() {}
 	if deadline, bounded := caller.Deadline(); bounded {
-		ctx, releaseDeadline = context.WithDeadline(ctx, deadline)
+		ctx, releaseDeadline = forkcancelcapture.WithDeadline(ctx, deadline)
 	}
-	ctx, cancel := context.WithCancelCause(ctx)
+	ctx, cancel := forkcancelcapture.WithCancelCause(ctx)
+	trace := forkcancelcapture.Resolve(ctx, ctx)
 	joined := make(chan struct{})
 	stop := context.AfterFunc(caller, func() {
 		defer close(joined)
+		trace.Note("selected decision caller bridge", ctx, caller, nil, nil, true)
 		cancel(context.Cause(caller))
 	})
 	if err := caller.Err(); err != nil {
+		trace.Note("selected decision already cancelled caller", ctx, caller, nil, err, true)
 		cancel(context.Cause(caller))
 	}
 	return ctx, func() {

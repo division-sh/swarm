@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	"github.com/google/uuid"
 )
 
@@ -584,7 +585,7 @@ func WithClaim(ctx context.Context, claim Claim) context.Context {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return context.WithValue(ctx, claimContextKey{}, claim)
+	return forkcancelcapture.WithValue(ctx, claimContextKey{}, claim)
 }
 
 // WithoutClaim starts a distinct delivery execution boundary. A claim is an
@@ -594,7 +595,7 @@ func WithoutClaim(ctx context.Context) context.Context {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return context.WithValue(ctx, claimContextKey{}, Claim{})
+	return forkcancelcapture.WithValue(ctx, claimContextKey{}, Claim{})
 }
 
 func ClaimFromContext(ctx context.Context) (Claim, bool) {
@@ -611,7 +612,7 @@ func WithRoute(ctx context.Context, route events.DeliveryRoute) context.Context 
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return context.WithValue(ctx, routeContextKey{}, route.Normalized())
+	return forkcancelcapture.WithValue(ctx, routeContextKey{}, route.Normalized())
 }
 
 func RouteFromContext(ctx context.Context) (events.DeliveryRoute, bool) {

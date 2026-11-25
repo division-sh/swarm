@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	"github.com/google/uuid"
 )
 
@@ -990,7 +991,7 @@ func WithContext(ctx context.Context, surface Surface) context.Context {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return context.WithValue(ctx, contextKey{}, surface.Clone())
+	return forkcancelcapture.WithValue(ctx, contextKey{}, surface.Clone())
 }
 
 func FromContext(ctx context.Context) (Surface, bool) {

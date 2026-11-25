@@ -28,6 +28,7 @@ import (
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	"github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
@@ -577,7 +578,7 @@ func prepareSelectedContractAgentRuntime(ctx context.Context, req publishSelecte
 				ForkPoint: req.Admission.ForkPoint, ForkEventID: req.Admission.ForkPoint.EventID,
 			},
 			ExecutionPosture:   req.AgentRuntime.Options.ExecutionPosture,
-			BaseContext:        context.WithoutCancel(ctx),
+			BaseContext:        forkcancelcapture.WithoutCancel(ctx),
 			SourceArtifactFact: req.LoadedSource.SourceArtifactFact,
 			SemanticSource:     req.LoadedSource.Source,
 			WorkflowInstances:  pipeline,
@@ -618,7 +619,7 @@ func prepareSelectedContractAgentRuntime(ctx context.Context, req publishSelecte
 			return nil, managedexecution.Admission{}, errors.Join(errors.New("selected execution provider catalog differs from preparation"), err)
 		}
 	}
-	builder.options.BaseContext = context.WithoutCancel(ctx)
+	builder.options.BaseContext = forkcancelcapture.WithoutCancel(ctx)
 	builder.options.LifecycleDiagnosticOrigin = runfork.LifecycleDiagnosticOrigin{
 		Owner: runfork.LifecycleDiagnosticSelectedFork, Causality: runfork.LifecycleDiagnosticObservation,
 		SelectedFork: authority.SelectedFork, SourceRunID: req.Admission.SourceRunID,
@@ -1047,7 +1048,7 @@ func (c *selectedGatewayCustody) hooks(hooks runtimemcp.GatewayHooks) runtimemcp
 
 func refusedSelectedGatewayContext(ctx context.Context, err error) context.Context {
 	refused, _ := runtimestartupownership.WithRuntimeMutationAuthority(ctx, nil)
-	failed, cancel := context.WithCancelCause(refused)
+	failed, cancel := forkcancelcapture.WithCancelCause(refused)
 	cancel(err)
 	return failed
 }
@@ -1216,7 +1217,7 @@ func (r *selectedContractAgentRuntime) Shutdown() (result error) {
 		if r.cleanupContext == nil {
 			return errors.Join(result, errors.New("selected grant cleanup requires its original context"))
 		}
-		if err := r.generationGrant.Retire(context.WithoutCancel(r.cleanupContext)); err != nil {
+		if err := r.generationGrant.Retire(forkcancelcapture.WithoutCancel(r.cleanupContext)); err != nil {
 			return errors.Join(result, err)
 		}
 		r.generationGrant = nil
@@ -1259,7 +1260,7 @@ func (r *selectedContractAgentRuntime) stopExecutionWork() error {
 			return errors.New("selected activation cleanup requires its original context")
 		}
 		var err error
-		r.pendingActivations, err = retireSelectedFlowActivations(context.WithoutCancel(r.cleanupContext), r.pipeline, r.pendingActivations)
+		r.pendingActivations, err = retireSelectedFlowActivations(forkcancelcapture.WithoutCancel(r.cleanupContext), r.pipeline, r.pendingActivations)
 		if err != nil {
 			return err
 		}

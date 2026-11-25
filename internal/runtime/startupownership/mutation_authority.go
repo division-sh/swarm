@@ -7,6 +7,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 )
 
 var ErrMutationAuthorityMissing = errors.New("runtime mutation requires its original generation owner")
@@ -35,7 +36,7 @@ func WithProcessMutationAuthority(ctx context.Context, process ProcessCapability
 	}
 	owner, ok := process.(*processCapability)
 	if !ok || owner == nil {
-		return context.WithValue(ctx, mutationAuthorityContextKey{}, refusedMutationAuthority{ErrMutationAuthorityMissing}), ErrMutationAuthorityMissing
+		return forkcancelcapture.WithValue(ctx, mutationAuthorityContextKey{}, refusedMutationAuthority{ErrMutationAuthorityMissing}), ErrMutationAuthorityMissing
 	}
 	if HasMutationAuthority(ctx) {
 		original, err := CaptureMutationAuthority(ctx)
@@ -44,7 +45,7 @@ func WithProcessMutationAuthority(ctx context.Context, process ProcessCapability
 		}
 		if original.owner != owner {
 			err := errors.New("process mutation cannot replace its original owner")
-			return context.WithValue(ctx, mutationAuthorityContextKey{}, refusedMutationAuthority{err}), err
+			return forkcancelcapture.WithValue(ctx, mutationAuthorityContextKey{}, refusedMutationAuthority{err}), err
 		}
 		return ctx, nil
 	}
@@ -71,7 +72,7 @@ func WithRuntimeMutationAuthority(ctx context.Context, grant GenerationGrant) (c
 		original = grant
 	}
 	if original == nil || original.owner == nil {
-		return context.WithValue(ctx, mutationAuthorityContextKey{}, refusedMutationAuthority{ErrMutationAuthorityMissing}), ErrMutationAuthorityMissing
+		return forkcancelcapture.WithValue(ctx, mutationAuthorityContextKey{}, refusedMutationAuthority{ErrMutationAuthorityMissing}), ErrMutationAuthorityMissing
 	}
 	if previous := ctx.Value(mutationAuthorityContextKey{}); previous != nil {
 		if frozen, ok := previous.(MutationAuthority); ok && frozen.grant == original {
@@ -82,10 +83,10 @@ func WithRuntimeMutationAuthority(ctx context.Context, grant GenerationGrant) (c
 		}
 		if previous != original.owner {
 			err := errors.New("runtime mutation cannot replace its original generation owner")
-			return context.WithValue(ctx, mutationAuthorityContextKey{}, refusedMutationAuthority{err}), err
+			return forkcancelcapture.WithValue(ctx, mutationAuthorityContextKey{}, refusedMutationAuthority{err}), err
 		}
 	}
-	ctx = context.WithValue(ctx, mutationAuthorityContextKey{}, original)
+	ctx = forkcancelcapture.WithValue(ctx, mutationAuthorityContextKey{}, original)
 	if _, err := original.Evidence(); err != nil {
 		return ctx, err
 	}
@@ -125,7 +126,7 @@ func WithLentOrdinaryMutationAuthority(ctx context.Context, grant any, use func(
 	if err != nil {
 		return err
 	}
-	lent := context.WithValue(ctx, mutationAuthorityContextKey{}, MutationAuthority{
+	lent := forkcancelcapture.WithValue(ctx, mutationAuthorityContextKey{}, MutationAuthority{
 		owner: original.owner, grant: target, process: original.process, evidence: evidence,
 	})
 	lent = correlation.WithRuntimeInstanceID(lent, evidence.RuntimeInstanceID)
@@ -245,7 +246,7 @@ func FreezeMutationAuthority(ctx context.Context) (context.Context, error) {
 	if err != nil {
 		return nil, err
 	}
-	return context.WithValue(ctx, mutationAuthorityContextKey{}, original), nil
+	return forkcancelcapture.WithValue(ctx, mutationAuthorityContextKey{}, original), nil
 }
 
 // ExternalEffectResultContext preserves result metadata without borrowing a
@@ -256,7 +257,7 @@ func ExternalEffectResultContext(ctx context.Context, result effects.Settlement)
 	if ctx == nil || result.OperationID == "" || result.AttemptID == "" || !result.Authority.Valid() {
 		return nil, ErrMutationAuthorityMissing
 	}
-	return context.WithValue(ctx, mutationAuthorityContextKey{}, externalEffectResultContext{}), nil
+	return forkcancelcapture.WithValue(ctx, mutationAuthorityContextKey{}, externalEffectResultContext{}), nil
 }
 
 // CarryMutationAuthority preserves a command's original custody when accepted
@@ -266,20 +267,20 @@ func CarryMutationAuthority(work, command context.Context) context.Context {
 	if !HasMutationAuthority(command) {
 		return work
 	}
-	original, err := CaptureMutationAuthority(context.WithoutCancel(command))
+	original, err := CaptureMutationAuthority(forkcancelcapture.WithoutCancel(command))
 	if err != nil {
-		return context.WithValue(work, mutationAuthorityContextKey{}, refusedMutationAuthority{err})
+		return forkcancelcapture.WithValue(work, mutationAuthorityContextKey{}, refusedMutationAuthority{err})
 	}
 	if HasMutationAuthority(work) {
-		previous, err := CaptureMutationAuthority(context.WithoutCancel(work))
+		previous, err := CaptureMutationAuthority(forkcancelcapture.WithoutCancel(work))
 		if err != nil {
-			return context.WithValue(work, mutationAuthorityContextKey{}, refusedMutationAuthority{err})
+			return forkcancelcapture.WithValue(work, mutationAuthorityContextKey{}, refusedMutationAuthority{err})
 		}
 		if previous.owner != original.owner || previous.grant != original.grant {
-			return context.WithValue(work, mutationAuthorityContextKey{}, refusedMutationAuthority{errors.New("accepted work cannot replace its original mutation owner")})
+			return forkcancelcapture.WithValue(work, mutationAuthorityContextKey{}, refusedMutationAuthority{errors.New("accepted work cannot replace its original mutation owner")})
 		}
 	}
-	return context.WithValue(work, mutationAuthorityContextKey{}, original)
+	return forkcancelcapture.WithValue(work, mutationAuthorityContextKey{}, original)
 }
 
 func (g *generationGrant) BindRuntimeMutationContext(ctx context.Context) (context.Context, error) {
@@ -292,5 +293,5 @@ func (p *processCapability) processMutationContext(ctx context.Context) context.
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return context.WithValue(ctx, mutationAuthorityContextKey{}, p)
+	return forkcancelcapture.WithValue(ctx, mutationAuthorityContextKey{}, p)
 }

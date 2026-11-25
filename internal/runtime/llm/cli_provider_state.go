@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	"github.com/division-sh/swarm/internal/runtime/workspace"
 )
 
@@ -53,7 +54,7 @@ func (*ClaudeCLIRuntime) releaseInvocationState(ctx context.Context, session *Se
 	if session == nil || session.claudeState == nil {
 		return nil
 	}
-	cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	cleanup, cancel := forkcancelcapture.WithTimeout(forkcancelcapture.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
 	err := session.claudeState.Release(cleanup)
 	if err != nil {

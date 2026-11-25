@@ -22,6 +22,7 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/google/uuid"
@@ -96,12 +97,21 @@ func completionInvocationGate(caller, heartbeat context.Context) error {
 // heartbeat context remains process-owned for observation and settlement.
 func completionProviderContext(caller, heartbeat context.Context) (context.Context, func()) {
 	provider, cancel := context.WithCancelCause(heartbeat)
+	trace := forkcancelcapture.Resolve(heartbeat, heartbeat)
+	if trace == nil {
+		trace = forkcancelcapture.Resolve(caller, caller)
+	}
+	trace.Link("provider context from attempt heartbeat", provider, heartbeat)
+	trace.Note("provider caller bridge parent", provider, caller, nil, nil, false)
+	cancel = trace.Wrap("provider primitive cancel", provider, cancel)
 	done := make(chan struct{})
 	stop := context.AfterFunc(caller, func() {
 		defer close(done)
+		trace.Note("provider caller bridge invocation", provider, caller, nil, nil, true)
 		cancel(context.Cause(caller))
 	})
 	if caller.Err() != nil {
+		trace.Note("provider caller already cancelled", provider, caller, nil, nil, true)
 		cancel(context.Cause(caller))
 	}
 	return provider, func() {
@@ -425,7 +435,7 @@ func startCompletionAttemptHeartbeatWithTiming(ctx context.Context, handle *runt
 		if !processOwned {
 			return ctx, nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_process_work_owner_missing", "llm-completion-authority", "heartbeat_attempt", nil)
 		}
-		workLease, err = process.Begin(context.WithoutCancel(ctx))
+		workLease, err = process.Begin(forkcancelcapture.WithoutCancel(ctx))
 	} else if occurrenceOwned {
 		if accepted, ok := owner.(interface {
 			BeginAcceptedDescendant(context.Context) (*worklifetime.Lease, error)
@@ -463,6 +473,9 @@ func startCompletionAttemptHeartbeatWithTiming(ctx context.Context, handle *runt
 		return ctx, nil, runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict, "completion_attempt_heartbeat_failed", "llm-completion-authority", "heartbeat_attempt", map[string]any{"stage": "prelaunch"}, initialRenewalErr)
 	}
 	heartbeatCtx, cancel := context.WithCancelCause(heartbeatParent)
+	trace := forkcancelcapture.Resolve(heartbeatParent, heartbeatParent)
+	trace.Link("completion attempt heartbeat from admitted lease", heartbeatCtx, heartbeatParent)
+	cancel = trace.Wrap("completion attempt heartbeat cancel", heartbeatCtx, cancel)
 	heartbeat := &completionAttemptHeartbeat{
 		ctx: heartbeatCtx, cancel: cancel, done: make(chan struct{}), handle: handle, lease: lease,
 		claimHandoff: claimHandoff, diagnostic: initialRenewalErr,
@@ -493,7 +506,7 @@ func startCompletionAttemptHeartbeatWithTiming(ctx context.Context, handle *runt
 			}
 		}
 	}()
-	return context.WithValue(heartbeatCtx, completionAttemptHeartbeatContextKey{}, heartbeat), heartbeat, nil
+	return forkcancelcapture.WithValue(heartbeatCtx, completionAttemptHeartbeatContextKey{}, heartbeat), heartbeat, nil
 }
 
 func requireCompletionAttemptHeartbeat(ctx context.Context) error {

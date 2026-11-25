@@ -126,7 +126,9 @@ func TestIssue642RemovedPreparedArrivalRuleSettlesDependentsBothStores(t *testin
 				TargetBundleHash: target.SourceArtifactFact.BundleHash(), TargetRootReference: target.RootedSource.Admission().Reference(), ContractSelection: selection}
 			startupCtx := authoractivity.WithScope(startupEntry, authoractivity.BundleScope(runForkTestRuntimeInstanceID, target.SourceArtifactFact.BundleHash()))
 			_, liveContexts := liveForkRuntimeFixtureWithStartupContext(t, ctx, startupCtx, selected, owner, target, sourceRun, executionposture.MockOnly)
-			result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
+			activationCtx, activationTrace := armSelectedForkActivation(ctx, backend, owner.ports.contexts.capability)
+			defer activationTrace.Close()
+			result, err := ExecuteSelectedContractRunFork(activationCtx, SelectedContractExecutionRequest{
 				SourceRunID: sourceRun, At: marker, Owner: owner, ForkOperation: &operation,
 				LiveContexts: liveContexts, LiveRuns: selected.(runlifecycle.LiveRunReader),
 				AcquireLiveRuntime: func(ctx context.Context, reference sourceartifact.RootAdmissionReference) (*rootruntime.RuntimeContextUse, error) {
@@ -138,8 +140,11 @@ func TestIssue642RemovedPreparedArrivalRuleSettlesDependentsBothStores(t *testin
 				AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: owner.ports.contexts.capability},
 			})
 			if err != nil || !result.Activation.Activated {
+				logPostgresForkActivationFailure(t, backend, owner.ports.contexts.capability)
+				logSelectedForkActivationTrace(t, activationTrace, ctx, err)
 				t.Fatalf("removed arrival rule must cancel, not refuse the fork: %+v err=%v", result, err)
 			}
+			activationTrace.Close()
 			child := result.Materialization.ForkRunID
 			operations := selected.(interface {
 				LoadForkOperation(context.Context, string, string, string) (runfork.ForkOperationRecord, bool, error)

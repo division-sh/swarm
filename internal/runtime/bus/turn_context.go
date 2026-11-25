@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 )
 
 type emittedEventsContextKey struct{}
@@ -65,7 +66,7 @@ func NewEmittedEventsRecorder() *EmittedEventsRecorder {
 }
 
 func WithEmittedEventsRecorder(ctx context.Context, rec *EmittedEventsRecorder) context.Context {
-	return context.WithValue(ctx, emittedEventsContextKey{}, rec)
+	return forkcancelcapture.WithValue(ctx, emittedEventsContextKey{}, rec)
 }
 
 func EmittedEventsRecorderFromContext(ctx context.Context) (*EmittedEventsRecorder, bool) {

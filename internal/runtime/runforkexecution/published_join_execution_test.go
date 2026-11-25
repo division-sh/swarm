@@ -486,7 +486,7 @@ func TestIssue642PublishedJoinCrashRestartBothStores(t *testing.T) {
 					selected = s
 					construct = func() SelectedContractExecutionOwner { return newSelectedContractExecutionOwnerForTest(t, s) }
 				}
-				checkpoint := killSelectedForkAtCheckpoint(t, backend, dsn, cut)
+				checkpoint := killSelectedForkAtObservedActivationCheckpoint(t, backend, dsn, cut)
 				operations := selected.(interface {
 					LoadForkOperation(context.Context, string, string, string) (runfork.ForkOperationRecord, bool, error)
 				})
@@ -542,7 +542,9 @@ func TestIssue642PublishedJoinCrashRestartBothStores(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				recovered, err := owner.RecoverSelectedForkContexts(ctx, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.MockOnly), SelectedForkRecoveryEnvironment{
+				recoveryCtx, recoveryTrace := armSelectedForkActivation(ctx, backend, capability)
+				defer recoveryTrace.Close()
+				recovered, err := owner.RecoverSelectedForkContexts(recoveryCtx, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.MockOnly), SelectedForkRecoveryEnvironment{
 					SourceLoader: loader, AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability},
 					LiveContexts: contexts, LiveRuns: selected.(runlifecycle.LiveRunReader),
 					AcquireLiveRuntime: func(ctx context.Context, reference sourceartifact.RootAdmissionReference) (*rootruntime.RuntimeContextUse, error) {
@@ -555,6 +557,8 @@ func TestIssue642PublishedJoinCrashRestartBothStores(t *testing.T) {
 					wantRecovery = runfork.SelectedForkRecoveryResume
 				}
 				if err != nil || len(recovered) != 1 || recovered[0].RunID != checkpoint.ForkRun || recovered[0].Disposition != wantRecovery {
+					logPostgresForkActivationFailure(t, backend, capability)
+					logSelectedForkActivationTrace(t, recoveryTrace, ctx, err)
 					t.Fatalf("published occurrence successor recovery: %+v err=%v", recovered, err)
 				}
 				wait, cancel := context.WithTimeout(t.Context(), 15*time.Second)
@@ -681,15 +685,20 @@ func TestIssue642PublishedJoinContinuesExactDeliveryBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{SourceRunID: sourceRun, At: marker,
+			activationCtx, activationTrace := armSelectedForkActivation(ctx, backend, owner.ports.contexts.capability)
+			defer activationTrace.Close()
+			result, err := ExecuteSelectedContractRunFork(activationCtx, SelectedContractExecutionRequest{SourceRunID: sourceRun, At: marker,
 				Owner: owner, ForkOperation: &operation, SourceLoader: loader, ContractSelection: selection,
 				LiveRuntime: liveRuntime, LiveContexts: liveContexts, LiveRuns: selected.(runlifecycle.LiveRunReader),
 				AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: owner.ports.contexts.capability}})
 			if err != nil || !result.Activation.Activated {
+				logPostgresForkActivationFailure(t, backend, owner.ports.contexts.capability)
+				logSelectedForkActivationTrace(t, activationTrace, ctx, err)
 				diagnostic, diagnosticErr := storetest.ReadServedRunDebugSummary(context.WithoutCancel(ctx), selected, result.Materialization.ForkRunID)
 				t.Logf("PUBLISHED_JOIN_HANDOFF diagnostic=%s err=%v", diagnostic, diagnosticErr)
 				t.Fatalf("selected published-join activation: %+v err=%v", result, err)
 			}
+			activationTrace.Close()
 			child := result.Materialization.ForkRunID
 			operations := selected.(interface {
 				LoadForkOperation(context.Context, string, string, string) (runfork.ForkOperationRecord, bool, error)

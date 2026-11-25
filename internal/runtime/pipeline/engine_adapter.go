@@ -23,6 +23,7 @@ import (
 	runtimeeventpayload "github.com/division-sh/swarm/internal/runtime/eventpayload"
 	runtimeeventschema "github.com/division-sh/swarm/internal/runtime/eventschema"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 )
@@ -346,7 +347,7 @@ func (o pipelineEngineMutationOwner) commitPreparedEngineMutation(
 	}()
 	moveOrReleasePlans := func(err error) error {
 		if o.publication != nil {
-			return errors.Join(err, o.publication.ReleaseEnginePublications(context.WithoutCancel(ctx), publications))
+			return errors.Join(err, o.publication.ReleaseEnginePublications(forkcancelcapture.WithoutCancel(ctx), publications))
 		}
 		return err
 	}

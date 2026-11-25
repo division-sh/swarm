@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/google/uuid"
@@ -164,6 +165,30 @@ type processCapability struct {
 	monitorDone     chan struct{}
 	monitorCadence  time.Duration
 	monitorDeadline time.Duration
+}
+
+// BindForkCancelCapture is only present in the non-merging diagnostic overlay.
+func BindForkCancelCapture(capability ProcessCapability, trace *forkcancelcapture.Capture) {
+	p, ok := capability.(*processCapability)
+	if !ok || p == nil {
+		trace.Missing("uncovered fixture process capability", nil)
+		return
+	}
+	trace.Bind(p)
+	select {
+	case <-p.Done():
+		trace.Missing("process capability already terminal before capture bind", p)
+	default:
+	}
+	session, ok := p.session.(interface {
+		BindForkCancelCapture(*forkcancelcapture.Capture)
+	})
+	if !ok {
+		trace.Missing("uncovered retained process session", p)
+		return
+	}
+	trace.Note("fixture capability and retained session", p, session, nil, nil, false)
+	session.BindForkCancelCapture(trace)
 }
 
 type generationGrant struct {
@@ -545,6 +570,7 @@ func (p *processCapability) terminalize(result TerminalResult) {
 		}
 		p.grants = map[string]*generationGrant{}
 		p.mu.Unlock()
+		forkcancelcapture.Owner(p).Note("capability terminalize "+string(result.Cause), p, p.session, nil, nil, true)
 		close(p.done)
 		p.cancelPossessionMonitor()
 		for _, grant := range grants {
@@ -586,6 +612,7 @@ func (p *processCapability) monitorPossession(ctx context.Context, done chan str
 		case <-ticker.C:
 		}
 
+		forkcancelcapture.Owner(p).Link("possession monitor context created at startPossessionMonitor", ctx, context.Background())
 		err := p.monitorPossessionOnce(ctx, nil)
 		if ctx.Err() != nil {
 			return
@@ -631,7 +658,11 @@ func (p *processCapability) startPossessionMonitor() {
 	}
 	monitorCtx, monitorCancel := context.WithCancel(context.Background())
 	monitorDone := make(chan struct{})
-	p.monitorCancel = monitorCancel
+	p.monitorCancel = func() {
+		trace := forkcancelcapture.Owner(p)
+		trace.Link("possession monitor context created at startPossessionMonitor", monitorCtx, context.Background())
+		trace.WrapPlain("possession monitor cancel", monitorCtx, monitorCancel)()
+	}
 	p.monitorDone = monitorDone
 	go p.monitorPossession(monitorCtx, monitorDone)
 }
@@ -937,6 +968,7 @@ func (g *generationGrant) retireLocal() {
 		g.evidence.State = GrantRetired
 		grantID := g.evidence.GrantID
 		g.mu.Unlock()
+		forkcancelcapture.Owner(g.owner).Note("generation grant retire", g, g.owner, g.issuingParent, nil, true)
 		close(g.done)
 		g.owner.mu.Lock()
 		if budget := g.owner.fanOutCapacity; budget != nil {

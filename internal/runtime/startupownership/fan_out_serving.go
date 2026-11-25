@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 )
 
@@ -89,7 +90,7 @@ func StartFanOutServing(ctx context.Context, grant GenerationGrant, occurrence w
 			r.Close()
 			return nil, beginErr
 		}
-		serviceCtx, cancel := context.WithCancel(standing.Context())
+		serviceCtx, cancel := forkcancelcapture.WithCancel(standing.Context())
 		s := &fanOutServingService{owner: p, store: store, ctx: serviceCtx, cancel: cancel, wake: make(chan struct{}, 1), done: make(chan struct{}), intents: make(map[fanoutobligation.IntentKey]struct{}), claimEntered: make(map[fanoutobligation.IntentKey]bool)}
 		budget.service = s
 		go s.run(standing)
@@ -143,10 +144,15 @@ func (r *FanOutServingRegistration) ResumeRunFanOut(ctx context.Context, runID s
 	r.turns.Add(1)
 	p.mu.Unlock()
 	defer r.turns.Done()
-	workCtx, cancel := context.WithCancel(lease.Context())
+	workCtx, cancel := forkcancelcapture.WithCancel(lease.Context())
 	defer cancel()
 	joined := make(chan struct{})
-	stop := context.AfterFunc(ctx, func() { defer close(joined); cancel() })
+	trace := forkcancelcapture.Resolve(workCtx, workCtx)
+	stop := context.AfterFunc(ctx, func() {
+		defer close(joined)
+		trace.Note("fan-out resume caller bridge", workCtx, ctx, nil, nil, true)
+		cancel()
+	})
 	defer func() {
 		if !stop() {
 			<-joined
@@ -184,7 +190,7 @@ type fanOutChunkObserverContextKey struct{}
 // WithFanOutChunkObserverForTest observes a prepared turn outside SQL, while
 // its native claim is live. It neither substitutes a plan nor changes its owner.
 func WithFanOutChunkObserverForTest(ctx context.Context, observer func(context.Context, pipeline.FanOutChunkCommand)) context.Context {
-	return context.WithValue(ctx, fanOutChunkObserverContextKey{}, observer)
+	return forkcancelcapture.WithValue(ctx, fanOutChunkObserverContextKey{}, observer)
 }
 
 func (s *fanOutServingService) reportTestScan(registrations map[string]*FanOutServingRegistration, candidate FanOutCandidate, found bool, err error) {

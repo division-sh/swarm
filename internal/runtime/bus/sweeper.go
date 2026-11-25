@@ -13,6 +13,7 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 )
@@ -96,7 +97,7 @@ func (eb *EventBus) StartOutboxSweeper(ctx context.Context, cfg OutboxSweeperCon
 	go func() {
 		defer close(done)
 		defer func() { _ = lease.Done() }()
-		defer func() { _ = eb.closeAllPipelineScans(context.WithoutCancel(ctx)) }()
+		defer func() { _ = eb.closeAllPipelineScans(forkcancelcapture.WithoutCancel(ctx)) }()
 		ticker := time.NewTicker(cfg.Interval)
 		defer ticker.Stop()
 		defer func() {
@@ -161,7 +162,7 @@ func (eb *EventBus) SealPipelineRecovery(ctx context.Context) error {
 	eb.pipelineRecoveryClosed = true
 	var result error
 	for request := range eb.pipelineScans {
-		result = errors.Join(result, eb.closePipelineScanLocked(context.WithoutCancel(ctx), request))
+		result = errors.Join(result, eb.closePipelineScanLocked(forkcancelcapture.WithoutCancel(ctx), request))
 	}
 	return result
 }
@@ -183,14 +184,14 @@ func (eb *EventBus) SweepPipelineObligations(ctx context.Context, limit int) (ru
 		paused, err = ingressGate.QueueableIngressPaused(ctx)
 	}
 	if err != nil {
-		closeErr := eb.closePipelineScan(context.WithoutCancel(ctx), runtimepipelineobligation.GlobalScanRequest().WithExecutionPosture(eb.executionPosture))
+		closeErr := eb.closePipelineScan(forkcancelcapture.WithoutCancel(ctx), runtimepipelineobligation.GlobalScanRequest().WithExecutionPosture(eb.executionPosture))
 		return runtimepipelineobligation.SweepResult{}, errors.Join(err, closeErr)
 	}
 	if paused {
 		if runtimepipelineobligation.StartupRecoveryDiagnosticsEnabled(ctx) {
 			slog.WarnContext(ctx, "startup pipeline recovery blocked", "reason", "ingress_paused_before_scan")
 		}
-		if err := eb.closePipelineScan(context.WithoutCancel(ctx), runtimepipelineobligation.GlobalScanRequest().WithExecutionPosture(eb.executionPosture)); err != nil {
+		if err := eb.closePipelineScan(forkcancelcapture.WithoutCancel(ctx), runtimepipelineobligation.GlobalScanRequest().WithExecutionPosture(eb.executionPosture)); err != nil {
 			return runtimepipelineobligation.SweepResult{}, err
 		}
 		return runtimepipelineobligation.SweepResult{Blocked: true}, nil
@@ -216,7 +217,9 @@ func (eb *EventBus) RecoverSelectedRunPipelineToExhaustion(ctx context.Context, 
 		return errors.New("selected pipeline recovery requires exact child authority")
 	}
 	request := runtimepipelineobligation.RunScanRequest(runID).WithExecutionPosture(eb.executionPosture)
-	defer func() { finalErr = errors.Join(finalErr, eb.closePipelineScan(context.WithoutCancel(ctx), request)) }()
+	defer func() {
+		finalErr = errors.Join(finalErr, eb.closePipelineScan(forkcancelcapture.WithoutCancel(ctx), request))
+	}()
 	for {
 		result, err := eb.sweepPipelineObligations(ctx, request, DefaultOutboxSweeperConfig().Limit)
 		if err != nil {
@@ -261,7 +264,7 @@ func (eb *EventBus) sweepPipelineObligations(ctx context.Context, request runtim
 	}
 	boundedRetries := make([]boundedPipelineRetry, 0, limit)
 	defer func() {
-		releaseCtx := context.WithoutCancel(ctx)
+		releaseCtx := forkcancelcapture.WithoutCancel(ctx)
 		for _, retry := range boundedRetries {
 			releaseErr := eb.pipelineObligations.Release(releaseCtx, retry.claim)
 			if !errors.Is(releaseErr, runtimepipelineobligation.ErrStaleClaim) {
@@ -272,15 +275,15 @@ func (eb *EventBus) sweepPipelineObligations(ctx context.Context, request runtim
 	for result.Examined < limit {
 		batch, batchErr := eb.pipelineObligations.ClaimBatch(ctx, state.cursor, limit-result.Examined)
 		if batchErr != nil {
-			closeErr := eb.closePipelineScanLocked(context.WithoutCancel(ctx), request)
+			closeErr := eb.closePipelineScanLocked(forkcancelcapture.WithoutCancel(ctx), request)
 			return result, errors.Join(batchErr, closeErr)
 		}
 		if len(batch.Work) > 1 {
-			closeErr := eb.closePipelineScanLocked(context.WithoutCancel(ctx), request)
+			closeErr := eb.closePipelineScanLocked(forkcancelcapture.WithoutCancel(ctx), request)
 			return result, errors.Join(errors.New("pipeline scan returned more than one mutation-ordered work item"), closeErr)
 		}
 		if batch.Examined == 0 && !batch.Exhausted {
-			closeErr := eb.closePipelineScanLocked(context.WithoutCancel(ctx), request)
+			closeErr := eb.closePipelineScanLocked(forkcancelcapture.WithoutCancel(ctx), request)
 			return result, errors.Join(errors.New("pipeline scan made no progress without exhaustion"), closeErr)
 		}
 		result.Examined += batch.Examined
@@ -298,7 +301,7 @@ func (eb *EventBus) sweepPipelineObligations(ctx context.Context, request runtim
 			}
 			if processErr != nil {
 				if settled || retry {
-					closeErr := eb.closePipelineScanLocked(context.WithoutCancel(ctx), request)
+					closeErr := eb.closePipelineScanLocked(forkcancelcapture.WithoutCancel(ctx), request)
 					return result, errors.Join(processErr, closeErr)
 				}
 				if errors.Is(processErr, errRunDispatchParked) {
@@ -316,17 +319,17 @@ func (eb *EventBus) sweepPipelineObligations(ctx context.Context, request runtim
 						slog.WarnContext(ctx, "startup pipeline recovery blocked", "reason", "ingress_paused_during_dispatch", "event_id", work.Event.ID(), "event_type", work.Event.Type(), "run_id", work.Event.RunID(), "purpose", work.Claim.Purpose(), "error", processErr)
 					}
 					result.Blocked = true
-					closeErr := eb.closePipelineScanLocked(context.WithoutCancel(ctx), request)
+					closeErr := eb.closePipelineScanLocked(forkcancelcapture.WithoutCancel(ctx), request)
 					return result, errors.Join(closeErr)
 				}
-				closeErr := eb.closePipelineScanLocked(context.WithoutCancel(ctx), request)
+				closeErr := eb.closePipelineScanLocked(forkcancelcapture.WithoutCancel(ctx), request)
 				return result, errors.Join(processErr, closeErr)
 			}
 		}
 		if batch.Exhausted {
 			result.Exhausted = true
 			result.Blocked = state.locallyBlocked
-			if err := eb.closePipelineScanLocked(context.WithoutCancel(ctx), request); err != nil {
+			if err := eb.closePipelineScanLocked(forkcancelcapture.WithoutCancel(ctx), request); err != nil {
 				return result, err
 			}
 			return result, nil
@@ -386,7 +389,7 @@ func (eb *EventBus) processClaimedPipelineWork(
 	claimOpen := true
 	defer func() {
 		if claimOpen && !retry {
-			err = errors.Join(err, eb.pipelineObligations.Release(context.WithoutCancel(ctx), work.Claim))
+			err = errors.Join(err, eb.pipelineObligations.Release(forkcancelcapture.WithoutCancel(ctx), work.Claim))
 		}
 	}()
 	if work.Claim.Purpose() == runtimepipelineobligation.PurposeDecisionRoute && work.Acknowledged {

@@ -18,6 +18,7 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
@@ -1014,7 +1015,7 @@ func (eb *EventBus) PrepareAgentRoute(ctx context.Context, token runtimeeffects.
 	ch := make(chan *LocalDelivery, 128)
 	route := newAgentRouteHandle(eb, token, ch, owner)
 	return &preparedAgentRoute{
-		bus: eb, lifecycleCtx: context.WithoutCancel(lifecycleCtx), token: token,
+		bus: eb, lifecycleCtx: forkcancelcapture.WithoutCancel(lifecycleCtx), token: token,
 		eventTypes: eventTypes, route: route, ch: ch,
 	}
 }
@@ -1176,7 +1177,7 @@ func (eb *EventBus) completeInternalSubscription(handle *internalSubscriptionHan
 	if eb == nil || handle == nil {
 		return nil
 	}
-	cleanupCtx, err := eb.admitSourceArtifactFact(context.WithoutCancel(handle.lifecycleCtx))
+	cleanupCtx, err := eb.admitSourceArtifactFact(forkcancelcapture.WithoutCancel(handle.lifecycleCtx))
 	if err != nil {
 		return err
 	}

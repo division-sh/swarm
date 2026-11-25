@@ -13,6 +13,7 @@ import (
 	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -253,12 +254,12 @@ func (eb *EventBus) prepareInboundDeliveryBatch(ctx context.Context, batch Inbou
 	var runProposal pipeline.FlowInstanceRunProposal
 	release := func(cause error) (InboundDeliveryPlan, error) {
 		for _, prepared := range plan.prepared {
-			cause = errors.Join(cause, eb.AbandonPreparedPublish(context.WithoutCancel(ctx), prepared))
+			cause = errors.Join(cause, eb.AbandonPreparedPublish(forkcancelcapture.WithoutCancel(ctx), prepared))
 		}
 		return InboundDeliveryPlan{}, cause
 	}
 	for index, item := range validated.Events {
-		itemCtx := context.WithValue(ctx, authenticatedProviderPublicationKey{}, authenticatedProviderPublication{
+		itemCtx := forkcancelcapture.WithValue(ctx, authenticatedProviderPublicationKey{}, authenticatedProviderPublication{
 			eventID: item.Event.ID(), source: item.Event.RoutingSource().Route(), kind: item.Kind,
 			provider: validated.Provider, account: validated.Admission.OperatorAccount(),
 			admission: validated.Admission, ordinal: index, count: len(validated.Events),
@@ -373,7 +374,7 @@ func (eb *EventBus) ApplyInboundDeliveryCommit(ctx context.Context, plan Inbound
 		finalizationErr = errors.Join(finalizationErr, err)
 	}
 	if finalizationErr != nil {
-		return nil, errors.Join(finalizationErr, eb.AbandonInboundDeliveryPlan(context.WithoutCancel(ctx), plan))
+		return nil, errors.Join(finalizationErr, eb.AbandonInboundDeliveryPlan(forkcancelcapture.WithoutCancel(ctx), plan))
 	}
 	return prepared, nil
 }
@@ -384,7 +385,9 @@ func (eb *EventBus) CompleteStoredInboundDeliveryCommit(ctx context.Context, pla
 	if !plan.storeOnly {
 		return false, fmt.Errorf("stored inbound completion requires its store-only plan")
 	}
-	defer func() { err = errors.Join(err, eb.AbandonInboundDeliveryPlan(context.WithoutCancel(ctx), plan)) }()
+	defer func() {
+		err = errors.Join(err, eb.AbandonInboundDeliveryPlan(forkcancelcapture.WithoutCancel(ctx), plan))
+	}()
 	if len(committed) != len(plan.prepared) {
 		return false, fmt.Errorf("committed inbound publication evidence count differs from prepared batch")
 	}
@@ -463,11 +466,11 @@ func preflightInboundDeliveryBatch(verifier ProviderOutputAuthorizationVerifier,
 type providerOutputAuthorizationContextKey struct{}
 
 func withProviderOutputAuthorization(ctx context.Context, authorization runtimeprovideroutput.Authorization) context.Context {
-	return context.WithValue(ctx, providerOutputAuthorizationContextKey{}, authorization)
+	return forkcancelcapture.WithValue(ctx, providerOutputAuthorizationContextKey{}, authorization)
 }
 
 func withoutProviderOutputAuthorization(ctx context.Context) context.Context {
-	return context.WithValue(ctx, providerOutputAuthorizationContextKey{}, runtimeprovideroutput.Authorization{})
+	return forkcancelcapture.WithValue(ctx, providerOutputAuthorizationContextKey{}, runtimeprovideroutput.Authorization{})
 }
 
 func providerOutputAuthorizationMatches(ctx context.Context, expected *runtimeprovideroutput.Authorization) bool {

@@ -15,6 +15,7 @@ import (
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	"github.com/google/uuid"
 )
 
@@ -1166,7 +1167,7 @@ func WithoutDeliveryContext(ctx context.Context) context.Context {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return context.WithValue(ctx, deliveryContextKey{}, DeliveryContext{})
+	return forkcancelcapture.WithValue(ctx, deliveryContextKey{}, DeliveryContext{})
 }
 
 func WithDeliveryContext(ctx context.Context, deliveryContext DeliveryContext) context.Context {
@@ -1177,7 +1178,7 @@ func WithDeliveryContext(ctx context.Context, deliveryContext DeliveryContext) c
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return context.WithValue(ctx, deliveryContextKey{}, deliveryContext)
+	return forkcancelcapture.WithValue(ctx, deliveryContextKey{}, deliveryContext)
 }
 
 func DeliveryContextFromContext(ctx context.Context) DeliveryContext {

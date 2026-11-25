@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverycontinuation"
 	"github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
@@ -103,7 +104,7 @@ func executePreparedLiveFork(ctx context.Context, req SelectedContractExecutionR
 			req.LiveRuntime = parked
 			finalErr = parked.WithParkedLiveRun(parkCtx, live, execute)
 			if !out.Activation.Activated {
-				finalErr = errors.Join(finalErr, parked.ReconcileLiveRun(context.WithoutCancel(parkCtx), live.RunID))
+				finalErr = errors.Join(finalErr, parked.ReconcileLiveRun(forkcancelcapture.WithoutCancel(parkCtx), live.RunID))
 			}
 			finalErr = errors.Join(finalErr, releaseUse())
 		} else {
@@ -124,7 +125,7 @@ func executePreparedLiveFork(ctx context.Context, req SelectedContractExecutionR
 			finalErr = execute(ctx)
 			finalErr = errors.Join(finalErr, releaseUse())
 			if !paused && !out.Activation.Activated {
-				finalErr = errors.Join(finalErr, parked.ReconcileLiveRun(context.WithoutCancel(parkCtx), live.RunID))
+				finalErr = errors.Join(finalErr, parked.ReconcileLiveRun(forkcancelcapture.WithoutCancel(parkCtx), live.RunID))
 			}
 		}
 	} else {
@@ -135,7 +136,7 @@ func executePreparedLiveFork(ctx context.Context, req SelectedContractExecutionR
 			releaseSelection := req.LiveContexts.BeginLiveRunSelection()
 			defer releaseSelection()
 		}
-		finalErr = errors.Join(finalErr, reconcileCommittedLiveFork(context.WithoutCancel(ctx), req.LiveContexts, out.Materialization.ForkRunID))
+		finalErr = errors.Join(finalErr, reconcileCommittedLiveFork(forkcancelcapture.WithoutCancel(ctx), req.LiveContexts, out.Materialization.ForkRunID))
 	}
 	return out, finalErr
 }
@@ -421,7 +422,7 @@ func (c selectedContractForkLocalRuntimeContainer) activateLive(p *PreparedSelec
 	inputs, err := c.commitSelectedInputs()
 	defer func() {
 		for _, input := range inputs {
-			finalErr = errors.Join(finalErr, runtime.bus.AbandonPreparedPublish(context.WithoutCancel(input.ctx), input.prepared))
+			finalErr = errors.Join(finalErr, runtime.bus.AbandonPreparedPublish(forkcancelcapture.WithoutCancel(input.ctx), input.prepared))
 		}
 	}()
 	if err != nil {
@@ -430,7 +431,7 @@ func (c selectedContractForkLocalRuntimeContainer) activateLive(p *PreparedSelec
 	if err := continuations.Start(c.attachment.ctx); err != nil {
 		return out, err
 	}
-	retireContinuations := sync.OnceValue(func() error { return continuations.Retire(context.WithoutCancel(c.attachment.ctx)) })
+	retireContinuations := sync.OnceValue(func() error { return continuations.Retire(forkcancelcapture.WithoutCancel(c.attachment.ctx)) })
 	defer func() { finalErr = errors.Join(finalErr, retireContinuations()) }()
 	recovered := p.recoveryFromExecutionID != ""
 	if err := c.restoreLiveSelectedWork(continuations, recovered); err != nil {
@@ -515,7 +516,7 @@ func (c selectedContractForkLocalRuntimeContainer) activateLiveHandoff(p *Prepar
 			defer func() {
 				releasePredecessorPark()
 				if !out.Activation.Activated {
-					finalErr = errors.Join(finalErr, parked.ReconcileLiveRun(context.WithoutCancel(parkCtx), live.RunID))
+					finalErr = errors.Join(finalErr, parked.ReconcileLiveRun(forkcancelcapture.WithoutCancel(parkCtx), live.RunID))
 				}
 				finalErr = errors.Join(finalErr, use.Done())
 			}()
@@ -611,7 +612,7 @@ func (c selectedContractForkLocalRuntimeContainer) joinLiveSelectedWork(continua
 	if timeout <= 0 {
 		timeout = selectedContractAgentRuntimeDefaultQuiescenceTimeout
 	}
-	ctx, cancel := context.WithTimeout(c.attachment.ctx, timeout)
+	ctx, cancel := forkcancelcapture.WithTimeout(c.attachment.ctx, timeout)
 	defer cancel()
 	return c.attachment.runtime.WaitForQuiescence(ctx, c.attachment.runtime.bus)
 }

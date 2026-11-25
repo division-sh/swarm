@@ -6,6 +6,7 @@ import (
 	"errors"
 	"sync"
 
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
 )
 
@@ -34,7 +35,7 @@ func BindTransaction(caller, ctx context.Context, tx *sql.Tx, dialect Dialect) (
 		ctx = caller
 	}
 	scope := &orderingTransaction{tx: tx, dialect: dialect, caller: caller, active: true}
-	return context.WithValue(ctx, orderingTransactionKey{}, scope), func() {
+	return forkcancelcapture.WithValue(ctx, orderingTransactionKey{}, scope), func() {
 		scope.mu.Lock()
 		defer scope.mu.Unlock()
 		scope.active = false

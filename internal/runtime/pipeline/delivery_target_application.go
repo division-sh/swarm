@@ -10,6 +10,7 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -86,7 +87,7 @@ func withDeliveryTargetApplication(ctx context.Context, application DeliveryTarg
 	life := events.InstanceLife{RunID: application.Event().RunID(), FlowInstance: application.Route().InstancePath, Life: application.Owner().Life()}
 	deliveryContext.Life = &life
 	ctx = events.WithDeliveryContext(ctx, deliveryContext)
-	return context.WithValue(ctx, deliveryTargetApplicationContextKey{}, application)
+	return forkcancelcapture.WithValue(ctx, deliveryTargetApplicationContextKey{}, application)
 }
 
 func deliveryTargetApplicationFromContext(ctx context.Context) (DeliveryTargetApplication, bool) {

@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"strings"
@@ -82,7 +83,7 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 			complete := active.complete
 			am.dynamicFlowReadinessMu.Unlock()
 			if shutdownCancellation || (!activationAccepted && !complete) {
-				cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), dynamicFlowRuntimeReadinessCleanupTimeout)
+				cleanupCtx, cancel := forkcancelcapture.WithTimeout(forkcancelcapture.WithoutCancel(ctx), dynamicFlowRuntimeReadinessCleanupTimeout)
 				cleanupErr = am.settleDynamicFlowActiveAttempt(cleanupCtx, admission.key, active, retirement, flowActivationFailedRetirement)
 				cancel()
 			}
@@ -269,7 +270,7 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 			if result.Terminal {
 				disposition = flowActivationTerminalRetirement
 			}
-			cleanupErr := am.settleDynamicFlowActiveAttempt(context.WithoutCancel(ctx), key, active, retirement, disposition)
+			cleanupErr := am.settleDynamicFlowActiveAttempt(forkcancelcapture.WithoutCancel(ctx), key, active, retirement, disposition)
 			activationAccepted = true
 			if result.Progress == runtimepipeline.FlowAttachmentStale {
 				err = errors.Join(err, errDynamicFlowRuntimeReadinessPlanStale)

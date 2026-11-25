@@ -8,6 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 )
 
 // Occurrence is deliberately closed to the fixed runtime-generation types in
@@ -164,7 +165,7 @@ func (d *EventDelivery) resolveContinuation(intent DeliveryContinuationIntent) (
 	continuation := d.continuation
 	d.continuationSettling = true
 	d.mu.Unlock()
-	result, err := continuation.Resolve(context.WithoutCancel(d.Context()), intent)
+	result, err := continuation.Resolve(forkcancelcapture.WithoutCancel(d.Context()), intent)
 	if err == nil && result != DeliveryContinuationReturned && result != DeliveryContinuationConsumed && result != DeliveryContinuationTerminal {
 		err = errors.New("delivery continuation returned an invalid resolution")
 	}

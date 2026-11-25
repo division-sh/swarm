@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 )
 
 type Plan struct {
@@ -45,7 +46,7 @@ func WithExecution(ctx context.Context, plan Plan, identity Identity) context.Co
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return context.WithValue(ctx, executionContextKey{}, Execution{Plan: plan, Identity: identity.Normalize()})
+	return forkcancelcapture.WithValue(ctx, executionContextKey{}, Execution{Plan: plan, Identity: identity.Normalize()})
 }
 
 func FromContext(ctx context.Context) (Execution, bool) {

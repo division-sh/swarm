@@ -8,6 +8,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/replycontext"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -396,7 +397,7 @@ func withPublicationTargetOwners(ctx context.Context, projection publicationTarg
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return context.WithValue(ctx, publicationTargetOwnerEvidenceKey{}, projection)
+	return forkcancelcapture.WithValue(ctx, publicationTargetOwnerEvidenceKey{}, projection)
 }
 
 func publicationTargetOwnersFromContext(ctx context.Context) (publicationTargetOwnerEvidence, bool) {
