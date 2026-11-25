@@ -159,6 +159,7 @@ func requireReceiverPublicReadbackEvidence(t *testing.T, endpoint, runID string,
 			check(event)
 			var got operatorread.OperatorEventFull
 			requireServedJSONRPCResult(t, endpoint, "event.get", map[string]any{"event_id": event.EventID}, &got)
+			assertServedEventConnectPlans(t, event, got)
 			check(got)
 			if len(event.Deliveries) != len(got.Deliveries) {
 				t.Fatal("get/list delivery cardinality disagrees")
@@ -228,4 +229,23 @@ func requireReceiverPublicReadbackEvidence(t *testing.T, endpoint, runID string,
 		}
 		delete(publicEvents, event.EventID)
 	}
+}
+
+func assertServedEventConnectPlans(t *testing.T, listed, detail operatorread.OperatorEventFull) {
+	t.Helper()
+	if listed.ConnectPlans != nil {
+		t.Fatalf("list included detail-only connect_plans for %s", listed.EventID)
+	}
+	// These fixtures record a ledger for ordinary and selected-contract deliveries.
+	if detail.ConnectPlans == nil && len(detail.Deliveries) > 0 ||
+		detail.ConnectPlans != nil && (len(detail.Deliveries) == 0 || *detail.ConnectPlans == nil) {
+		t.Fatalf("unexpected detail connect_plans for %s: %+v", detail.EventID, detail.ConnectPlans)
+	}
+}
+
+func servedEventDetailForListComparison(t *testing.T, listed, detail operatorread.OperatorEventFull) operatorread.OperatorEventFull {
+	t.Helper()
+	assertServedEventConnectPlans(t, listed, detail)
+	detail.ConnectPlans = nil
+	return detail
 }

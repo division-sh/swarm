@@ -119,7 +119,7 @@ func requireSelectedForkDurablePublicReads(t *testing.T, endpoint string, owner 
 		eventIDs[event.EventID] = true
 		var exact operatorread.OperatorEventFull
 		requireServedJSONRPCResult(t, endpoint, "event.get", map[string]any{"event_id": event.EventID}, &exact)
-		if !reflect.DeepEqual(exact, event) {
+		if !reflect.DeepEqual(servedEventDetailForListComparison(t, event, exact), event) {
 			t.Fatalf("selected event list/get disagree: %+v / %+v", event, exact)
 		}
 	}

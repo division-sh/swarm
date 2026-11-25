@@ -271,7 +271,12 @@ func executeNodeIdentityWork(t *testing.T, process *releaseServeProcess, hash, s
 			delete(want, delivery.SubscriberID)
 		}
 		var read goldenEvent
-		if err := process.rpc.call(ctx, "event.get", map[string]any{"event_id": event.EventID}, &read); err != nil || !reflect.DeepEqual(read, event) {
+		err := process.rpc.call(ctx, "event.get", map[string]any{"event_id": event.EventID}, &read)
+		if err == nil && (event.ConnectPlans != nil || len(read.ConnectPlans) == 0 || read.ConnectPlans[0] != '[') {
+			t.Fatalf("list/detail connect_plans: list=%s detail=%s", event.ConnectPlans, read.ConnectPlans)
+		}
+		read.ConnectPlans = nil
+		if err != nil || !reflect.DeepEqual(read, event) {
 			t.Fatalf("event.get/list parity: %v\n%#v\n%#v", err, event, read)
 		}
 	}

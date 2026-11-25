@@ -74,7 +74,7 @@ func TestA2PortfolioPublicIndependentArrivalAdmissionBothStores(t *testing.T) {
 					t.Fatalf("ordinary forwarded arrival count=%d want=1", len(matches))
 				}
 				arrival := a2ReadJoinPublicEvent(t, rt, matches[0].EventID)
-				if !reflect.DeepEqual(matches[0], arrival) || arrival.RunID != setup.RunID || !reflect.DeepEqual(arrival.Payload, wirePayload) ||
+				if !reflect.DeepEqual(matches[0], servedEventDetailForListComparison(t, matches[0], arrival)) || arrival.RunID != setup.RunID || !reflect.DeepEqual(arrival.Payload, wirePayload) ||
 					arrival.NoDelivery != nil || len(arrival.Deliveries) != 1 {
 					t.Fatalf("public forwarded event lost payload or list/get agreement: %+v", arrival)
 				}
