@@ -154,15 +154,13 @@ func TestServedOrdinaryUncalledRetrySettlesAtStartupBothStores(t *testing.T) {
 			second, cuts := startOrdinaryRetryChild[ordinaryRetryCut](t, req)
 			after := awaitOrdinaryRetryChild(t, second, cuts)
 			requireOrdinaryRetryHistory(t, after)
-			if after.Claim != before.Claim || after.Attempts[0] != before.Attempts[0] ||
-				(*after.Effects.Attempts)[0].AttemptID != (*before.Effects.Attempts)[0].AttemptID ||
-				(*after.Effects.Attempts)[0].OperationID != (*before.Effects.Attempts)[0].OperationID {
+			if after.Claim != before.Claim || after.Attempts[0] != before.Attempts[0] {
 				t.Fatal("replacement startup changed the exact v1 evidence or acquired another delivery")
 			}
 			if _, err := os.Stat(launcher + ".business"); !os.IsNotExist(err) {
 				t.Fatalf("a CLI business subprocess started or its counter is unreadable: %v", err)
 			}
-			t.Logf("after PrepareLifecycle, before PrepareStart: same v%d status=%s closure=%s retry_count=%d v1=%s/%s effect=%s/%s attempts=%d saved_turns=%d business_calls=0", after.Claim.Version, after.Status, after.Attempts[1].Closure, after.Retries, after.Attempts[0].Outcome, after.Attempts[0].Reason, (*after.Effects.Attempts)[0].AttemptState, (*after.Effects.Attempts)[0].OperationState, after.Effects.ProviderAttempts, after.Turns)
+			t.Logf("after PrepareLifecycle, before PrepareStart: same v%d status=%s closure=%s retry_count=%d v1=%s/%s provider_attempts=%d saved_turns=%d business_calls=0", after.Claim.Version, after.Status, after.Attempts[1].Closure, after.Retries, after.Attempts[0].Outcome, after.Attempts[0].Reason, after.Effects.ProviderAttempts, after.Turns)
 			if after.Status != deliverylifecycle.StatusDeadLetter || after.Reason != "retry_exhausted" || after.Attempts[1].Closure != "settled" || after.Attempts[1].Outcome != "dead_letter" {
 				t.Fatalf("startup did not settle the exhausted never-called retry: status=%s reason=%q v2=%s/%s", after.Status, after.Reason, after.Attempts[1].Closure, after.Attempts[1].Outcome)
 			}
@@ -190,6 +188,10 @@ func (cut *ordinaryRetryCut) inspect(ctx context.Context, selected any) (err err
 	if err != nil {
 		return err
 	}
+	// Preserve the distinction between an inspected empty list and an omitted list across the child pipe.
+	if cut.Effects.Attempts != nil && *cut.Effects.Attempts == nil {
+		*cut.Effects.Attempts = []storetest.ManagedTurnEffectStorageAttempt{}
+	}
 	turns, err := storetest.ReadManagedAgentTurnStorage(ctx, selected, cut.Claim.Run, "load-agent")
 	cut.Turns = len(turns)
 	return err
@@ -210,31 +212,21 @@ func requireOrdinaryRetryHistory(t *testing.T, cut ordinaryRetryCut) {
 		t.Fatalf("v1 failure decoding differs: %v (retained bytes=%d); remaining fields were not validated", err, len(a[0].Failure))
 	}
 	logOrdinaryRetryFailure(t, "decoded", failure)
-	t.Logf("v1 provider evidence already read: attempts=%d active=%d saved_turns=%d", effects.ProviderAttempts, effects.ActiveProviderAttempts, cut.Turns)
-	if effects.Attempts != nil {
-		for _, attempt := range *effects.Attempts {
-			t.Logf("v1 provider attempt: exact_delivery=%t state=%s operation=%s launch_marked=%t response_observed=%t",
-				attempt.OriginDeliveryID == cut.Claim.Delivery, attempt.AttemptState, attempt.OperationState, attempt.LaunchedAt.Valid, attempt.ResponseObservedAt.Valid)
-		}
-	}
-	if failure.Detail.Code != "claude_cli_process_start_failed" {
-		t.Errorf("v1 failure code differs: got %q, want claude_cli_process_start_failed", failure.Detail.Code)
+	if failure.Class != runtimefailures.ClassDependencyUnavailable || failure.Detail.Code != "workspace_worker_target_missing" || failure.Component != "workspace" || failure.Operation != "admit_worker" {
+		t.Error("v1 did not record the exact workspace target admission failure")
 	}
 	if !failure.Retryable {
 		t.Error("v1 failure retryability differs: got false, want true")
 	}
-	if failure.Detail.Attributes["launch_rejected"] != true {
-		t.Error("v1 failure launch_rejected differs: want boolean true; see retained value above")
+	if _, present := failure.Detail.Attributes["launch_rejected"]; present {
+		t.Error("v1 failure launch_rejected differs: want absent before provider admission")
 	}
 	if t.Failed() {
 		t.FailNow()
 	}
-	if effects.ProviderAttempts != 1 || effects.ActiveProviderAttempts != 0 || effects.Attempts == nil || len(*effects.Attempts) != 1 || cut.Turns != 0 {
-		t.Fatalf("wrong provider history: attempts=%d active=%d saved_turns=%d", effects.ProviderAttempts, effects.ActiveProviderAttempts, cut.Turns)
-	}
-	effect := (*effects.Attempts)[0]
-	if effect.AttemptID == "" || effect.OperationID == "" || effect.OriginDeliveryID != cut.Claim.Delivery || effect.OriginEventID != cut.Claim.Event || effect.AttemptState != "terminal_failure" || effect.OperationState != "terminal_failure" {
-		t.Fatalf("v1 terminal effect not bound to the cut delivery: attempt=%s operation=%s", effect.AttemptState, effect.OperationState)
+	if effects.ProviderAttempts != 0 || effects.ActiveProviderAttempts != 0 || effects.LaunchedCandidateWorkAttempts != 0 ||
+		effects.Attempts == nil || len(*effects.Attempts) != 0 || effects.Settled != 0 || effects.Projected != 0 || effects.ResponseConsumed != 0 || cut.Turns != 0 {
+		t.Fatalf("expected inspected absence of provider attempts and results: attempts=%d active=%d saved_turns=%d", effects.ProviderAttempts, effects.ActiveProviderAttempts, cut.Turns)
 	}
 }
 
@@ -289,7 +281,7 @@ func runOrdinaryRetryProofChild(t *testing.T, req ordinaryRetryRequest) {
 				return
 			}
 			if claim.Version() == 1 {
-				// The startup probe used this launcher; now the first business start fails in exec.Cmd.Start.
+				// The first claim's workspace worker cannot inspect its target through the removed launcher.
 				if err := os.Remove(req.Launcher); err != nil {
 					t.Error(err)
 				}
