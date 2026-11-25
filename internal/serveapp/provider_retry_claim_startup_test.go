@@ -202,8 +202,32 @@ func requireOrdinaryRetryHistory(t *testing.T, cut ordinaryRetryCut) {
 		t.Fatalf("wrong ordinary retry history: status=%s retry_count=%d entries=%d", cut.Status, cut.Retries, len(a))
 	}
 	failure, err := runtimefailures.UnmarshalEnvelope([]byte(a[0].Failure))
-	if err != nil || failure.Detail.Code != "claude_cli_process_start_failed" || !failure.Retryable || failure.Detail.Attributes["launch_rejected"] != true {
-		t.Fatal("v1 did not record the ordinary retryable CLI start rejection")
+	if err != nil {
+		var unvalidated runtimefailures.Envelope
+		if json.Unmarshal([]byte(a[0].Failure), &unvalidated) == nil {
+			logOrdinaryRetryFailure(t, "unvalidated", unvalidated)
+		}
+		t.Fatalf("v1 failure decoding differs: %v (retained bytes=%d); remaining fields were not validated", err, len(a[0].Failure))
+	}
+	logOrdinaryRetryFailure(t, "decoded", failure)
+	t.Logf("v1 provider evidence already read: attempts=%d active=%d saved_turns=%d", effects.ProviderAttempts, effects.ActiveProviderAttempts, cut.Turns)
+	if effects.Attempts != nil {
+		for _, attempt := range *effects.Attempts {
+			t.Logf("v1 provider attempt: exact_delivery=%t state=%s operation=%s launch_marked=%t response_observed=%t",
+				attempt.OriginDeliveryID == cut.Claim.Delivery, attempt.AttemptState, attempt.OperationState, attempt.LaunchedAt.Valid, attempt.ResponseObservedAt.Valid)
+		}
+	}
+	if failure.Detail.Code != "claude_cli_process_start_failed" {
+		t.Errorf("v1 failure code differs: got %q, want claude_cli_process_start_failed", failure.Detail.Code)
+	}
+	if !failure.Retryable {
+		t.Error("v1 failure retryability differs: got false, want true")
+	}
+	if failure.Detail.Attributes["launch_rejected"] != true {
+		t.Error("v1 failure launch_rejected differs: want boolean true; see retained value above")
+	}
+	if t.Failed() {
+		t.FailNow()
 	}
 	if effects.ProviderAttempts != 1 || effects.ActiveProviderAttempts != 0 || effects.Attempts == nil || len(*effects.Attempts) != 1 || cut.Turns != 0 {
 		t.Fatalf("wrong provider history: attempts=%d active=%d saved_turns=%d", effects.ProviderAttempts, effects.ActiveProviderAttempts, cut.Turns)
@@ -212,6 +236,14 @@ func requireOrdinaryRetryHistory(t *testing.T, cut ordinaryRetryCut) {
 	if effect.AttemptID == "" || effect.OperationID == "" || effect.OriginDeliveryID != cut.Claim.Delivery || effect.OriginEventID != cut.Claim.Event || effect.AttemptState != "terminal_failure" || effect.OperationState != "terminal_failure" {
 		t.Fatalf("v1 terminal effect not bound to the cut delivery: attempt=%s operation=%s", effect.AttemptState, effect.OperationState)
 	}
+}
+
+func logOrdinaryRetryFailure(t *testing.T, decode string, failure runtimefailures.Envelope) {
+	t.Helper()
+	value, present := failure.Detail.Attributes["launch_rejected"]
+	launchRejected, boolean := value.(bool)
+	t.Logf("v1 failure: decoding=%s schema=%q class=%q code=%q component=%q operation=%q retryable=%t launch_rejected_present=%t launch_rejected_type=%T launch_rejected_true=%t",
+		decode, failure.SchemaVersion, failure.Class, failure.Detail.Code, failure.Component, failure.Operation, failure.Retryable, present, value, boolean && launchRejected)
 }
 
 func runOrdinaryRetryProofChild(t *testing.T, req ordinaryRetryRequest) {
