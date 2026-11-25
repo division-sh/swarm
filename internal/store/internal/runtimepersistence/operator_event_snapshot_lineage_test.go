@@ -277,9 +277,10 @@ func TestOperatorEventSnapshotInheritedLineageInterleavingBothStores(t *testing.
 						if len(page.Events) != 1 || page.NextCursor != "" {
 							t.Fatalf("exact inherited page: %+v", page)
 						}
-						full = page.Events[0]
+						assertOperatorListMatchesDetail(t, page.Events[0], before)
+					} else {
+						assertOperatorBatchScalarEqual(t, full, before)
 					}
-					assertOperatorBatchScalarEqual(t, full, before)
 					t.Logf("committed ancestry removal preceded successful owner=%d lineage=%d snapshot reads", f.probe.seen["inherited-owner"], f.probe.seen["inherited-lineage"])
 					f.probe.disarm()
 					_, freshRelease := f.probe.arm("none", 1, nil, nil)

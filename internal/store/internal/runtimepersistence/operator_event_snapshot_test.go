@@ -210,7 +210,7 @@ func TestOperatorEventSnapshotInterleavingBothStores(t *testing.T) {
 					if len(page.Events) != 1 || page.NextCursor == "" {
 						t.Fatalf("pre-change candidate/lookahead lost: %+v", page)
 					}
-					assertOperatorBatchScalarEqual(t, page.Events[0], f.before[1])
+					assertOperatorListMatchesDetail(t, page.Events[0], f.before[1])
 					if !reflect.DeepEqual(f.probe.candidates, f.ids) {
 						t.Fatalf("consumed prefix/lookahead=%v want=%v", f.probe.candidates, f.ids)
 					}
