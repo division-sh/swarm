@@ -386,8 +386,10 @@ func TestIssue642FreshPendingEffectBeforeJournalSIGKILLRecoveryBothStores(t *tes
 					}
 				}
 			}()
+			recoveryCtx, recoveryTrace := armSelectedForkActivation(wait, backend, capability)
+			defer recoveryTrace.Close()
 			go func() {
-				entries, err := owner.RecoverSelectedForkContexts(wait, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.Live), SelectedForkRecoveryEnvironment{
+				entries, err := owner.RecoverSelectedForkContexts(recoveryCtx, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.Live), SelectedForkRecoveryEnvironment{
 					SourceLoader: loader, AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.Live, ProcessCapability: capability},
 					LiveContexts: liveContexts, LiveRuns: selected.(runlifecycle.LiveRunReader),
 					AcquireLiveRuntime: func(ctx context.Context, reference sourceartifact.RootAdmissionReference) (*rootruntime.RuntimeContextUse, error) {
@@ -403,6 +405,8 @@ func TestIssue642FreshPendingEffectBeforeJournalSIGKILLRecoveryBothStores(t *tes
 			case selectedContext = <-startupEntered:
 			case outcome := <-done:
 				joined = true
+				logPostgresForkActivationFailure(t, backend, capability)
+				logSelectedForkActivationTrace(t, recoveryTrace, wait, outcome.err)
 				t.Fatalf("native recovery missed its startup cut: %+v error=%v", outcome.entries, outcome.err)
 			case <-wait.Done():
 				t.Fatal("successor did not reach its native startup reconciliation")
@@ -443,8 +447,11 @@ func TestIssue642FreshPendingEffectBeforeJournalSIGKILLRecoveryBothStores(t *tes
 			joined = true
 			recovered, err := outcome.entries, outcome.err
 			if err != nil || len(recovered) != 2 {
+				logPostgresForkActivationFailure(t, backend, capability)
+				logSelectedForkActivationTrace(t, recoveryTrace, wait, err)
 				t.Fatalf("pending-card native recovery: %+v error=%v", recovered, err)
 			}
+			recoveryTrace.Close()
 			matched := 0
 			for _, entry := range recovered {
 				if entry.RunID == checkpoint.ForkRun {

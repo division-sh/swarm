@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	"github.com/google/uuid"
 )
 
@@ -73,6 +74,7 @@ type Lease struct {
 	publicCompletion bool
 	runIDs           []string
 	settled          bool
+	forkCancelParent context.Context
 }
 
 type acceptedLeaseContextKey struct{}
@@ -291,13 +293,14 @@ func (g *gate) beginOwned(parent context.Context, transient bool, ancestor *Leas
 
 	ctx, cancel := context.WithCancelCause(parent)
 	lease := &Lease{gate: g, ctx: ctx, cancel: cancel, transient: transient, publicCompletion: publicCompletion, runIDs: runIDs}
+	lease.recordForkCancelParent(ctx, parent)
 	lease.ctx = context.WithValue(ctx, acceptedLeaseContextKey{}, lease)
 	lease.stop = context.AfterFunc(g.ctx, func() {
 		cause := error(ErrRetired)
 		if shutdown, ok := context.Cause(g.ctx).(*managerShutdownCancellation); ok && shutdown.owner.occurrence.gate == g {
 			cause = shutdown
 		}
-		cancel(cause)
+		lease.cancelFromGateForForkCapture(g.ctx, cancel, cause)
 	})
 	return lease, nil
 }
@@ -394,6 +397,38 @@ func (l *Lease) Context() context.Context {
 	return l.ctx
 }
 
+func (l *Lease) BindForkCancelCapture(label string) {
+	if p := forkcancelcapture.From(l.ctx); p != nil {
+		p.Bind(l)
+		p.Bind(l.gate)
+		p.Note(label+" lease from parent", l.ctx, l.forkCancelParent, l.ctx, nil, false)
+		p.Note(label+" lease gate", l.ctx, l.gate.ctx, l.gate.ctx, nil, false)
+	}
+}
+
+func (l *Lease) recordForkCancelParent(ctx, parent context.Context) {
+	if forkcancelcapture.From(ctx) != nil {
+		l.forkCancelParent = parent
+	}
+}
+
+func (l *Lease) cancelFromGateForForkCapture(gateCtx context.Context, cancel context.CancelCauseFunc, cause error) {
+	if trace := forkcancelcapture.Owner(l); trace != nil {
+		trace.Note("gate to lease bridge", l.ctx, gateCtx, gateCtx, cause, true)
+		trace.Cancel("lease gate bridge", l.ctx, l.ctx, cancel, cause)
+	} else {
+		cancel(cause)
+	}
+}
+
+func (l *Lease) cancelDoneForForkCapture(cancel context.CancelCauseFunc) {
+	if trace := forkcancelcapture.Owner(l); trace != nil {
+		trace.Cancel("lease Done", l.ctx, l.ctx, cancel, nil)
+	} else {
+		cancel(nil)
+	}
+}
+
 func (l *Lease) Done() error {
 	if l == nil {
 		return errors.New("work lease is required")
@@ -413,7 +448,7 @@ func (l *Lease) Done() error {
 		stop()
 	}
 	if cancel != nil {
-		cancel(nil)
+		l.cancelDoneForForkCapture(cancel)
 	}
 	var settleErr error
 	if g == nil {
@@ -531,7 +566,11 @@ func (g *gate) retireWithCause(cause error) {
 	g.state = gateRetired
 	cancel := g.cancel
 	g.mu.Unlock()
-	cancel(cause)
+	if trace := forkcancelcapture.Owner(g); trace != nil {
+		trace.Cancel("work gate retire", g.ctx, g.ctx, cancel, cause)
+	} else {
+		cancel(cause)
+	}
 }
 
 func (g *gate) wait(ctx context.Context) error {
@@ -1441,7 +1480,14 @@ func (p *Process) NewSelectedFork(ctx context.Context, identity SelectedForkIden
 	}
 	identity.ExecutionID = strings.TrimSpace(identity.ExecutionID)
 	identity.RunID = strings.TrimSpace(identity.RunID)
-	return &SelectedForkOccurrence{occurrence: p.occurrence.newChild(parentLease), identity: identity, process: p}, nil
+	fork := &SelectedForkOccurrence{occurrence: p.occurrence.newChild(parentLease), identity: identity, process: p}
+	if trace := forkcancelcapture.From(ctx); trace != nil {
+		parentLease.BindForkCancelCapture("selected parent process")
+		trace.Bind(fork.occurrence.gate)
+		trace.Note("selected gate run="+identity.RunID+" executor="+identity.ExecutionID,
+			fork.occurrence.gate.ctx, p.occurrence.gate.ctx, fork.occurrence.gate.ctx, nil, false)
+	}
+	return fork, nil
 }
 
 func (s *SelectedForkOccurrence) Begin(ctx context.Context) (*Lease, error) {

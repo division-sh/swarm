@@ -26,6 +26,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	"github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -255,6 +256,35 @@ func logForkProcessCapabilityOnFailure(t *testing.T, capability startupownership
 	}
 }
 
+func logPostgresForkActivationFailure(t *testing.T, backend string, capability startupownership.ProcessCapability) {
+	t.Helper()
+	if backend == "postgres" {
+		logForkProcessCapabilityOnFailure(t, capability)
+	}
+}
+
+func armSelectedForkActivation(ctx context.Context, backend string, capability startupownership.ProcessCapability) (context.Context, *forkcancelcapture.Capture) {
+	if backend != "postgres" {
+		return ctx, nil
+	}
+	traceCtx, trace := forkcancelcapture.Start(ctx)
+	startupownership.BindForkCancelCapture(capability, trace)
+	return traceCtx, trace
+}
+
+func logSelectedForkActivationTrace(t *testing.T, trace *forkcancelcapture.Capture, ctx context.Context, err error) {
+	t.Helper()
+	logSelectedForkActivationTraceAt(t, trace, "fixture activation assertion failed", ctx, err)
+}
+
+func logSelectedForkActivationTraceAt(t *testing.T, trace *forkcancelcapture.Capture, label string, ctx context.Context, err error) {
+	t.Helper()
+	if trace != nil {
+		trace.Note(label, nil, nil, ctx, err, false)
+		t.Logf("fork cancellation diagnostic:\n%s", trace.Output())
+	}
+}
+
 func TestIssue642ArmedArrivalTimeoutContinuesExactDeliveryBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
@@ -329,7 +359,9 @@ func TestIssue642ArmedArrivalTimeoutContinuesExactDeliveryBothStores(t *testing.
 			if err != nil {
 				t.Fatal(err)
 			}
-			result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
+			activationCtx, activationTrace := armSelectedForkActivation(ctx, backend, owner.ports.contexts.capability)
+			defer activationTrace.Close()
+			result, err := ExecuteSelectedContractRunFork(activationCtx, SelectedContractExecutionRequest{
 				SourceRunID: sourceRun, At: marker, Owner: owner, ForkOperation: &operation,
 				LiveRuntime: liveRuntime, LiveContexts: liveContexts, LiveRuns: selected.(runlifecycle.LiveRunReader),
 				SourceLoader: loader, ContractSelection: selection,
@@ -338,8 +370,10 @@ func TestIssue642ArmedArrivalTimeoutContinuesExactDeliveryBothStores(t *testing.
 			// The source callback is held; only the selected child may fire this arm.
 			if err != nil || !result.Activation.Activated {
 				logForkProcessCapabilityOnFailure(t, owner.ports.contexts.capability)
+				logSelectedForkActivationTraceAt(t, activationTrace, "armed arrival executor refused", ctx, err)
 				t.Fatalf("selected armed arrival activation must succeed: %+v err=%v", result, err)
 			}
+			activationTrace.Close()
 			child := result.Materialization.ForkRunID
 			operations := selected.(interface {
 				LoadForkOperation(context.Context, string, string, string) (runfork.ForkOperationRecord, bool, error)
