@@ -423,11 +423,7 @@ func inspectVerifyListeners(ctx context.Context, repo string, cfg RuntimeConfigL
 			})
 		} else if binding.name == "public-webhook" && intent.PublicWebhookListener != nil {
 			verifyDeploymentObservation(ctx, result, "listener_availability", "net.TCPListener.SyscallConn", binding.name+":"+intent.PublicWebhookListener.Addr().String(), failures.ClassDependencyUnavailable, func(context.Context) error {
-				connection, err := intent.PublicWebhookListener.SyscallConn()
-				if err != nil {
-					return err
-				}
-				return connection.Control(func(uintptr) {})
+				return inspectBorrowedWebhookListener(intent.PublicWebhookListener)
 			})
 		} else if intent.DryRun {
 			probeServeDryRunListener(ctx, binding, &held, result)
@@ -450,4 +446,12 @@ func inspectVerifyListeners(ctx context.Context, repo string, cfg RuntimeConfigL
 		})
 	}
 	return nil
+}
+
+func inspectBorrowedWebhookListener(listener *net.TCPListener) error {
+	connection, err := listener.SyscallConn()
+	if err != nil {
+		return err
+	}
+	return connection.Control(func(uintptr) {})
 }
