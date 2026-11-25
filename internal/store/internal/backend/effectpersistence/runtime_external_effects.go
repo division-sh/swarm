@@ -148,6 +148,7 @@ func (s *EffectPostgresOwner) ReconcileExternalEffectAttempts(ctx context.Contex
 			counts, err := settleUncalledStartupClaims(txctx, mutation, s.delivery, uncalled, request.Now())
 			summary.UncalledAgentClaimsDeadLettered = counts.uncalled
 			summary.UncalledRetryExhaustedClaimsDeadLettered = counts.retryExhausted
+			summary.UncalledFailedRetryClaimsDeadLettered = counts.failedRetryExhausted
 			return err
 		})
 		return summary, err
@@ -193,6 +194,7 @@ func (s *EffectSQLiteOwner) ReconcileExternalEffectAttempts(ctx context.Context,
 			counts, err := settleUncalledStartupClaims(txctx, mutation, s.delivery, uncalled, request.Now())
 			summary.UncalledAgentClaimsDeadLettered = counts.uncalled
 			summary.UncalledRetryExhaustedClaimsDeadLettered = counts.retryExhausted
+			summary.UncalledFailedRetryClaimsDeadLettered = counts.failedRetryExhausted
 			return err
 		})
 		return summary, err

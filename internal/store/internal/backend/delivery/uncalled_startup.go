@@ -14,11 +14,19 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/runstate"
 )
 
+type UncalledStartupKind int
+
+const (
+	UncalledStartupFirstCall UncalledStartupKind = iota + 1
+	UncalledStartupInterruptedRetry
+	UncalledStartupFailedRetry
+)
+
 type UncalledStartupClaim struct {
-	Claim          deliverylifecycle.Claim
-	Actor          agentidentity.Identity
-	BundleHash     string
-	RetryExhausted bool
+	Claim      deliverylifecycle.Claim
+	Actor      agentidentity.Identity
+	BundleHash string
+	Kind       UncalledStartupKind
 }
 
 func (s *DeliveryPostgresOwner) UncalledStartupClaims(ctx context.Context, attempt *mutationprotocol.Attempt, lock bool) ([]UncalledStartupClaim, error) {
@@ -76,7 +84,37 @@ const uncalledStartupClaimsSelection = `startup_claims AS (
 		      AND o.effect_kind='provider_turn' AND o.authority_kind='normal_agent' AND o.state='outcome_uncertain'
 		      AND o.agent_run_id=d.run_id AND o.agent_id=d.subscriber_id AND o.bundle_hash=d.authority_bundle_hash
 		      AND t.first_launched_at IS NOT NULL AND t.cancel_reason IS NULL AND t.settled_at IS NULL AND t.origin_evidence IS NULL)
-		THEN 2 ELSE 0 END AS arm
+		THEN 2
+		WHEN d.claim_version=2 AND d.retry_count=1 AND d.max_retries=1
+		  AND r.origin_kind<>'fork_materialization'
+		  AND EXISTS (
+		    SELECT 1 FROM event_delivery_attempts prior
+		    JOIN runtime_agent_turn_lifetimes t ON t.origin_kind='delivery' AND t.origin_id=d.delivery_id
+		      AND t.run_id=d.run_id AND t.agent_id=d.subscriber_id
+		    JOIN runtime_external_effect_attempts anchor ON anchor.attempt_id=t.admitted_attempt_id
+		      AND anchor.origin_kind='delivery' AND anchor.origin_delivery_id=d.delivery_id
+		    JOIN runtime_external_effect_attempts bound ON bound.attempt_id=t.current_attempt_id
+		      AND bound.origin_kind='delivery' AND bound.origin_delivery_id=d.delivery_id
+		    WHERE prior.delivery_id=d.delivery_id AND prior.claim_version=1
+		      AND prior.closure_kind='settled' AND prior.open_marker=FALSE AND prior.completed_at IS NOT NULL
+		      AND prior.outcome='retry_scheduled' AND prior.reason_code='handler_failure' AND prior.failure IS NOT NULL
+		      AND t.cancel_reason IS NULL AND t.origin_evidence IS NULL
+		      AND NOT EXISTS (
+		        SELECT 1 FROM runtime_external_effect_attempts e
+		        LEFT JOIN runtime_external_effect_operations o ON o.operation_id=e.operation_id
+		        WHERE e.origin_delivery_id=d.delivery_id AND (
+		          e.origin_kind='delivery' AND e.origin_claim_version=prior.claim_version AND e.origin_claim_token=prior.claim_token
+		          AND e.origin_run_id=d.run_id AND e.origin_route_identity=d.route_identity
+		          AND e.origin_subscriber_type=d.subscriber_type AND e.origin_subscriber_id=d.subscriber_id
+		          AND e.state='terminal_failure' AND e.completed_at IS NOT NULL
+		          AND e.completion_projection_phase IS NULL AND e.completion_continuation_active=FALSE
+		          AND o.effect_kind='provider_turn' AND o.authority_kind='normal_agent' AND o.state='terminal_failure'
+		          AND o.agent_run_id=d.run_id AND o.agent_id=d.subscriber_id AND o.bundle_hash=d.authority_bundle_hash
+		        ) IS NOT TRUE)
+		      AND NOT EXISTS (
+		        SELECT 1 FROM runtime_provider_attempt_drains drain
+		        WHERE drain.origin_kind='delivery' AND drain.origin_delivery_id=d.delivery_id))
+		THEN 3 ELSE 0 END AS arm
 		FROM event_deliveries d JOIN runs r ON r.run_id=d.run_id AND r.bundle_hash=d.authority_bundle_hash
 		JOIN event_delivery_attempts c ON c.delivery_id=d.delivery_id AND c.claim_version=d.claim_version AND c.open_marker=TRUE
 		WHERE d.status='in_progress' AND d.subscriber_type='agent' AND d.execution_authority_kind='normal_runtime'
@@ -86,7 +124,7 @@ const uncalledStartupClaimsSelection = `startup_claims AS (
 		    AND g.runtime_generation=d.execution_authority_generation AND g.bundle_hash=d.authority_bundle_hash
 		    AND g.selected_execution_id IS NULL AND g.state='admitted' AND g.process_authority_id<>$1)
 	)
-	SELECT delivery_id, arm=2 FROM startup_claims WHERE arm<>0 ORDER BY run_id,delivery_id`
+	SELECT delivery_id, arm FROM startup_claims WHERE arm<>0 ORDER BY run_id,delivery_id`
 
 func (a *Adapter) uncalledStartupClaimsTx(ctx context.Context, tx *sql.Tx, processID string, lock bool) ([]UncalledStartupClaim, error) {
 	rows, err := tx.QueryContext(ctx, uncalledStartupClaimsSQL, processID)
@@ -94,13 +132,13 @@ func (a *Adapter) uncalledStartupClaimsTx(ctx context.Context, tx *sql.Tx, proce
 		return nil, err
 	}
 	type candidate struct {
-		id             string
-		retryExhausted bool
+		id   string
+		kind UncalledStartupKind
 	}
 	var candidates []candidate
 	for rows.Next() {
 		var row candidate
-		if err := rows.Scan(&row.id, &row.retryExhausted); err != nil {
+		if err := rows.Scan(&row.id, &row.kind); err != nil {
 			return nil, errors.Join(err, rows.Close())
 		}
 		candidates = append(candidates, row)
@@ -122,10 +160,16 @@ func (a *Adapter) uncalledStartupClaimsTx(ctx context.Context, tx *sql.Tx, proce
 		if err != nil {
 			return nil, err
 		}
-		if candidate.retryExhausted && (claim.Version() != 2 || record.RetryCount != 1 || record.MaxRetries != 1) {
-			return nil, fmt.Errorf("uncalled startup retry candidate differs from its exact exhausted claim")
+		switch candidate.kind {
+		case UncalledStartupFirstCall:
+		case UncalledStartupInterruptedRetry, UncalledStartupFailedRetry:
+			if claim.Version() != 2 || record.RetryCount != 1 || record.MaxRetries != 1 {
+				return nil, fmt.Errorf("uncalled startup retry candidate differs from its exact exhausted claim")
+			}
+		default:
+			return nil, fmt.Errorf("invalid uncalled startup claim kind %d", candidate.kind)
 		}
-		out = append(out, UncalledStartupClaim{Claim: claim, Actor: actor, BundleHash: record.Authority.SourceArtifact().BundleHash(), RetryExhausted: candidate.retryExhausted})
+		out = append(out, UncalledStartupClaim{Claim: claim, Actor: actor, BundleHash: record.Authority.SourceArtifact().BundleHash(), Kind: candidate.kind})
 	}
 	return out, nil
 }
