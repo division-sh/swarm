@@ -74,6 +74,7 @@ func TestOwnedMockClockLocalAgentConsumerBothStores(t *testing.T) {
 			}
 			var full operatorread.OperatorEventFull
 			requireServedJSONRPCResult(t, endpoint, "event.get", map[string]any{"event_id": settled.EventID}, &full)
+			assertServedEventConnectPlans(t, settled, full)
 			if full.EventID != settled.EventID || full.RunID != runID || full.Source != "." || len(full.Deliveries) != 1 || full.Deliveries[0].DeliveryID != settled.Deliveries[0].DeliveryID || len(full.DeadLetters) != 0 {
 				t.Fatalf("local agent full delivery lost exact publication: %+v", full)
 			}

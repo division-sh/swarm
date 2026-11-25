@@ -64,6 +64,10 @@ func TestEventListDeploymentDeadLettersBothStores(t *testing.T) {
 			if err != nil || len(full.DeadLetters) != 2 || len(full.Deliveries) != 3 {
 				t.Fatalf("native fixture: %+v err=%v", full, err)
 			}
+			if full.ConnectPlans == nil || *full.ConnectPlans == nil || len(*full.ConnectPlans) != 0 {
+				t.Fatal("detail did not include the recorded empty connect_plans")
+			}
+			full.ConnectPlans = nil
 			wanted[event.ID()] = full
 			plain := eventtest.ExistingRunRootIngress(uuid.NewString(), "plain.list", "runtime", "", nil, 0, runID, events.EventEnvelope{}, at)
 			storetest.CommitSemanticEventWithRoutes(t, ctx, selected, plain, nil, runtimepipelineobligation.ScopeSubscribed)
@@ -82,6 +86,13 @@ func TestEventListDeploymentDeadLettersBothStores(t *testing.T) {
 			var page operatorread.OperatorEventListResult
 			if err := json.Unmarshal(raw, &page); err != nil || len(page.Events) != 1 {
 				t.Fatalf("public page: %s err=%v", raw, err)
+			}
+			rows, ok := asMap(t, response.Result)["events"].([]any)
+			if !ok || len(rows) != 1 {
+				t.Fatalf("public list did not return one event: %s", raw)
+			}
+			if _, ok := asMap(t, rows[0])["connect_plans"]; ok {
+				t.Fatal("list included detail-only connect_plans")
 			}
 			for _, full := range page.Events {
 				if seen[full.EventID] || !jsonValueEqual(full, wanted[full.EventID]) {

@@ -384,7 +384,7 @@ func requireA2PortfolioEmission(t *testing.T, rt servedControlProofRuntime, runI
 		t.Fatalf("ordinary emission %s from %s: matches=%+v", name, sourceID, matches)
 	}
 	full := requireA2PortfolioEvent(t, rt, matches[0].EventID, runID, name, payload)
-	if !reflect.DeepEqual(matches[0], full) {
+	if !reflect.DeepEqual(matches[0], servedEventDetailForListComparison(t, matches[0], full)) {
 		t.Fatalf("portfolio event list/get disagree: list=%+v full=%+v", matches[0], full)
 	}
 	return full

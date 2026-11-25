@@ -44,6 +44,9 @@ func TestOperatorEventBatchPaginationBoundaryBothStores(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				if got.ConnectPlans != nil {
+					t.Fatal("no-delivery detail included top-level connect_plans")
+				}
 				scalar[id] = got
 			}
 			for _, order := range []string{"asc", "desc"} {

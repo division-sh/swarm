@@ -1375,6 +1375,8 @@ type goldenEvent struct {
 	Deliveries    []goldenEventDelivery `json:"deliveries"`
 	NoDelivery    *goldenNoDelivery     `json:"no_delivery"`
 	DeadLetters   []json.RawMessage     `json:"dead_letters"`
+
+	ConnectPlans json.RawMessage `json:"connect_plans,omitempty"`
 }
 
 type goldenRuntimeLog map[string]json.RawMessage

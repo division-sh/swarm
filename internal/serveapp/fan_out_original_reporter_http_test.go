@@ -575,6 +575,7 @@ func assertIssue2394ReporterEventGet(t *testing.T, rt servedControlProofRuntime,
 	t.Helper()
 	var got operatorread.OperatorEventFull
 	issue2394ReporterRPC(t, rt, "event.get", map[string]any{"event_id": want.EventID}, &got)
+	assertServedEventConnectPlans(t, want, got)
 	if got.EventID != want.EventID || got.RunID != want.RunID || !reflect.DeepEqual(got.Payload, want.Payload) {
 		t.Fatalf("original reporter event.get changed payload: %+v want=%+v", got, want)
 	}

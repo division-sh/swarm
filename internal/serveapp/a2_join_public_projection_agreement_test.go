@@ -326,7 +326,7 @@ func a2ReadJoinPublicEvent(t *testing.T, rt servedControlProofRuntime, eventID s
 			matches = append(matches, listed)
 		}
 	}
-	if len(matches) != 1 || !reflect.DeepEqual(matches[0], event) {
+	if len(matches) != 1 || !reflect.DeepEqual(matches[0], servedEventDetailForListComparison(t, matches[0], event)) {
 		t.Fatalf("public join event list/get disagree: event=%+v matches=%+v", event, matches)
 	}
 	return event
