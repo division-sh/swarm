@@ -812,19 +812,20 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 		presenter.fail(1, "serve_admission", err)
 		return 2
 	}
+	publicWebhookOrigin, publicWebhookListen := opts.PublicWebhookBaseURL, opts.PublicWebhookListen
 	if publicIngressMode == runtimepublicingress.ModeNativeTLS {
 		if err := cliapp.ValidateServePublicWebhookPort(cfg, cliapp.ChannelPackLoad{}); err != nil {
 			presenter.fail(1, "serve_admission", err)
 			return 2
 		}
-		opts.PublicWebhookBaseURL, opts.PublicWebhookListen, err = runtimepublicingress.NativeTLSAddresses(cfg.Serve.PublicWebhook)
+		publicWebhookOrigin, publicWebhookListen, err = runtimepublicingress.NativeTLSAddresses(cfg.Serve.PublicWebhook)
 		if err != nil {
 			presenter.fail(1, "serve_admission", err)
 			return 2
 		}
 	}
 	if publicIngressEnabled {
-		if err := runtimepublicingress.ValidateConfiguration(publicIngressMode, opts.PublicWebhookBaseURL, opts.PublicWebhookListen); err != nil {
+		if err := runtimepublicingress.ValidateConfiguration(publicIngressMode, publicWebhookOrigin, publicWebhookListen); err != nil {
 			presenter.fail(1, "serve_admission", err)
 			return 2
 		}
@@ -915,6 +916,7 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 		presenter.fail(5, "credentials", err)
 		return 1
 	}
+	opts.PublicWebhookBaseURL, opts.PublicWebhookListen = publicWebhookOrigin, publicWebhookListen
 	composition := runtimeCompositionRequest{
 		BootCheckInput: &checkInput,
 		Purpose:        executionposture.Live, ProviderIngress: true,
