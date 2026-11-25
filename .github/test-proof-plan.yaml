@@ -103,6 +103,7 @@ profiles:
     - conformance-2394-pressure
     - serveapp-other
     - serveapp-other-late
+    - serveapp-other-late-lifecycle
     - serveapp-2564-h1
     - serveapp-2564-h2
     - serveapp-delayed-commit-preservation
@@ -193,6 +194,7 @@ profiles:
     - serveapp-i-reporter
     - serveapp-i-reporter-all-commit
     - serveapp-other-late
+    - serveapp-other-late-lifecycle
     - serveapp-2564-h1
     - serveapp-2564-h2
     - serveapp-delayed-commit-preservation
@@ -1091,7 +1093,7 @@ units:
   serveapp-other-late:
     packages:
       - github.com/division-sh/swarm/internal/serveapp
-    run: '^(Test([J-LNOQ].*|P($|[^r].*|r($|[^o].*|o($|[^v].*)))|Issue2394(Held.*|Served(F.*|S.*)|Stop.*|Selected.*)|Issue2564(DecisionCard.*|Served(H3.*|M33.*))|Issue2566ReporterFiniteFixtureCanCloseBothStores|Inbound.*|Initialize.*|Internal.*|M($|[^a].*)|Ma[^i].*|ServedPublicationDirect.*)|Example.*|Fuzz.*)$'
+    run: '^(Test(P($|[^r].*|r($|[^o].*|o($|[^v].*)))|Issue2566ReporterFiniteFixtureCanCloseBothStores|Initialize.*|Internal.*|M($|[^a].*)|Ma[^i].*|ServedPublicationDirect.*)|Example.*|Fuzz.*)$'
     required_children:
       TestPublicCompletionPreAckRetirementBothStores: [default_sqlite/event.publish, default_sqlite/run.start, explicit_postgres/event.publish, explicit_postgres/run.start]
       TestPublicCompletionNativePreAckRetirementBothStores: [default_sqlite/event.publish, default_sqlite/run.start, explicit_postgres/event.publish, explicit_postgres/run.start]
@@ -1110,6 +1112,13 @@ units:
       TestPublicFeedOnlyInvalidAcknowledgedResultBothStores: [default_sqlite, explicit_postgres]
       TestIssue2566ReporterFiniteFixtureCanCloseBothStores: [sqlite, postgres]
       TestManagedEmitPublicationExactScopeBothStores: [default_sqlite/root, default_sqlite/imported, default_sqlite/nested, default_sqlite/template, explicit_postgres/root, explicit_postgres/imported, explicit_postgres/nested, explicit_postgres/template]
+    count_mode: count-1
+    environment_ids: *postgres_gateway_empty
+    budget_class: full
+  serveapp-other-late-lifecycle:
+    packages:
+      - github.com/division-sh/swarm/internal/serveapp
+    run: '^Test([J-LNOQ].*|Issue2394(Held.*|Served(F.*|S.*)|Stop.*|Selected.*)|Issue2564(DecisionCard.*|Served(H3.*|M33.*))|Inbound.*)$'
     count_mode: count-1
     environment_ids: *postgres_gateway_empty
     budget_class: full
