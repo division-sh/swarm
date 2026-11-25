@@ -8,6 +8,7 @@ import (
 	"math"
 
 	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 )
 
 var ErrProcessGenerationMissing = errors.New("initialized store has no process-generation singleton")
@@ -71,7 +72,10 @@ func readProcessGeneration(ctx context.Context, q processGenerationReader, sqlit
 	if ctx == nil || q == nil {
 		return processbinding.LeaseStamp{}, errors.New("process-generation context and reader are required")
 	}
+	trace := forkcancelcapture.Resolve(ctx, q)
+	before := trace.ReadStart(ctx)
 	if err := ctx.Err(); err != nil {
+		trace.ReadFailure("generation read rejected before SQL", before, q, ctx, err)
 		return processbinding.LeaseStamp{}, err
 	}
 	query := `SELECT generation, CAST(lease_id AS TEXT), owner_id, CAST(boot_id AS TEXT),
@@ -89,6 +93,7 @@ func readProcessGeneration(ctx context.Context, q processGenerationReader, sqlit
 		return processbinding.LeaseStamp{}, ErrProcessGenerationMissing
 	}
 	if err != nil {
+		trace.ReadFailure("generation SQL read returned", before, q, ctx, err)
 		return processbinding.LeaseStamp{}, fmt.Errorf("read process generation: %w", err)
 	}
 	return decodeProcessGeneration(ctx, generation, lease, owner, boot, runtime, backend, sqlite)
