@@ -302,6 +302,11 @@ func TestMandatorySoakWorkflowMatrixExecutionAndShellSyntax(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			// Matrix rows name runner batches, which may execute multiple units.
+			batches := make(map[string]testplanning.ProofBatch, len(plan.Batches))
+			for _, batch := range plan.Batches {
+				batches[batch.ID] = batch
+			}
 			seen := map[string]bool{}
 			declaredSoaks := map[string]bool{}
 			soaks := 0
@@ -315,23 +320,29 @@ func TestMandatorySoakWorkflowMatrixExecutionAndShellSyntax(t *testing.T) {
 					t.Fatal(err)
 				}
 				for _, entry := range matrix.Include {
-					u, err := plan.Unit(entry.Unit)
-					if err != nil {
-						t.Fatal(err)
+					batch, ok := batches[entry.Unit]
+					if !ok || len(batch.Units) == 0 || lane == "soak_matrix" && len(batch.Units) != 1 {
+						t.Fatalf("invalid matrix batch %s/%s", lane, entry.Unit)
 					}
-					if lane == "soak_matrix" {
-						if declaredSoaks[u.ID] || u.BudgetClass != "soak" {
-							t.Fatalf("duplicate/foreign soak declaration %s", u.ID)
+					for _, id := range batch.Units {
+						u, err := plan.Unit(id)
+						if err != nil {
+							t.Fatal(err)
 						}
-						declaredSoaks[u.ID] = true
-						continue // Inventory only; the unified matrix owns execution once.
-					}
-					if seen[u.ID] {
-						t.Fatalf("duplicated/misrouted unit %s", u.ID)
-					}
-					seen[u.ID] = true
-					if u.BudgetClass == "soak" {
-						soaks++
+						if lane == "soak_matrix" {
+							if declaredSoaks[u.ID] || u.BudgetClass != "soak" {
+								t.Fatalf("duplicate/foreign soak declaration %s", u.ID)
+							}
+							declaredSoaks[u.ID] = true
+							continue // Inventory only; the unified matrix owns execution once.
+						}
+						if seen[u.ID] {
+							t.Fatalf("duplicated/misrouted unit %s", u.ID)
+						}
+						seen[u.ID] = true
+						if u.BudgetClass == "soak" {
+							soaks++
+						}
 					}
 				}
 			}
