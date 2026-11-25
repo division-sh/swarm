@@ -5,12 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
 	"os"
-	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -24,38 +21,29 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
+	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
-	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/runtime/workspace"
-	"github.com/division-sh/swarm/internal/sourceartifact"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/tests/support/testutil"
-	"gopkg.in/yaml.v3"
+	"github.com/division-sh/swarm/tests/support/testutil/llmapi"
 )
 
 const ordinaryRetryChildEnv = "SWARM_TEST_ORDINARY_RETRY_CHILD"
 
 type ordinaryRetryRequest struct {
-	Root, Config, Source, Backend, Launcher string
-	Image, MCPListen                        string
-	Target                                  uncalledAgentClaim
-}
-
-type ordinaryRetryCrashCut struct {
-	Claim   uncalledAgentClaim
-	Cleanup sourceartifact.RuntimeProjectionCleanup
+	Root, Config, Source, Backend string
+	Target                        uncalledAgentClaim
 }
 
 type ordinaryRetryCut struct {
-	Claim                    uncalledAgentClaim
-	Status                   deliverylifecycle.Status
-	Retries                  int
-	Reason                   string
-	Attempts                 []storetest.DeliveryAttemptDiagnosticRow
-	Effects                  storetest.ManagedTurnEffectStorage
-	ProviderHistoryInspected bool
-	Turns                    int
+	Claim    uncalledAgentClaim
+	Status   deliverylifecycle.Status
+	Retries  int
+	Reason   string
+	Attempts []storetest.DeliveryAttemptDiagnosticRow
+	Effects  storetest.ManagedTurnEffectStorage
+	Turns    int
 }
 
 func TestServedOrdinaryUncalledRetrySettlesAtStartupBothStores(t *testing.T) {
@@ -67,40 +55,41 @@ func TestServedOrdinaryUncalledRetrySettlesAtStartupBothStores(t *testing.T) {
 		runOrdinaryRetryProofChild(t, req)
 		return
 	}
-	image := buildCompletion2270CLIImage(t)
-	network, err := exec.Command("docker", "network", "inspect", workspace.DefaultWorkspaceNetwork(), "--format", "{{json .IPAM.Config}}").CombinedOutput()
-	var addresses []struct{ Gateway string }
-	if err != nil || json.Unmarshal(network, &addresses) != nil || len(addresses) != 1 || net.ParseIP(addresses[0].Gateway) == nil {
-		t.Fatalf("inspect exact Docker proof interface: %v: %s", err, network)
-	}
-	mcpListen := net.JoinHostPort(addresses[0].Gateway, "0")
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			isolateCLIAPIConfigEnv(t)
 			unsetStoreSelectorEnv(t)
-			t.Setenv("SWARM_CLAUDE_USE_MCP", "1")
+			const profile, key = "openai_compatible", "restart-key"
+			provider := llmapi.New(t, llmapi.OpenAICompatible, "/v1/chat/completions", key, func(req llmapi.Request) (llmapi.Reply, error) {
+				if req.Number != 1 {
+					return llmapi.Reply{}, fmt.Errorf("unexpected provider request %d", req.Number)
+				}
+				return llmapi.Reply{StatusCode: 429, ErrorBody: `{"error":{"message":"rate limited"}}`}, nil
+			})
 			root := t.TempDir()
-			launcher := filepath.Join(root, "docker-proof")
-			installOrdinaryRetryLauncher(t, launcher)
 			location := filepath.Join(root, "retry.sqlite")
 			configPath := writeStandingMockRuntimeConfig(t, backend, location)
 			if backend == "postgres" {
 				location = testutil.StartEmptyPostgresDSN(t)
 				configPath = writeChannelOnboardingPostgresRuntimeConfig(t, location)
 			}
-			configureOrdinaryRetryProof(t, configPath, launcher, image)
+			configureProviderResume(t, configPath, profile, provider.URL)
 			credentialPath := filepath.Join(root, "credentials.json")
 			t.Setenv("SWARM_CREDENTIALS_FILE", credentialPath)
 			secrets, err := credentials.NewFileStore(credentialPath)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := secrets.Set(t.Context(), "CLAUDE_CODE_OAUTH_TOKEN", "ordinary-retry-fixture-token"); err != nil {
+			selection, err := llmselection.ResolveActiveBackend(profile)
+			if err != nil {
 				t.Fatal(err)
 			}
-			source := writeServedLiveAgentFixture(t)
-			req := ordinaryRetryRequest{Root: root, Config: configPath, Source: source, Backend: backend, Launcher: launcher, Image: image, MCPListen: mcpListen}
-			first, claims := startOrdinaryRetryChild[ordinaryRetryCrashCut](t, req)
+			if err := secrets.Set(t.Context(), selection.Credential.EnvVar, key); err != nil {
+				t.Fatal(err)
+			}
+			source := writeProviderResumeSource(t, provider.URL+"/unused-tool", false)
+			req := ordinaryRetryRequest{Root: root, Config: configPath, Source: source, Backend: backend}
+			first, claims := startOrdinaryRetryChild[uncalledAgentClaim](t, req)
 			endpoint := first.endpoint(t) + "/v1/rpc"
 			seed := requireServedEventPublishRPCResult(t, endpoint, map[string]any{
 				"event_name": "item.received", "bundle_hash": servedEventPublishFixtureBundleHash(t, source),
@@ -108,11 +97,10 @@ func TestServedOrdinaryUncalledRetrySettlesAtStartupBothStores(t *testing.T) {
 			})
 			waitProviderResumeSeedDelivery(t, endpoint, seed.EventID)
 			input := requireServedEventPublishRPCResult(t, endpoint, map[string]any{
-				"event_name": "item.processed", "run_id": seed.RunID, "source_event_id": seed.EventID,
-				"payload": map[string]any{"item_id": "ordinary-retry"}, "idempotency_key": "ordinary-retry-input",
+				"event_name": "item.agent_hold", "run_id": seed.RunID, "source_event_id": seed.EventID,
+				"payload": map[string]any{"note": "ordinary-retry"}, "idempotency_key": "ordinary-retry-input",
 			})
-			crash := awaitOrdinaryRetryChild(t, first, claims)
-			claim := crash.Claim
+			claim := awaitOrdinaryRetryChild(t, first, claims)
 			if claim.Version != 2 || claim.Event != input.EventID || claim.Run != seed.RunID || claim.Delivery == "" {
 				t.Fatalf("wrong v2 crash cut: %+v", claim)
 			}
@@ -138,19 +126,12 @@ func TestServedOrdinaryUncalledRetrySettlesAtStartupBothStores(t *testing.T) {
 			if before.Status != deliverylifecycle.StatusInProgress || before.Attempts[1].Closure != "open" {
 				t.Fatalf("predecessor did not hold v2 before its provider call: %s/%s", before.Status, before.Attempts[1].Closure)
 			}
+			if count := len(provider.Requests()); count != 1 {
+				t.Fatalf("before kill: provider wire requests=%d, want the sole v1 request", count)
+			}
 			if err := first.kill(); err != nil {
 				t.Fatal(err)
 			}
-			t.Cleanup(func() {
-				if err := workspace.NewDockerManager().DisposeProjectionContainers(context.Background(), crash.Cleanup); err != nil {
-					t.Errorf("retire crashed fixture workspace: %v", err)
-					return
-				}
-				if err := sourceartifact.SettleRuntimeProjectionCleanup(crash.Cleanup); err != nil {
-					t.Errorf("retire crashed fixture projection: %v", err)
-				}
-			})
-			installOrdinaryRetryLauncher(t, launcher)
 			req.Target = claim
 			second, cuts := startOrdinaryRetryChild[ordinaryRetryCut](t, req)
 			after := awaitOrdinaryRetryChild(t, second, cuts)
@@ -158,10 +139,16 @@ func TestServedOrdinaryUncalledRetrySettlesAtStartupBothStores(t *testing.T) {
 			if after.Claim != before.Claim || after.Attempts[0] != before.Attempts[0] {
 				t.Fatal("replacement startup changed the exact v1 evidence or acquired another delivery")
 			}
-			if _, err := os.Stat(launcher + ".business"); !os.IsNotExist(err) {
-				t.Fatalf("a CLI business subprocess started or its counter is unreadable: %v", err)
+			prior, retained := (*before.Effects.Attempts)[0], (*after.Effects.Attempts)[0]
+			if prior.AttemptID != retained.AttemptID || prior.OperationID != retained.OperationID ||
+				!prior.LaunchedAt.Time.Equal(retained.LaunchedAt.Time) || !prior.ResponseObservedAt.Time.Equal(retained.ResponseObservedAt.Time) ||
+				!prior.CompletedAt.Time.Equal(retained.CompletedAt.Time) || before.Turns != after.Turns {
+				t.Fatal("replacement changed the retained v1 provider attempt or turn diagnostics")
 			}
-			t.Logf("after PrepareLifecycle, before PrepareStart: same v%d status=%s closure=%s retry_count=%d v1=%s/%s provider_attempts=%d saved_turns=%d business_calls=0", after.Claim.Version, after.Status, after.Attempts[1].Closure, after.Retries, after.Attempts[0].Outcome, after.Attempts[0].Reason, after.Effects.ProviderAttempts, after.Turns)
+			if count := len(provider.Requests()); count != 1 {
+				t.Fatalf("after startup lifecycle: provider wire requests=%d, want the sole v1 request", count)
+			}
+			t.Logf("after PrepareLifecycle, before PrepareStart: same v%d status=%s closure=%s reason=%q retry_count=%d v1=%s/%s unchanged_terminal_attempt=%s/%s provider_attempts=%d projected=%d consumed=%d diagnostic_turns=%d wire_requests=1", after.Claim.Version, after.Status, after.Attempts[1].Closure, after.Reason, after.Retries, after.Attempts[0].Outcome, after.Attempts[0].Reason, retained.AttemptState, retained.OperationState, after.Effects.ProviderAttempts, after.Effects.Projected, after.Effects.ResponseConsumed, after.Turns)
 			if after.Status != deliverylifecycle.StatusDeadLetter || after.Reason != "retry_exhausted" || after.Attempts[1].Closure != "settled" || after.Attempts[1].Outcome != "dead_letter" {
 				t.Fatalf("startup did not settle the exhausted never-called retry: status=%s reason=%q v2=%s/%s", after.Status, after.Reason, after.Attempts[1].Closure, after.Attempts[1].Outcome)
 			}
@@ -169,8 +156,8 @@ func TestServedOrdinaryUncalledRetrySettlesAtStartupBothStores(t *testing.T) {
 			if err := second.stop(); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := os.Stat(launcher + ".business"); !os.IsNotExist(err) {
-				t.Fatalf("the settled turn reached a CLI subprocess after dispatch release: %v", err)
+			if count := len(provider.Requests()); count != 1 {
+				t.Fatalf("after dispatch release: provider wire requests=%d, want the sole v1 request", count)
 			}
 			attempts, err := storetest.ReadDeliveryAttemptDiagnosticRows(t.Context(), reader, claim.Delivery)
 			if err != nil || len(attempts) != 2 || attempts[0] != after.Attempts[0] || attempts[1] != after.Attempts[1] {
@@ -189,8 +176,6 @@ func (cut *ordinaryRetryCut) inspect(ctx context.Context, selected any) (err err
 	if err != nil {
 		return err
 	}
-	// An inspected empty list encodes as null across the child pipe.
-	cut.ProviderHistoryInspected = cut.Effects.Attempts != nil
 	turns, err := storetest.ReadManagedAgentTurnStorage(ctx, selected, cut.Claim.Run, "load-agent")
 	cut.Turns = len(turns)
 	return err
@@ -203,39 +188,26 @@ func requireOrdinaryRetryHistory(t *testing.T, cut ordinaryRetryCut) {
 		t.Fatalf("wrong ordinary retry history: status=%s retry_count=%d entries=%d", cut.Status, cut.Retries, len(a))
 	}
 	failure, err := runtimefailures.UnmarshalEnvelope([]byte(a[0].Failure))
-	if err != nil {
-		var unvalidated runtimefailures.Envelope
-		if json.Unmarshal([]byte(a[0].Failure), &unvalidated) == nil {
-			logOrdinaryRetryFailure(t, "unvalidated", unvalidated)
-		}
-		t.Fatalf("v1 failure decoding differs: %v (retained bytes=%d); remaining fields were not validated", err, len(a[0].Failure))
+	if err != nil || failure.Class != runtimefailures.ClassConnectorFailure || failure.Detail.Code != "provider_http_status" ||
+		failure.Component != "llm-provider" || failure.Operation != "http_status" || !failure.Retryable ||
+		failure.Detail.Attributes["provider"] != "openai_compatible" || failure.Detail.Attributes["status"] != json.Number("429") {
+		t.Fatalf("v1 did not retain retryable HTTP 429: class=%s code=%s component=%s operation=%s status=%v retryable=%t decode=%v",
+			failure.Class, failure.Detail.Code, failure.Component, failure.Operation, failure.Detail.Attributes["status"], failure.Retryable, err)
 	}
-	logOrdinaryRetryFailure(t, "decoded", failure)
-	if failure.Class != runtimefailures.ClassDependencyUnavailable || failure.Detail.Code != "workspace_worker_target_missing" || failure.Component != "workspace" || failure.Operation != "admit_worker" {
-		t.Error("v1 did not record the exact workspace target admission failure")
+	if effects.ProviderAttempts != 1 || effects.ActiveProviderAttempts != 0 || effects.Attempts == nil || len(*effects.Attempts) != 1 ||
+		effects.Settled != 0 || effects.Projected != 0 || effects.ResponseConsumed != 0 {
+		t.Fatalf("want one terminal attempt without resumable completion: attempts=%d active=%d settled=%d projected=%d consumed=%d",
+			effects.ProviderAttempts, effects.ActiveProviderAttempts, effects.Settled, effects.Projected, effects.ResponseConsumed)
 	}
-	if !failure.Retryable {
-		t.Error("v1 failure retryability differs: got false, want true")
+	prior := (*effects.Attempts)[0]
+	if prior.AttemptID == "" || prior.OperationID == "" || prior.OriginDeliveryID != cut.Claim.Delivery || prior.OriginEventID != cut.Claim.Event ||
+		prior.AttemptState != "terminal_failure" || prior.OperationState != "terminal_failure" ||
+		!prior.LaunchedAt.Valid || !prior.ResponseObservedAt.Valid || !prior.CompletedAt.Valid {
+		t.Fatalf("v1 terminal provider evidence differs: attempt=%s operation=%s exact_delivery=%t exact_event=%t launch=%t response=%t completed=%t",
+			prior.AttemptState, prior.OperationState, prior.OriginDeliveryID == cut.Claim.Delivery, prior.OriginEventID == cut.Claim.Event,
+			prior.LaunchedAt.Valid, prior.ResponseObservedAt.Valid, prior.CompletedAt.Valid)
 	}
-	if _, present := failure.Detail.Attributes["launch_rejected"]; present {
-		t.Error("v1 failure launch_rejected differs: want absent before provider admission")
-	}
-	if t.Failed() {
-		t.FailNow()
-	}
-	if !cut.ProviderHistoryInspected || (effects.Attempts != nil && len(*effects.Attempts) != 0) ||
-		effects.ProviderAttempts != 0 || effects.ActiveProviderAttempts != 0 || effects.LaunchedCandidateWorkAttempts != 0 ||
-		effects.Settled != 0 || effects.Projected != 0 || effects.ResponseConsumed != 0 || cut.Turns != 0 {
-		t.Fatalf("expected inspected absence of provider attempts and results: attempts=%d active=%d saved_turns=%d", effects.ProviderAttempts, effects.ActiveProviderAttempts, cut.Turns)
-	}
-}
-
-func logOrdinaryRetryFailure(t *testing.T, decode string, failure runtimefailures.Envelope) {
-	t.Helper()
-	value, present := failure.Detail.Attributes["launch_rejected"]
-	launchRejected, boolean := value.(bool)
-	t.Logf("v1 failure: decoding=%s schema=%q class=%q code=%q component=%q operation=%q retryable=%t launch_rejected_present=%t launch_rejected_type=%T launch_rejected_true=%t",
-		decode, failure.SchemaVersion, failure.Class, failure.Detail.Code, failure.Component, failure.Operation, failure.Retryable, present, value, boolean && launchRejected)
+	t.Logf("v1 retained retryable HTTP 429, one terminal provider attempt/operation, launch and response observed, diagnostic_turns=%d", cut.Turns)
 }
 
 func runOrdinaryRetryProofChild(t *testing.T, req ordinaryRetryRequest) {
@@ -245,16 +217,7 @@ func runOrdinaryRetryProofChild(t *testing.T, req ordinaryRetryRequest) {
 		t.Fatal("missing witness pipe")
 	}
 	defer witness.Close()
-	var projection *sourceartifact.RuntimeProjection
-	cliapp.ConfiguredWorkspaceLifecycleForServe = func(_ *config.Config, admitted *sourceartifact.RuntimeProjection, source semanticview.Source, _ cliapp.WorkspaceMountSources, _ cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
-		projection = admitted
-		manager := workspace.NewDockerManager()
-		settings := workspace.DefaultDockerConfig()
-		settings.WorkspaceImage, settings.SourceProjection = req.Image, admitted
-		manager.SetConfig(settings)
-		manager.SetSemanticSource(source)
-		return manager, nil
-	}
+	configureHostWorkspaceProofLifecycle(t)
 	var selected *selectedStoreOwner
 	open := buildStoresForServe
 	buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
@@ -266,8 +229,7 @@ func runOrdinaryRetryProofChild(t *testing.T, req ordinaryRetryRequest) {
 	defer stop()
 	opts := cliapp.DefaultServeOptions()
 	opts.SourceRoot, opts.ConfigPath, opts.StoreMode, opts.StoreModeSet = req.Source, req.Config, req.Backend, true
-	opts.APIListenAddr, opts.MCPListenAddr = "127.0.0.1:0", req.MCPListen
-	opts.MCPListenAddrSource = cliapp.ListenerAddressFlag
+	opts.APIListenAddr, opts.MCPListenAddr = "127.0.0.1:0", "127.0.0.1:0"
 	opts.Output, opts.ErrorOutput, opts.NoColor = os.Stdout, os.Stderr, true
 	opts.ShutdownGrace = 5 * time.Second
 	if req.Target.Delivery == "" {
@@ -281,19 +243,9 @@ func runOrdinaryRetryProofChild(t *testing.T, req ordinaryRetryRequest) {
 				return
 			}
 			if claim.Version() == 1 {
-				// The first claim's workspace worker cannot inspect its target through the removed launcher.
-				if err := os.Remove(req.Launcher); err != nil {
-					t.Error(err)
-				}
 				return
 			}
-			cleanup, err := projection.CleanupIntent()
-			if err != nil {
-				t.Error(err)
-				return
-			}
-			cut := ordinaryRetryCrashCut{Claim: uncalledAgentClaim{s.EventID, claim.RunID(), claim.DeliveryID(), claim.Version()}, Cleanup: cleanup}
-			if err := json.NewEncoder(witness).Encode(cut); err != nil {
+			if err := json.NewEncoder(witness).Encode(uncalledAgentClaim{s.EventID, claim.RunID(), claim.DeliveryID(), claim.Version()}); err != nil {
 				t.Error(err)
 			}
 			<-ctx.Done()
@@ -392,48 +344,4 @@ func awaitOrdinaryRetryChild[T any](t *testing.T, child *channelOnboardingCrashS
 	}
 	var none T
 	return none
-}
-
-func configureOrdinaryRetryProof(t *testing.T, configPath, launcher, image string) {
-	t.Helper()
-	raw, err := os.ReadFile(configPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var doc map[string]any
-	if err := yaml.Unmarshal(raw, &doc); err != nil {
-		t.Fatal(err)
-	}
-	doc["runtime"] = map[string]any{"recovery_on_startup": true}
-	doc["workspace"] = map[string]any{"backend": "docker", "docker_bin": launcher, "image": image}
-	doc["llm"] = map[string]any{
-		"backend": "claude_cli", "models": map[string]any{"regular": map[string]any{"claude_cli": "request-A"}},
-		"claude_cli": map[string]any{"command": "completion-proof-cli", "output_format": "stream-json"},
-		"session":    map[string]any{"lock_ttl": "10s", "rotate_on_parse_failures": 3},
-	}
-	raw, err = yaml.Marshal(doc)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(configPath, raw, 0o600); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func installOrdinaryRetryLauncher(t *testing.T, path string) {
-	t.Helper()
-	// The workspace owner still uses real Docker. The adapter's private launcher
-	// forwards the fixture startup probe and detects any unexpected business call.
-	script := strings.TrimSpace(`#!/bin/sh
-for arg do
-    if [ "$arg" = '--model' ]; then
-        printf 'unexpected\n' >> "$0.business"
-        exit 1
-    fi
-done
-exec docker "$@"
-`)
-	if err := os.WriteFile(path, []byte(fmt.Sprintln(script)), 0o700); err != nil {
-		t.Fatal(err)
-	}
 }
