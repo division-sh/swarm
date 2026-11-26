@@ -15,12 +15,12 @@ func TestAdmissionFactoringCompiledStructuralSurfaces(t *testing.T) {
 	config, env := clockReleaseConfig(t, root, "sqlite")
 	source := copyFactoringStandingSource(t)
 	for _, args := range [][]string{
-		{"verify", "--portable", "--json"}, {"verify", "--json"},
+		{"verify", "--json"}, {"serve", "--dry-run"},
 		{"describe"}, {"describe", "--json"}, {"describe", "--quiet"},
 	} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			result := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binary, append(args, source, "--config", config)...)
-			deploymentVerify := args[0] == "verify" && len(args) == 2
+			deploymentVerify := args[0] == "serve"
 			if deploymentVerify {
 				exit, ok := result.err.(*exec.ExitError)
 				if !ok || exit.ExitCode() != 4 || !strings.Contains(result.output, "credential_key_exists") || !strings.Contains(result.output, "telegram.telegram_bot_token") || !strings.Contains(result.output, "telegram.webhook_signing_secret") {
@@ -43,19 +43,21 @@ func TestAdmissionFactoringCompiledStructuralSurfaces(t *testing.T) {
 				if string(fields["live_readiness"]) != `"not_evaluated"` {
 					t.Fatalf("invented live readiness: %s", result.output)
 				}
-				if args[0] == "verify" && len(args) == 2 {
-					// First-use store absence is valid but must remain explicit.
-					if string(fields["validation_scope"]) != `"deployment"` || string(fields["admission_complete"]) != "false" || !strings.Contains(string(fields["observations"]), `"selected_store_access"`) || !strings.Contains(string(fields["observations"]), `"startup_process_possession"`) {
-						t.Fatalf("lost fresh-store deployment admission: %s", result.output)
+				if args[0] == "verify" {
+					if string(fields["validation_scope"]) != `"structural"` || string(fields["admission_complete"]) != "false" || strings.Contains(string(fields["observations"]), `"selected_store_access"`) {
+						t.Fatalf("stateless verify opened deployment admission: %s", result.output)
 					}
 				}
+			}
+			if deploymentVerify && (!strings.Contains(result.output, "not_run: selected_store_access @") || !strings.Contains(result.output, "startup_process_possession")) {
+				t.Fatalf("dry run lost explicit fresh-store and possession accounting: %s", result.output)
 			}
 		})
 	}
 	// The authored source gate stays intact: describe/verify must not bypass
 	// malformed recursive definitions simply to produce a projection.
 	writeReleaseFile(t, filepath.Join(source, "tools.yaml"), "schema_guard:\n  description: schema admission guard\n  input_schema: {type: array}\n")
-	result := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binary, "verify", source, "--portable", "--json", "--config", config)
+	result := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binary, "verify", source, "--json", "--config", config)
 	if result.err == nil || !strings.Contains(result.output, "array requires items") {
 		t.Fatalf("compiled verify did not reach canonical schema refusal: %v\n%s", result.err, result.output)
 	}

@@ -11,8 +11,10 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	. "github.com/division-sh/swarm/internal/runtime/timerobligation"
+	"github.com/division-sh/swarm/internal/store/internal/adminpersistence"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
+	"github.com/lib/pq"
 )
 
 type queryer interface {
@@ -287,6 +289,20 @@ func timerObligationReadQuery(postgres bool, scope Scope) (string, []any, error)
 			query += ` AND (t.flow_instance=? OR (COALESCE(t.flow_instance,'')='' AND ?=?))`
 			args = append(args, life.FlowInstance, life.FlowInstance, life.RunID)
 		}
+	}
+	if runIDs, reset := scope.ResetRuns(); reset && len(runIDs) != 0 {
+		runSet := "(SELECT value FROM json_each($3))"
+		if postgres {
+			runSet = "(SELECT unnest($2::uuid[]))"
+			args = append(args, pq.Array(runIDs))
+		} else {
+			raw, err := json.Marshal(runIDs)
+			if err != nil {
+				return "", nil, err
+			}
+			args = append(args, string(raw))
+		}
+		query += " AND (" + adminpersistence.TimerCleanupPredicate("t", runSet) + ") IS NOT TRUE"
 	}
 	return query + ` ORDER BY t.task_type, t.run_id, t.timer_id`, args, nil
 }

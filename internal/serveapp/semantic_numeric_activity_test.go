@@ -94,6 +94,9 @@ func proveActivitySemanticResultExecutionParity(t *testing.T, mock bool) {
 			if err := os.WriteFile(filepath.Join(root, toolPath), []byte(tool), 0600); err != nil {
 				t.Fatal(err)
 			}
+			if !mock && backend == servedparity.BackendExplicitPostgres {
+				useDeclaredServePostgresTarget(t)
+			}
 			rt, restart := startSemanticNumericRuntime(t, backend, root, mock)
 			key := uuid.NewString()
 			first := semanticNumericRPC(t, rt.Endpoint, "http", semanticNumericRequest(rt.BundleHash, "event.publish", "", key, "7"))

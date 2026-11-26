@@ -4,10 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/config"
@@ -639,6 +642,86 @@ func TestValidateClaudeMCPToolsForManagedAgents_StartupPromptMatchesCanonicalNor
 	if !slices.Equal(exec.executed, []string{"health_check"}) {
 		t.Fatalf("executed = %#v, want health_check tools/call smoke", exec.executed)
 	}
+	t.Run("checked_start_keeps_native_binding_and_callable_tail", func(t *testing.T) {
+		ctx := testAuthorActivityContext(t.Context())
+		root := t.TempDir()
+		if err := os.WriteFile(filepath.Join(root, "manifest.yaml"), []byte("version: 1.0.0\nplatform_version: '*'\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("stages: []\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		artifact, err := sourceartifact.AdmitDirectory(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		source := claudeStartupAgentSource()
+		bundle, _ := semanticview.Bundle(source)
+		bundle.SourceArtifact = artifact
+		credentialStore := testProviderCredentialStore(t, "CLAUDE_CODE_OAUTH_TOKEN", "checked-provider")
+		resolver := llm.NewProviderCredentialResolver(credentialStore)
+		profile, err := cfg.LLMBackendProfile()
+		if err != nil {
+			t.Fatal(err)
+		}
+		credential, err := resolver.Resolve(ctx, profile)
+		if err != nil {
+			t.Fatal(err)
+		}
+		contract, err := llm.ProviderContractForProfile(profile)
+		if err != nil {
+			t.Fatal(err)
+		}
+		candidates, err := managedProviderPreflightAgentConfigs(manager)
+		if err != nil || len(candidates) != 1 {
+			t.Fatalf("native candidate census: %v", err)
+		}
+		target := ManagedProviderCheckTarget{Actor: candidates[0].config, Plan: candidates[0].plan}
+		planned, err := llm.CompileManagedCapabilityAdmission(target.Actor, contract, exec.defs, startupProbeCapabilitySet([]string{"hidden_tool", "query_entities", "health_check"}, exec.caps))
+		if err != nil {
+			t.Fatal(err)
+		}
+		key, err := providerStartupCheckKey(cfg, credential, artifact.BundleHash(), target, expectedText, planned)
+		if err != nil {
+			t.Fatal(err)
+		}
+		configHash, _ := providerCheckHash(cfg)
+		targetKey, _ := providerCheckHash(target)
+		group, _ := providerCheckHash([]string{profile.Provider, credential.Key, credential.Value})
+		response := &llm.Response{CLIInventory: llm.CLIInventoryValid, MCPServers: map[string]string{"runtime-tools": "connected"}}
+		for _, tool := range planned {
+			if !tool.Capability.Visible || !tool.Capability.Callable {
+				continue
+			}
+			for _, binding := range tool.Bindings {
+				if binding.Kind == managedcapabilities.BindingMCPProvider {
+					response.MCPVisibleTools = append(response.MCPVisibleTools, binding.ExactName)
+				}
+			}
+		}
+		raw, err := json.Marshal(response)
+		if err != nil {
+			t.Fatal(err)
+		}
+		input := providerCheckTestInput{checks: &ManagedProviderBootChecks{
+			config: configHash, source: artifact.BundleHash(), starts: map[string]json.RawMessage{key: raw},
+			keys: map[string]llmselection.Profile{group: profile}, targets: map[string]struct{}{targetKey: {}},
+		}, credentials: resolver}
+		beforeStarts, beforeCalls := len(probe.calls), len(exec.executed)
+		if err := validateClaudeMCPToolsForManagedAgents(ctx, cfg, source, binding, probe, turns, exec, manager, input); err != nil {
+			t.Fatal(err)
+		}
+		if len(probe.calls) != beforeStarts || len(exec.executed) != beforeCalls+1 || exec.executed[beforeCalls] != "health_check" {
+			t.Fatal("checked start repeated provider work or bypassed the native callable proof")
+		}
+		if string(input.checks.starts[key]) != string(raw) || response.CapabilitySurface != nil {
+			t.Fatal("native consumption mutated raw check evidence or adopted it as authority")
+		}
+		delete(input.checks.starts, key)
+		if err := validateClaudeMCPToolsForManagedAgents(ctx, cfg, source, binding, probe, turns, exec, manager, input); err == nil || len(probe.calls) != beforeStarts || len(exec.executed) != beforeCalls+1 {
+			t.Fatalf("missing exact observation permitted a second start or callable dispatch: %v", err)
+		}
+	})
 }
 
 func TestValidateManagedProviderPreflightConsumesRunlessBlueprintBeforeLiveAdmission(t *testing.T) {
@@ -715,6 +798,29 @@ func TestManagedProviderPreflightKeepsSamePlanLiveRunsDistinct(t *testing.T) {
 	if len(candidates) != wantCandidateCount {
 		t.Fatalf("preflight candidates = %#v, want one per live run", candidates)
 	}
+	checks, err := CompileManagedProviderCheckTargets(manager.ListAgentConfigs(), nil)
+	if err != nil || len(checks) != len(candidates) {
+		t.Fatalf("read-only target census = %+v, %v", checks, err)
+	}
+	for i, check := range checks {
+		if check.Actor.Identity != candidates[i].config.Identity || check.Plan != candidates[i].plan {
+			t.Fatalf("check/runtime owner census differs at %d", i)
+		}
+		if _, err := check.Actor.Prompt.Text(check.Actor.Intent); err != nil {
+			t.Fatalf("check snapshot lost its immutable derived prompt: %v", err)
+		}
+	}
+	checks[0].Actor.Config[0] = '['
+	if candidates[0].config.Config[0] != '{' {
+		t.Fatal("check target mutation changed the runtime input snapshot")
+	}
+	conflicting := append([]runtimeactors.AgentConfig(nil), manager.ListAgentConfigs()...)
+	other := conflicting[0]
+	other.Config = json.RawMessage(`{"different":true}`)
+	conflicting = append(conflicting, other)
+	if _, err := CompileManagedProviderCheckTargets(conflicting, nil); err == nil {
+		t.Fatal("read-only target census accepted conflicting revisions for the same owner")
+	}
 	for _, candidate := range candidates {
 		identity, identityErr := candidate.config.ConcreteIdentity()
 		if identityErr != nil {
@@ -735,6 +841,120 @@ func TestManagedProviderPreflightKeepsSamePlanLiveRunsDistinct(t *testing.T) {
 	if len(wantRuns) != 0 {
 		t.Fatalf("unexamined live runs = %#v", wantRuns)
 	}
+	t.Run("one_answer_per_credential_and_stale_inputs", func(t *testing.T) {
+		var calls atomic.Int32
+		var refused atomic.Bool
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			calls.Add(1)
+			if r.URL.Path != "/v1/chat/completions" || r.Header.Get("Authorization") != "Bearer check-credential" {
+				t.Errorf("wrong provider request identity: path=%s", r.URL.Path)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			if refused.Load() {
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write([]byte(`{"error":{"message":"rejected check-credential"}}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`))
+		}))
+		defer server.Close()
+		cfg := &config.Config{LLM: config.LLMConfig{Backend: llmselection.BackendOpenAICompatible,
+			Models:           llmselection.ModelAliases{llmselection.ModelAliasRegular: {llmselection.BackendOpenAICompatible: "check-model"}},
+			OpenAICompatible: config.OpenAICompatibleConfig{BaseURL: server.URL + "/v1"},
+		}}
+		profile, err := cfg.LLMBackendProfile()
+		if err != nil {
+			t.Fatal(err)
+		}
+		root := t.TempDir()
+		if err := os.WriteFile(filepath.Join(root, "manifest.yaml"), []byte("version: 1.0.0\nplatform_version: '*'\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("stages: []\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		artifact, err := sourceartifact.AdmitDirectory(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{SourceArtifact: artifact})
+		var targets []ManagedProviderCheckTarget
+		for _, candidate := range candidates {
+			actor := candidate.config
+			actor.LLMBackend, actor.Model = profile.ID, llmselection.ModelAliasRegular
+			resolved, err := llm.ResolveAgentExecution(executionposture.Live, profile, cfg.LLM.Models, actor)
+			if err != nil {
+				t.Fatal(err)
+			}
+			targets = append(targets, ManagedProviderCheckTarget{Actor: resolved.Actor, Plan: candidate.plan})
+		}
+		credentialKey := llm.ProviderCredentialKey(profile)
+		t.Setenv(credentialKey, "")
+		credentials := testProviderCredentialStore(t, credentialKey, "check-credential")
+		options := WorkflowContractValidationOptions{LLMProfile: profile, ProviderCredentials: credentials}
+		checks, err := ObserveManagedProviderBootChecks(context.Background(), cfg, source, options, targets, nil, nil, nil, "")
+		if err != nil || calls.Load() != 1 {
+			t.Fatalf("two actors sharing one provider/credential made %d calls: %v", calls.Load(), err)
+		}
+		resolver := llm.NewProviderCredentialResolver(credentials)
+		if err := checks.ValidateConfiguration(context.Background(), cfg, resolver); err != nil {
+			t.Fatal(err)
+		}
+		t.Run("injected_observer_has_no_real_dispatch", func(t *testing.T) {
+			var observed atomic.Int32
+			base := startupAnswerRuntimeWithoutObserver{}
+			fake := startupAnswerRuntimeObserver{startupAnswerRuntimeWithoutObserver: base, calls: &observed}
+			if _, err := ObserveManagedProviderBootChecks(t.Context(), cfg, source, options, targets, nil, nil, nil, "", fake); err != nil || observed.Load() != 1 || calls.Load() != 1 {
+				t.Fatalf("injected group used a hidden real transport: observed=%d requests=%d err=%v", observed.Load(), calls.Load(), err)
+			}
+			fault := errors.New("startup observer refused")
+			fake.err = fault
+			if _, err := ObserveManagedProviderBootChecks(t.Context(), cfg, source, options, targets, nil, nil, nil, "", fake); !errors.Is(err, fault) || calls.Load() != 1 {
+				t.Fatalf("observer failure escaped or fell through to HTTP: %v", err)
+			}
+			if _, err := ObserveManagedProviderBootChecks(t.Context(), cfg, source, options, targets, nil, nil, nil, "", base); err == nil || !strings.Contains(err.Error(), "startup answer observer") || calls.Load() != 1 {
+				t.Fatalf("unsupported injection used real transport: %v", err)
+			}
+		})
+		var required []managedProviderPreflightAgent
+		for _, target := range targets {
+			required = append(required, managedProviderPreflightAgent{config: target.Actor, plan: target.Plan})
+		}
+		if err := checks.validateTargets(context.Background(), cfg, resolver, required); err != nil {
+			t.Fatal(err)
+		}
+		for _, missing := range []string{"target", "answer"} {
+			copy := *checks
+			if missing == "target" {
+				copy.targets = nil
+			} else {
+				copy.keys = nil
+			}
+			if err := copy.validateTargets(context.Background(), cfg, resolver, required); err == nil {
+				t.Fatalf("missing %s coverage accepted an unchecked API target", missing)
+			}
+		}
+		copy := *cfg
+		copy.LLM.OpenAICompatible.BaseURL += "/changed"
+		if err := checks.ValidateConfiguration(context.Background(), &copy, resolver); err == nil {
+			t.Fatal("changed check inputs reused a paid observation")
+		}
+		if err := credentials.Set(context.Background(), credentialKey, "changed-credential"); err != nil {
+			t.Fatal(err)
+		}
+		if err := checks.ValidateConfiguration(context.Background(), cfg, resolver); err == nil || calls.Load() != 1 {
+			t.Fatalf("changed credential did not refuse without a hidden second call: calls=%d err=%v", calls.Load(), err)
+		}
+		if err := credentials.Set(t.Context(), credentialKey, "check-credential"); err != nil {
+			t.Fatal(err)
+		}
+		refused.Store(true)
+		_, err = ObserveManagedProviderBootChecks(t.Context(), cfg, source, options, targets, nil, nil, nil, "")
+		failure, ok := runtimefailures.As(err)
+		if !ok || failure.Failure.Class != runtimefailures.ClassAuthenticationNeeded || strings.Contains(err.Error(), "check-credential") || calls.Load() != 2 {
+			t.Fatalf("startup provider refusal lost its class, leaked its credential or repeated: calls=%d", calls.Load())
+		}
+	})
 
 	cfg := &config.Config{LLM: config.LLMConfig{Backend: llmselection.BackendClaudeCLI}}
 	regularWorkspaceCalls := 0
@@ -763,6 +983,23 @@ func TestManagedProviderPreflightKeepsSamePlanLiveRunsDistinct(t *testing.T) {
 			t.Fatalf("normal startup surface actor owner = %#v, want runless plan projection after run-scoped candidate census", surface)
 		}
 	}
+}
+
+type startupAnswerRuntimeWithoutObserver struct{ llm.NoopRuntime }
+
+func (startupAnswerRuntimeWithoutObserver) ProviderContract() llm.ProviderContract {
+	return llm.OpenAICompatibleProviderContract()
+}
+
+type startupAnswerRuntimeObserver struct {
+	startupAnswerRuntimeWithoutObserver
+	calls *atomic.Int32
+	err   error
+}
+
+func (r startupAnswerRuntimeObserver) ObserveStartupAnswer(context.Context, llmselection.Profile, llmselection.ResolvedModel) ([]byte, error) {
+	r.calls.Add(1)
+	return []byte(`{"choices":[{"message":{"role":"assistant","content":"ready"},"finish_reason":"stop"}]}`), r.err
 }
 
 func TestValidateClaudeMCPToolsForManagedAgents_RequiresCLIStartupProbeForMCPOnlySurface(t *testing.T) {

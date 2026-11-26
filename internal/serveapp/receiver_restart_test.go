@@ -38,16 +38,22 @@ func TestReceiverCompositionRestartBothStores(t *testing.T) {
 				captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { db, _, _ = selectedRuntimeStoreForTest(t, p) })
 			} else {
 				dsn, _, cleanup := testutil.StartPostgres(t)
+				recordServePostgresFixture(t, dsn)
 				t.Cleanup(cleanup)
 				original := buildStoresForServe
-				buildStoresForServe = func(_ context.Context, _ storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
+				buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config, bootCheck ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {
+					target, err := checkedPostgresFixtureDSN(ctx, cfg, dsn, true, bootCheck)
+					if err != nil {
+						return nil, err
+					}
 					pg, err := store.NewPostgresStore(dsn)
 					if err != nil {
 						return nil, err
 					}
-					storetest.BootstrapPostgresRuntimeStore(t, pg)
 					db = storetest.DatabaseForTest(pg)
-					return openSelectedPostgresOwner(t, dsn, db, cfg), nil
+					owner := openSelectedPostgresOwner(t, target, db, cfg, bootCheck...)
+					storetest.BootstrapPostgresRuntimeStore(t, pg)
+					return owner, nil
 				}
 				t.Cleanup(func() { buildStoresForServe = original })
 				opts.ConfigPath = writeServeRuntimeTestConfig(t)

@@ -368,7 +368,7 @@ func assertCatalogOracleCoverage(t *testing.T, plan RunPlan) {
 
 func assertNumericTimerInspectionOwnership(t *testing.T, plan RunPlan) {
 	t.Helper()
-	child, err := plan.Unit("serveapp-other-late")
+	child, err := plan.Unit(otherLateLifecycle)
 	if err != nil {
 		t.Fatal(err)
 	}

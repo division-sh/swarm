@@ -64,6 +64,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
+	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -73,6 +74,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/runtime/startuprecovery"
 	"github.com/division-sh/swarm/internal/runtime/toolgateway"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
@@ -91,13 +93,28 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-type servedNoopLLMRuntime struct{ runtimellm.NoopRuntime }
+type servedStartupAnswerObservation struct{ inspect func(context.Context) error }
+
+func (o servedStartupAnswerObservation) ObserveStartupAnswer(ctx context.Context, _ llmselection.Profile, _ llmselection.ResolvedModel) ([]byte, error) {
+	if o.inspect != nil {
+		return nil, o.inspect(ctx)
+	}
+	return []byte(`{"status":"completed","stop_reason":"end_turn","content":[{"type":"text","text":"ready"}],"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"ready"}}],"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ready"}]}]}`), ctx.Err()
+}
+
+type servedNoopLLMRuntime struct {
+	runtimellm.NoopRuntime
+	servedStartupAnswerObservation
+}
 
 func (servedNoopLLMRuntime) ProviderContract() runtimellm.ProviderContract {
 	return runtimellm.AnthropicAPIProviderContract()
 }
 
-type servedOpenAICompatibleNoopLLMRuntime struct{ runtimellm.NoopRuntime }
+type servedOpenAICompatibleNoopLLMRuntime struct {
+	runtimellm.NoopRuntime
+	servedStartupAnswerObservation
+}
 
 func (servedOpenAICompatibleNoopLLMRuntime) ProviderContract() runtimellm.ProviderContract {
 	return runtimellm.OpenAICompatibleProviderContract()
@@ -141,6 +158,7 @@ type delayedRunStatusAgent struct {
 
 type servedEventPublishBlockingLLMRuntime struct {
 	runtimellm.NoopRuntime
+	servedStartupAnswerObservation
 	started chan<- struct{}
 	release <-chan struct{}
 }
@@ -151,6 +169,7 @@ func (r servedEventPublishBlockingLLMRuntime) ProviderContract() runtimellm.Prov
 
 type servedSessionCleanupProofLLMRuntime struct {
 	runtimellm.NoopRuntime
+	servedStartupAnswerObservation
 	store   *store.PostgresStore
 	started chan<- string
 	release <-chan struct{}
@@ -162,6 +181,7 @@ func (r servedSessionCleanupProofLLMRuntime) ProviderContract() runtimellm.Provi
 
 type servedLiveAgentProofLLMRuntime struct {
 	runtimellm.NoopRuntime
+	servedStartupAnswerObservation
 	calls             *atomic.Int32
 	directiveFailures bool
 }
@@ -513,6 +533,7 @@ func TestCLI_ServeLifecycleRoutesDiagnosticsToStderr(t *testing.T) {
 }
 
 func TestRunServeRuntimeJoinFailureReachesAPIAndCLI(t *testing.T) {
+	useDeclaredServePostgresTarget(t)
 	endpoint, db, bundleHash, _, _ := startServedJoinProofRuntime(t)
 	initial := requireServedEventPublishRPCResult(t, endpoint, map[string]any{
 		"event_name":      "order.started",
@@ -723,6 +744,7 @@ func TestRunServeRuntimeEventPublishTargetRouteServedPathDefaultSQLite(t *testin
 }
 
 func TestRunServeRuntimeEventPublishTargetRouteServedPathPostgres(t *testing.T) {
+	useDeclaredServePostgresTarget(t)
 	_, db, _ := installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
 	})
@@ -747,6 +769,7 @@ func TestRunServeRuntimeEventPublishTargetRouteServedPathPostgres(t *testing.T) 
 
 func TestRunServeRuntimeEventPublishExistingRunActiveLoadServedPathDefaultSQLite(t *testing.T) {
 	unsetStoreSelectorEnv(t)
+	setDoctorProviderSecret(t, "ANTHROPIC_API_KEY", "active-load-provider-fixture")
 	stubServeRuntimeWorkspaceLifecycle(t)
 	sqlitePath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
 	sourceRoot := writeServedEventPublishActiveLoadFixture(t)
@@ -778,6 +801,8 @@ func TestRunServeRuntimeEventPublishExistingRunActiveLoadServedPathDefaultSQLite
 }
 
 func TestRunServeRuntimeEventPublishExistingRunActiveLoadServedPathPostgres(t *testing.T) {
+	setDoctorProviderSecret(t, "ANTHROPIC_API_KEY", "active-load-provider-fixture")
+	useDeclaredServePostgresTarget(t)
 	_, db, _ := installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
 	})
@@ -956,6 +981,8 @@ type servedSessionCleanupProof struct {
 
 func startServedSessionCleanupProof(t *testing.T) servedSessionCleanupProof {
 	t.Helper()
+	setDoctorProviderSecret(t, "ANTHROPIC_API_KEY", "session-cleanup-provider-fixture")
+	useDeclaredServePostgresTarget(t)
 	_, db, pg := installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
 	})
@@ -1405,6 +1432,9 @@ func startServedControlProofRuntimeWithFixture(t *testing.T, backend servedparit
 
 func runServedRunControlBackendProof(t *testing.T, backend servedparity.Backend) {
 	t.Helper()
+	if backend == servedparity.BackendExplicitPostgres {
+		useDeclaredServePostgresTarget(t)
+	}
 	credentialPath := filepath.Join(t.TempDir(), "credentials.json")
 	t.Setenv("SWARM_CREDENTIALS_FILE", credentialPath)
 	writeChannelOnboardingLiveToolCredentials(t, credentialPath)
@@ -1420,6 +1450,9 @@ func runServedRunControlBackendProof(t *testing.T, backend servedparity.Backend)
 
 func runServedRunForkBackendProof(t *testing.T, backend servedparity.Backend) {
 	t.Helper()
+	if backend == servedparity.BackendExplicitPostgres {
+		useDeclaredServePostgresTarget(t)
+	}
 	rt := startServedControlProofRuntimeWithFixture(t, backend, func(t *testing.T) string {
 		return canonicalrouting.CopyRootIngressServedFollowUp(t)
 	})
@@ -1548,18 +1581,30 @@ func runServedRunForkBackendProof(t *testing.T, backend servedparity.Backend) {
 
 func runServedLiveAgentEventReplayBackendProof(t *testing.T, backend servedparity.Backend) {
 	t.Helper()
+	setDoctorProviderSecret(t, "ANTHROPIC_API_KEY", "agent-replay-provider-fixture")
+	if backend == servedparity.BackendExplicitPostgres {
+		useDeclaredServePostgresTarget(t)
+	}
 	rt := startServedLiveAgentProofRuntime(t, backend)
 	runServedLiveAgentEventReplayLifecycleProof(t, rt)
 }
 
 func runServedAgentRestartBackendProof(t *testing.T, backend servedparity.Backend) {
 	t.Helper()
+	setDoctorProviderSecret(t, "ANTHROPIC_API_KEY", "agent-restart-provider-fixture")
+	if backend == servedparity.BackendExplicitPostgres {
+		useDeclaredServePostgresTarget(t)
+	}
 	rt := startServedLiveAgentProofRuntime(t, backend)
 	runServedAgentRestartLifecycleProof(t, rt)
 }
 
 func runServedAgentDirectiveBackendProof(t *testing.T, backend servedparity.Backend) {
 	t.Helper()
+	setDoctorProviderSecret(t, "ANTHROPIC_API_KEY", "directive-provider-fixture")
+	if backend == servedparity.BackendExplicitPostgres {
+		useDeclaredServePostgresTarget(t)
+	}
 	var effects atomic.Int32
 	faults := &servedDirectivePersistenceFaults{}
 	rt := startServedLiveAgentProofRuntimeWithLLMAndDirectiveFaults(t, backend, servedLiveAgentProofLLMRuntime{calls: &effects, directiveFailures: true}, faults)
@@ -1568,6 +1613,9 @@ func runServedAgentDirectiveBackendProof(t *testing.T, backend servedparity.Back
 
 func runServedRuntimeIngressControlBackendProof(t *testing.T, backend servedparity.Backend) {
 	t.Helper()
+	if backend == servedparity.BackendExplicitPostgres {
+		useDeclaredServePostgresTarget(t)
+	}
 	t.Cleanup(runtimebus.ResumeRuntimeIngress)
 	rt := startServedControlProofRuntimeWithFixture(t, backend, writeServedExternalEventFixture)
 	assertServedRetiredDashboardRefusal(t, rt)
@@ -1576,6 +1624,9 @@ func runServedRuntimeIngressControlBackendProof(t *testing.T, backend servedpari
 
 func runServedMailboxDecisionBackendProof(t *testing.T, backend servedparity.Backend) {
 	t.Helper()
+	if backend == servedparity.BackendExplicitPostgres {
+		useDeclaredServePostgresTarget(t)
+	}
 	credentialPath := filepath.Join(t.TempDir(), "credentials.json")
 	t.Setenv("SWARM_CREDENTIALS_FILE", credentialPath)
 	writeChannelOnboardingLiveToolCredentials(t, credentialPath)
@@ -1639,6 +1690,11 @@ func startServedConversationForkProofRuntime(t *testing.T, backend servedparity.
 		t.Fatalf("create forkchat proof credential store: %v", err)
 	}
 	t.Setenv("SWARM_CREDENTIALS_FILE", credentialPath)
+	unsetEnvForTest(t, "OPENAI_COMPATIBLE_API_KEY")
+	const bootKey = "OPENAI_COMPATIBLE_API_KEY"
+	if err := credentials.Set(t.Context(), bootKey, "forkchat-proof-key"); err != nil {
+		t.Fatal(err)
+	}
 
 	start := func(configPath string, opts cliapp.ServeOptions) servedControlProofRuntime {
 		var servedDB *sql.DB
@@ -1683,12 +1739,19 @@ func startServedConversationForkProofRuntime(t *testing.T, backend servedparity.
 		rt = start(configPath, cliapp.ServeOptions{})
 		rt.Backend = "sqlite"
 	case servedparity.BackendExplicitPostgres:
+		useDeclaredServePostgresTarget(t)
 		_, _, _ = installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle { return serveRuntimeWorkspaceStub{} })
 		configPath := writeServedConversationForkConfig(t, storebackend.BackendPostgres.String(), "", provider.URL)
 		rt = start(configPath, cliapp.ServeOptions{StoreMode: "postgres", StoreModeSet: true})
 		rt.Backend = "postgres"
 	default:
 		t.Fatalf("unknown conversation fork served parity backend %q", backend)
+	}
+	if err := credentials.Delete(t.Context(), bootKey); err != nil {
+		t.Fatal(err)
+	}
+	if _, present, err := credentials.Get(t.Context(), bootKey); err != nil || present {
+		t.Fatalf("forkchat prelaunch control requires an absent provider key: present=%t err=%v", present, err)
 	}
 	return servedConversationForkProofRuntime{servedControlProofRuntime: rt, Credentials: credentials, LLMRequests: requests}
 }
@@ -1715,6 +1778,7 @@ func writeServedConversationForkConfig(t *testing.T, backend, sqlitePath, provid
 	)
 	path := filepath.Join(t.TempDir(), "swarm.yaml")
 	text := withTestProviderTriggerPlatformInventory(t, strings.Join(lines, "\n")+"\n")
+	text = withInstalledServePostgresConfig(t, text, backend)
 	if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
 		t.Fatalf("write conversation fork served config: %v", err)
 	}
@@ -3130,6 +3194,8 @@ func runServedCreateCarryProjectionPostgresProof(t *testing.T) {
 	_, db, _ := installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
 	})
+	// Keep the sandbox observer, but open serve's store from the boot check's declaration.
+	buildStoresForServe = buildStores
 	sourceRoot := canonicalrouting.CopyExample(t, canonicalrouting.TemplateCreateMintedKey)
 	bundleHash := servedEventPublishFixtureBundleHash(t, sourceRoot)
 	endpoint, _ := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
@@ -3283,6 +3349,7 @@ func runServedDynamicAutoEmitSQLiteProof(t *testing.T) {
 
 func runServedDynamicAutoEmitPostgresProof(t *testing.T) {
 	t.Helper()
+	useDeclaredServePostgresTarget(t)
 	_, db, _ := installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
 	})
@@ -6189,6 +6256,7 @@ func servedEventPublishEntityState(t *testing.T, db *sql.DB, backend, runID, ent
 
 func TestRunServeRuntimePassesNoAmbientDataSourceToWorkspaceLifecycle(t *testing.T) {
 	var capturedMountSources cliapp.WorkspaceMountSources
+	useDeclaredServePostgresTarget(t)
 	_, _, _ = installServeRuntimePostgresTestStoresWithWorkspaceFactory(t, func(mountSources cliapp.WorkspaceMountSources) cliapp.ServeWorkspaceLifecycle {
 		capturedMountSources = mountSources
 		return serveRuntimeWorkspaceStub{}
@@ -6269,6 +6337,34 @@ func TestRunServeRuntimeNoAgentDefaultBootsWithoutDocker(t *testing.T) {
 }
 
 func TestRunServeRuntimeAPIAgentDefaultHostBootsWithoutDocker(t *testing.T) {
+	t.Run("interrupted check retains integrity and independent cleanup", func(t *testing.T) {
+		setDoctorProviderSecrets(t, map[string]string{"ANTHROPIC_API_KEY": "test-startup-key"})
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		called, published := false, false
+		databasePath := filepath.Join(t.TempDir(), "runtime.db")
+		previous := buildStoresForServe
+		buildStoresForServe = buildStores
+		t.Cleanup(func() { buildStoresForServe = previous })
+		var out lockedBuffer
+		code := runFrom(ctx, repoRootForTest(), cliapp.ServeOptions{
+			ConfigPath: writeStoreBackendRuntimeConfig(t, "sqlite", databasePath),
+			SourceRoot: writeServeRuntimeAgentSlugFixture(t, "interrupted-check", "api-worker"),
+			StoreMode:  "sqlite", APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", Output: &out,
+			TestRuntimeContextsReadyHook: func(*runtimepkg.RuntimeContextManager) { published = true },
+			TestLLMRuntime: servedNoopLLMRuntime{servedStartupAnswerObservation: servedStartupAnswerObservation{inspect: func(context.Context) error {
+				called = true
+				cancel()
+				return errors.Join(startuprecovery.DataIntegrityError{}, errors.New("independent check cleanup"))
+			}}},
+		})
+		if !called || published || code != serveExitDataIntegrity || !strings.Contains(out.String(), "independent check cleanup") || !strings.Contains(out.String(), "context canceled") {
+			t.Fatalf("failed check lost typed/joined cause: called=%v published=%v code=%d output=%s", called, published, code, out.String())
+		}
+		if _, err := os.Stat(databasePath); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("failed check created the SQLite database: %v", err)
+		}
+	})
 	missingDocker := filepath.Join(t.TempDir(), "missing-docker")
 	hostRoot := filepath.Join(t.TempDir(), "host-workspaces")
 
@@ -6321,7 +6417,7 @@ func TestRunServeRuntimeNativeBashDefaultDockerFailsWithoutDocker(t *testing.T) 
 		t.Fatalf("Run code = 0, want Docker prerequisite failure\noutput:\n%s", out.String())
 	}
 	output := out.String()
-	for _, want := range []string{"[5/22] startup_ownership_lease", "workspace                  docker · agent \"native-bash-worker\" runs in a container", "Docker is not reachable", missingDocker + " info"} {
+	for _, want := range []string{"docker_daemon_observation", "Docker is not reachable", missingDocker + " info"} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("serve output missing %q:\n%s", want, output)
 		}
@@ -6332,6 +6428,7 @@ func TestRunServeRuntimeNativeBashDefaultDockerFailsWithoutDocker(t *testing.T) 
 }
 
 func TestRunServeRuntimeFreshEmptyPostgresBootstrapsSchemaBeforeDiskContractsServe(t *testing.T) {
+	useDeclaredServePostgresTarget(t)
 	_, db, _ := installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
 	})
@@ -6362,6 +6459,7 @@ func TestRunServeRuntimeFreshEmptyPostgresBootstrapsSchemaBeforeDiskContractsSer
 }
 
 func TestRunLocalRuntimeFreshEmptyPostgresBootstrapsSchemaBeforeDevAbandon(t *testing.T) {
+	useDeclaredServePostgresTarget(t)
 	_, db, _ := installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
 	})
@@ -6519,6 +6617,7 @@ func TestPostgresIdleSessionLossStopsServe(t *testing.T) {
 
 func TestPostgresIdleSessionLossReturnsFailureFromRun(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
+	useDeclaredServePostgresTarget(t)
 	_, db, _ := installServeRuntimePostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
 	})
@@ -6730,6 +6829,7 @@ func TestLocalRunStaleContextAndAbandonedStoreRecovers(t *testing.T) {
 		run(t, base(writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), path), storebackend.BackendSQLite.String(), t.TempDir()), path)
 	})
 	t.Run("postgres", func(t *testing.T) {
+		useDeclaredServePostgresTarget(t)
 		_, _, selected := installServeRuntimePostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle { return serveRuntimeWorkspaceStub{} })
 		storetest.BootstrapPostgresRuntimeStore(t, selected)
 		seedServeRuntimeReleasedProcess(t, selected)
@@ -6859,6 +6959,7 @@ func Test2376DirectoryBootUsesExactSelectedStoreSource(t *testing.T) {
 					t.Fatalf("close seeded SQLite selected store: %v", err)
 				}
 			case storebackend.BackendPostgres:
+				useDeclaredServePostgresTarget(t)
 				_, _, selected := installServeRuntimePostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 					return serveRuntimeWorkspaceStub{bundleScopes: &workspaceBundleScopes}
 				})
@@ -7001,6 +7102,7 @@ func TestRunServeRuntimeUnavailableBundleStartupRecoveryFailsPersistedMissingBef
 		BundleHash: missingRoot.Admission().BundleHash(), RootDirectory: missingRoot.Admission().RootDirectory(),
 	})
 
+	buildStoresForServe = buildStores
 	var out lockedBuffer
 	code := runFrom(context.Background(), repoRootForTest(), cliapp.ServeOptions{
 		ConfigPath:    writeServeRuntimeTestConfig(t),
@@ -7073,14 +7175,21 @@ func installServeRuntimePostgresTestStoresForDatabase(t *testing.T, workspaceFac
 		dsn, db, cleanup = testutil.StartEmptyPostgres(t)
 	}
 	t.Cleanup(cleanup)
+	recordServePostgresFixture(t, dsn)
 	runtimePG, err := store.NewPostgresStore(dsn)
 	if err != nil {
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
 	t.Cleanup(func() { _ = storetest.DatabaseForTest(runtimePG).Close() })
-	buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
+	_, useDeclaration := declaredServePostgresTargets.Load(t)
+	buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config, bootCheck ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {
+		openDSN, err := checkedPostgresFixtureDSN(ctx, cfg, dsn, useDeclaration && selection.Backend == storebackend.BackendPostgres, bootCheck)
+		if err != nil {
+			return nil, err
+		}
+		owner := openSelectedPostgresOwner(t, openDSN, storetest.DatabaseForTest(runtimePG), cfg, bootCheck...)
 		storetest.BootstrapPostgresRuntimeStore(t, runtimePG)
-		return openSelectedPostgresOwner(t, dsn, storetest.DatabaseForTest(runtimePG), cfg), nil
+		return owner, nil
 	}
 	if workspaceFactory != nil {
 		cliapp.ConfiguredWorkspaceLifecycleForServe = func(_ *config.Config, _ *sourceartifact.RuntimeProjection, _ semanticview.Source, mountSources cliapp.WorkspaceMountSources, _ cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
@@ -7535,7 +7644,7 @@ func TestRunServeRuntimeListenerBindFailuresExitBeforeReadiness(t *testing.T) {
 				t.Fatalf("Run code = %d, want 3\noutput:\n%s", code, out.String())
 			}
 			if verbose {
-				if !strings.Contains(out.String(), "http_listener_bind") || !strings.Contains(out.String(), "FAILED") {
+				if !strings.Contains(out.String(), "listener_availability") || !strings.Contains(out.String(), "FAILED") {
 					t.Fatalf("verbose serve output missing bind failure proof:\n%s", out.String())
 				}
 			} else if !strings.Contains(out.String(), "serve failed · http listener bind") {
@@ -8056,7 +8165,40 @@ func startServeRuntimeTestProcess(t *testing.T, opts cliapp.ServeOptions) *serve
 }
 
 func startServeRuntimeTestProcessAtRepo(t *testing.T, repo string, opts cliapp.ServeOptions) *serveRuntimeTestProcess {
+	if _, mocked := opts.TestLLMRuntime.(runtimellm.StartupAnswerObserver); mocked && mockServeCredentialFileOwned(t) {
+		if strings.TrimSpace(os.Getenv("SWARM_CREDENTIALS_FILE")) == "" {
+			t.Setenv("SWARM_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "mock-provider-credentials.json"))
+		}
+		store, err := cliapp.BuildProviderCredentialStore()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, key := range []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENAI_COMPATIBLE_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"} {
+			if _, present, err := store.Get(t.Context(), key); err != nil {
+				t.Fatal(err)
+			} else if !present {
+				if err := store.Set(t.Context(), key, "mocked-startup-credential"); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+	}
 	return startRuntimeTestProcessWithRunner(t, repo, opts, runFrom)
+}
+
+func mockServeCredentialFileOwned(t *testing.T) bool {
+	path := strings.TrimSpace(os.Getenv("SWARM_CREDENTIALS_FILE"))
+	if path == "" {
+		return true // The caller creates an explicit t.TempDir file before writing.
+	}
+	// A configured path is not ownership. Only this test's managed temporary
+	// namespace permits fixture seeding; inherited and symlinked files stay read-only.
+	root, rootErr := filepath.EvalSymlinks(filepath.Dir(t.TempDir()))
+	parent, parentErr := filepath.EvalSymlinks(filepath.Dir(path))
+	relative, err := filepath.Rel(root, parent)
+	info, statErr := os.Lstat(path)
+	return rootErr == nil && parentErr == nil && err == nil && filepath.IsLocal(relative) &&
+		(os.IsNotExist(statErr) || statErr == nil && info.Mode().IsRegular())
 }
 
 func startOwnedMockLifecycleTestProcess(t *testing.T, repo, retainedRoot string, opts cliapp.ServeOptions) *serveRuntimeTestProcess {
@@ -8257,6 +8399,8 @@ func writeServeRuntimeTestConfigWithWorkspaceFields(t *testing.T, workspaceField
 	}, "\n") + "\n"
 	path := filepath.Join(t.TempDir(), "swarm.yaml")
 	configText = withTestProviderTriggerPlatformInventory(t, configText)
+	configText = withInstalledServePostgresConfig(t, configText, "")
+	configText = withServeFixtureStateDirectory(t, configText)
 	if err := os.WriteFile(path, []byte(configText), 0o644); err != nil {
 		t.Fatalf("write serve runtime config: %v", err)
 	}
@@ -8459,6 +8603,8 @@ func writeStoreBackendRuntimeConfigWithWorkspaceFields(t *testing.T, backend str
 	)
 	path := filepath.Join(t.TempDir(), "swarm.yaml")
 	configText := withTestProviderTriggerPlatformInventory(t, strings.Join(lines, "\n")+"\n")
+	configText = withInstalledServePostgresConfig(t, configText, backend)
+	configText = withServeFixtureStateDirectory(t, configText)
 	if err := os.WriteFile(path, []byte(configText), 0o644); err != nil {
 		t.Fatalf("write runtime config: %v", err)
 	}

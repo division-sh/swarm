@@ -35,8 +35,8 @@ func absentStore2567ReportAt(path string) Report {
 
 func TestIssue2567AbsentStoreReductionIsIncompleteNotFailure(t *testing.T) {
 	report := absentStore2567Report()
-	if len(report.Observations) != 14 {
-		t.Fatalf("valid ledger has %d rows, want root plus 13 dependents", len(report.Observations))
+	if len(report.Observations) != 15 {
+		t.Fatalf("valid ledger has %d rows, want root plus 14 dependents", len(report.Observations))
 	}
 	if got := report.AdmissionDecision(AdmissionFindingPolicy{}); got.Complete || got.FailureClass != "" || got.Interrupted {
 		t.Fatalf("absence reduction = %+v", got)
@@ -49,6 +49,7 @@ var absentStore2567RequiredIDs = []string{
 	"pending_reset_admission", "retained_route_admission", "retained_channel_admission",
 	"selected_fork_recovery_admission", "retained_actor_admission",
 	"selected_fork_source_dependencies", "retained_actor_provider_dependencies",
+	"run_mutation_drift",
 }
 
 func TestIssue2567AbsentStoreReductionRequiresEveryDependent(t *testing.T) {
@@ -56,7 +57,7 @@ func TestIssue2567AbsentStoreReductionRequiresEveryDependent(t *testing.T) {
 		t.Run(id, func(t *testing.T) {
 			report := absentStore2567Report()
 			report.Observations = slices.DeleteFunc(report.Observations, func(o AdmissionObservation) bool { return o.CheckID == id })
-			if len(report.Observations) != 13 {
+			if len(report.Observations) != 14 {
 				t.Fatalf("fixture must contain exactly one %s", id)
 			}
 			if got := report.AdmissionDecision(AdmissionFindingPolicy{}); got.Complete || got.FailureClass != failures.ClassSchemaInvalid {
@@ -74,7 +75,7 @@ func TestIssue2567AbsentStoreReductionRequiresEveryDependent(t *testing.T) {
 }
 
 func TestIssue2567AbsentStoreReductionIsOrderIndependent(t *testing.T) {
-	for shift := 0; shift < 14; shift++ {
+	for shift := 0; shift < 15; shift++ {
 		report := absentStore2567Report()
 		slices.Reverse(report.Observations)
 		report.Observations = append(report.Observations[shift:], report.Observations[:shift]...)
@@ -100,7 +101,7 @@ func TestIssue2567AbsentStoreReductionIsolatesSubjects(t *testing.T) {
 				t.Run(id, func(t *testing.T) {
 					report := newReport()
 					report.Observations = slices.DeleteFunc(report.Observations, func(o AdmissionObservation) bool { return o.Subject == subject && o.CheckID == id })
-					if len(report.Observations) != 27 {
+					if len(report.Observations) != 29 {
 						t.Fatalf("fixture must contain exactly one %s for %s", id, subject)
 					}
 					if got := report.AdmissionDecision(AdmissionFindingPolicy{}); got.Complete || got.FailureClass != failures.ClassSchemaInvalid {

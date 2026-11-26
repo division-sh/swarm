@@ -22,6 +22,7 @@ func TestChannelDeliveryAbruptProcessDeathPublicJourney(t *testing.T) {
 			for _, cut := range []string{"launched", "settled"} {
 				t.Run(string(backend)+"/"+presentation+"/"+cut, func(t *testing.T) {
 					h, db, _ := startChannelAnchorJourney(t, backend, "delivery-crash-token", false, true)
+					seedChannelCrashProviderCredential(t, h.credentialPath)
 					if presentation == "cli" {
 						runRegisteredCLIProcessRestart(t, h, cut)
 						return

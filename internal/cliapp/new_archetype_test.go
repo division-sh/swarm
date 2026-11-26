@@ -60,7 +60,7 @@ func TestScaffoldAdmittedArchetypesAndTeachNextCommands(t *testing.T) {
 					t.Fatalf("generated deployment file is missing or not private: %s", private)
 				}
 			}
-			for _, command := range []string{"swarm verify --portable", "swarm serve", "swarm test"} {
+			for _, command := range []string{"swarm verify", "swarm serve", "swarm test"} {
 				if !strings.Contains(out.String(), command) {
 					t.Fatalf("output %q does not teach %s", out.String(), command)
 				}
@@ -82,9 +82,9 @@ func TestScaffoldNextStepsUseCurrentDirectory(t *testing.T) {
 			}
 			want := "Next:\n  cd " + name + "\n"
 			if name == "whatsapp-receptionist" {
-				want += "  swarm channel connect whatsapp\n  Set operator_account in policy.yaml to the linked number, including +.\n  swarm verify --portable\n  swarm serve\n"
+				want += "  swarm channel connect whatsapp\n  Set operator_account in policy.yaml to the linked number, including +.\n  swarm verify\n  swarm serve\n"
 			} else {
-				want += "  swarm verify --portable\n  swarm test tests/smoke.yaml\n  swarm secrets set -- 'telegram.telegram_bot_token'\n  swarm serve --dev\n"
+				want += "  swarm verify\n  swarm test tests/smoke.yaml\n  swarm secrets set -- 'telegram.telegram_bot_token'\n  swarm serve --dev\n"
 			}
 			if !strings.HasSuffix(out.String(), want) {
 				t.Fatalf("wrong next steps:\n%s", out.String())

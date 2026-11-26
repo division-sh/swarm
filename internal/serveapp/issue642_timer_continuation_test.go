@@ -33,7 +33,7 @@ type issue642TimerContinuationReaders interface {
 func TestIssue642OrdinaryTimerForkContinuationBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			issue642RetainedOrdinaryTimerFork(t, backend)
+			issue642RetainedOrdinaryTimerFork(t, backend, true)
 		})
 	}
 }
@@ -42,13 +42,13 @@ func TestIssue642ArmedTimerKeepsDueAcrossSelectedDelayChangeBothStores(t *testin
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, delay := range []string{"1ms", "1h"} {
 			t.Run(backend+"/"+delay, func(t *testing.T) {
-				issue642RetainedOrdinaryTimerFork(t, backend, delay)
+				issue642RetainedOrdinaryTimerFork(t, backend, true, delay)
 			})
 		}
 	}
 }
 
-func issue642RetainedOrdinaryTimerFork(t *testing.T, backend string, selectedDelay ...string) {
+func issue642RetainedOrdinaryTimerFork(t *testing.T, backend string, openFromDeclaration issue2564OpenFromDeclaration, selectedDelay ...string) {
 	t.Helper()
 	previous := buildSelectedAPICapabilities
 	buildSelectedAPICapabilities = func(owner *selectedStoreOwner, req selectedAPICapabilityRequest) (selectedAPICapabilities, error) {
@@ -60,7 +60,7 @@ func issue642RetainedOrdinaryTimerFork(t *testing.T, backend string, selectedDel
 	}
 	t.Cleanup(func() { buildSelectedAPICapabilities = previous })
 	sourceRoot := issue642TimerContinuationSource(t)
-	opts, start := issue2564ServeHarness(t, backend, sourceRoot, false)
+	opts, start := issue2564ServeHarnessAtLocation(t, backend, sourceRoot, false, "", openFromDeclaration)
 	targetRoot, targetHash := sourceRoot, ""
 	if len(selectedDelay) != 0 {
 		targetRoot = issue642TimerContinuationSource(t)

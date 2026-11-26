@@ -85,9 +85,7 @@ func TestServedWebSearchProvidersPublicJourneyBothStores(t *testing.T) {
 					}
 				})
 			}
-			if got := len(llm.Requests()); got != 2*len(providerSearchNames) {
-				t.Fatalf("search LLM requests=%d, want search and terminal output per provider", got)
-			}
+			requireFixtureLLMHistory(t, llm, 1, 2*len(providerSearchNames))
 		})
 	}
 }
@@ -142,6 +140,12 @@ func searchProviderHandler(t *testing.T, name string, calls *atomic.Int32) http.
 }
 
 func searchJourneyReply(request llmapi.Request) (llmapi.Reply, error) {
+	if reply, boot := llmapi.StartupAnswer(request); boot {
+		if reply.Model != "fixture-model" {
+			return llmapi.Reply{}, fmt.Errorf("startup answer used the wrong search model")
+		}
+		return reply, nil
+	}
 	var body struct {
 		Model string `json:"model"`
 		Tools []struct {

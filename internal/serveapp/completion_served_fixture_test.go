@@ -23,13 +23,25 @@ type completion2270ServedProof struct {
 	AuthorContext                 context.Context
 }
 
-func configureCompletion2270PostgresFixture(t *testing.T) {
+func allocateCompletion2270PostgresFixture(t *testing.T) string {
 	t.Helper()
 	location := testutil.StartEmptyPostgresDSN(t)
+	recordServePostgresFixture(t, location)
+	return location
+}
+
+func configureCompletion2270PostgresFixture(t *testing.T, declaredTarget ...bool) {
+	t.Helper()
+	location := allocateCompletion2270PostgresFixture(t)
+	useDeclaration := len(declaredTarget) == 1 && declaredTarget[0]
 	previous := buildStoresForServe
-	buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
+	buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config, bootCheck ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {
+		target, err := checkedPostgresFixtureDSN(ctx, cfg, location, useDeclaration, bootCheck)
+		if err != nil {
+			return nil, err
+		}
 		return storeselected.OpenRuntime(ctx, storeselected.RuntimeRequest{
-			Selection: selection, PostgresDSN: location, SessionLockTTL: runtimeSessionLockTTL(cfg),
+			Selection: selection, PostgresDSN: target, SessionLockTTL: runtimeSessionLockTTL(cfg), BootCheckInput: firstBootCheckInput(bootCheck),
 		})
 	}
 	t.Cleanup(func() { buildStoresForServe = previous })

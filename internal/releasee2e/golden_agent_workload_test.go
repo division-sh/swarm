@@ -88,72 +88,32 @@ func TestGoldenSQLitePossessionServeJourney(t *testing.T) {
 	env := goldenProcessEnv(t, root, "", 0)
 	assertGoldenProcessHasNoExternalExecutables(t, env)
 
-	// Fresh-store creation belongs to startup, never a read-only verifier.
+	// Deployment admission belongs to serve's non-mutating check stage.
 	absent := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binaryPath,
-		"verify", contracts, "--config", configPath, "--json")
-	var incomplete struct {
-		OK                bool   `json:"ok"`
-		ValidationScope   string `json:"validation_scope"`
-		AdmissionComplete bool   `json:"admission_complete"`
-		LiveReadiness     string `json:"live_readiness"`
-		Observations      []struct {
-			CheckID      string    `json:"check_id"`
-			Owner        string    `json:"owner"`
-			Subject      string    `json:"subject"`
-			Class        string    `json:"class"`
-			Status       string    `json:"status"`
-			Reason       string    `json:"reason"`
-			StartedAt    time.Time `json:"started_at"`
-			FinishedAt   time.Time `json:"finished_at"`
-			Dependencies []string  `json:"dependencies"`
-			FailureClass string    `json:"failure_class"`
-			NotRunCause  *struct {
-				Kind string `json:"kind"`
-				Path string `json:"path"`
-			} `json:"not_run_cause"`
-		} `json:"observations"`
+		"serve", contracts, "--config", configPath, "--dry-run")
+	if absent.err != nil || !strings.Contains(absent.output, "admission incomplete") ||
+		!strings.Contains(absent.output, "no selected store at "+store.inspectionSQLitePath+" (created on first serve)") {
+		t.Fatalf("fresh-store default admission: command=%v\n%s", absent.err, absent.output)
 	}
-	if err := json.Unmarshal([]byte(absent.output), &incomplete); absent.err != nil || err != nil || !incomplete.OK ||
-		incomplete.ValidationScope != "deployment" || incomplete.AdmissionComplete || incomplete.LiveReadiness != "not_evaluated" {
-		t.Fatalf("fresh-store default admission: command=%v decode=%v\n%s", absent.err, err, absent.output)
-	}
-	expected := map[string]bool{
-		"selected_store_access": false, "selected_store_schema": false, "startup_process_possession": false,
-		"pinned_source_admission": false, "retained_source_integrity": false, "startup_recovery_admission": false,
-		"startup_process_generation": false, "pending_reset_admission": false, "retained_route_admission": false,
-		"retained_channel_admission": false, "selected_fork_recovery_admission": false, "retained_actor_admission": false,
-		"selected_fork_source_dependencies": false, "retained_actor_provider_dependencies": false,
-	}
-	for _, observation := range incomplete.Observations {
-		if observation.Subject != "store:"+store.inspectionSQLitePath {
-			continue
-		}
-		seen, known := expected[observation.CheckID]
-		if !known || seen || observation.Class != "deployment" || observation.Status != "not_run" || observation.Reason == "" || observation.FailureClass != "" {
-			t.Fatalf("invalid fresh-store observation: %+v", observation)
-		}
-		expected[observation.CheckID] = true
-		if observation.CheckID == "selected_store_access" {
-			if observation.NotRunCause == nil || observation.NotRunCause.Kind != "absent_sqlite_store" || observation.NotRunCause.Path != store.inspectionSQLitePath {
-				t.Fatalf("fresh-store absence root: %+v", observation)
-			}
-		} else if observation.NotRunCause != nil || !reflect.DeepEqual(observation.Dependencies, []string{"selected_store_access"}) {
-			t.Fatalf("fresh-store dependent: %+v", observation)
-		}
-	}
-	for id, seen := range expected {
-		if !seen {
-			t.Fatalf("missing fresh-store observation %s", id)
+	for _, id := range []string{
+		"selected_store_access", "selected_store_schema", "startup_process_possession",
+		"pinned_source_admission", "retained_source_integrity", "startup_recovery_admission",
+		"startup_process_generation", "pending_reset_admission", "retained_route_admission",
+		"retained_channel_admission", "run_mutation_drift", "selected_fork_recovery_admission", "retained_actor_admission",
+		"selected_fork_source_dependencies", "retained_actor_provider_dependencies",
+	} {
+		if !strings.Contains(absent.output, "not_run: "+id+" @ store:"+store.inspectionSQLitePath+" (") {
+			t.Fatalf("missing fresh-store observation %s:\n%s", id, absent.output)
 		}
 	}
 	for _, path := range []string{store.inspectionSQLitePath, store.inspectionSQLitePath + ".possession"} {
 		if _, err := os.Stat(path); !os.IsNotExist(err) {
-			t.Fatalf("default verify created fresh store state %s: %v", path, err)
+			t.Fatalf("dry run created fresh store state %s: %v", path, err)
 		}
 	}
 
 	verify := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binaryPath,
-		"verify", contracts, "--config", configPath, "--portable", "--json")
+		"verify", contracts, "--config", configPath, "--json")
 	if verify.err != nil {
 		t.Fatalf("release verify failed: %v\n%s", verify.err, verify.output)
 	}
@@ -203,8 +163,8 @@ func TestGoldenSQLitePossessionServeJourney(t *testing.T) {
 				t.Fatalf("persistent possession coordinate after teardown %s: info=%v err=%v", test.possessionPath, info, err)
 			}
 			if !test.dev {
-				assertReleaseDeploymentAdmission(t, runReleaseCommand(t, goldenStartupTimeout, root, env, "", binaryPath,
-					"verify", contracts, "--config", configPath, "--json"))
+				assertReleaseDryRunAdmission(t, runReleaseCommand(t, goldenStartupTimeout, root, env, "", binaryPath,
+					"serve", contracts, "--config", configPath, "--dry-run", "--api-listen-addr", "127.0.0.1:0", "--mcp-listen-addr", "127.0.0.1:0"))
 			}
 		})
 	}
@@ -400,7 +360,7 @@ func TestGoldenInvocationRootDevReadiness(t *testing.T) {
 			assertGoldenProcessHasNoExternalExecutables(t, env)
 
 			contracts := filepath.Join(test.root, "contracts")
-			verify := runReleaseCommand(t, goldenStartupTimeout, test.root, env, "", binaryPath, "verify", contracts, "--portable", "--json")
+			verify := runReleaseCommand(t, goldenStartupTimeout, test.root, env, "", binaryPath, "verify", contracts, "--json")
 			if verify.err != nil {
 				t.Fatalf("relative invocation-root verify failed: %v\n%s", verify.err, verify.output)
 			}
@@ -732,7 +692,7 @@ func runGoldenAgentWorkload(t *testing.T, binaryPath, root string, store goldenS
 	writeReleaseFile(t, tokenFile, goldenAPIToken+"\n")
 	env := goldenProcessEnv(t, root, store.passwordEnv, options.processGOMAXPROCS)
 	assertGoldenProcessHasNoExternalExecutables(t, env)
-	verify := runReleaseCommand(t, goldenStartupTimeout, projectRoot, env, "", binaryPath, "verify", contractsOperand, "--config", configOperand, "--portable", "--json")
+	verify := runReleaseCommand(t, goldenStartupTimeout, projectRoot, env, "", binaryPath, "verify", contractsOperand, "--config", configOperand, "--json")
 	if verify.err != nil {
 		t.Fatalf("golden release verify failed: %v\n%s", verify.err, verify.output)
 	}
@@ -786,41 +746,38 @@ func runGoldenAgentWorkload(t *testing.T, binaryPath, root string, store goldenS
 	}
 	waitForGoldenTerminalRun(t, process, store, runID, completionBudget, len(replayed))
 	assertGoldenPublicProof(t, process.rpc, runID, restart, options.candidateIDs, preRestartRuntimeLog, []string{runID}, replayed)
-	assertGoldenRunHasNoDrift(t, binaryPath, projectRoot, contractsOperand, configOperand, env, runID)
+	assertGoldenRunHasNoDrift(t, process, projectRoot, contractsOperand, store, runID)
 	if options.publicBoundaryProof {
 		assertSelectedRootConnectedReadbacks(t, process, runID, binaryPath, projectRoot, configOperand, tokenOperand, env)
 	}
 }
 
-func assertGoldenRunHasNoDrift(t *testing.T, binaryPath, projectRoot, contracts, configPath string, env []string, runID string) {
+func assertGoldenRunHasNoDrift(t *testing.T, process *releaseServeProcess, projectRoot, contracts string, selected goldenStoreSelection, runID string) {
 	t.Helper()
-	for _, jsonOutput := range []bool{false, true} {
-		args := []string{"verify", contracts, "--config", configPath, "--run", runID}
-		if jsonOutput {
-			args = append(args, "--json")
-		}
-		result := runReleaseCommand(t, goldenStartupTimeout, projectRoot, env, "", binaryPath, args...)
-		if result.err != nil {
-			t.Fatalf("compiled verify --run failed (json=%t): %v\n%s", jsonOutput, result.err, result.output)
-		}
-		if !jsonOutput {
-			if !strings.Contains(result.output, "entities checked, no drift") {
-				t.Fatalf("compiled text verify did not prove no drift: %s", result.output)
-			}
-			continue
-		}
-		var report struct {
-			OK              bool              `json:"ok"`
-			Status          string            `json:"status"`
-			RunID           string            `json:"run_id"`
-			EntitiesChecked int               `json:"entities_checked"`
-			Rows            []json.RawMessage `json:"rows"`
-			Errors          []json.RawMessage `json:"errors"`
-		}
-		if err := json.Unmarshal([]byte(strings.TrimSpace(result.output)), &report); err != nil || !report.OK ||
-			report.Status != "passed" || report.RunID != runID || report.EntitiesChecked == 0 || len(report.Rows) != 0 || len(report.Errors) != 0 {
-			t.Fatalf("compiled JSON verify did not prove exact-run no drift: err=%v output=%s", err, result.output)
-		}
+	ctx, cancel := context.WithTimeout(context.Background(), goldenStartupTimeout)
+	defer cancel()
+	location := selected.inspectionSQLitePath
+	if selected.name == "postgres" {
+		location = selected.inspectionPostgresDSN
+	}
+	source := filepath.Join(projectRoot, contracts)
+	request, err := json.Marshal(struct{ Kind, Backend, Location, RunID, Source string }{"terminal_drift", selected.name, location, runID, source})
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := exec.CommandContext(ctx, process.cmd.Path, "-test.run=^TestOwnedMockLifecycleProcessEntry$")
+	command.Dir = process.cmd.Dir
+	command.Env = append(append([]string(nil), process.cmd.Env...), "SWARM_TEST_INTERNAL_GOLDEN_CRASH_OBSERVATION="+string(request))
+	output, childErr := command.Output()
+	var report struct {
+		Backend, Location, RunID, Source string
+		EntitiesChecked                  int
+		Rows                             []json.RawMessage
+	}
+	decodeErr := json.Unmarshal(output, &report)
+	matched := report.Backend == selected.name && report.Location == location && report.RunID == runID && report.Source == source
+	if childErr != nil || decodeErr != nil || !matched || report.EntitiesChecked <= 0 || len(report.Rows) != 0 {
+		t.Fatalf("terminal mock native exact-run drift proof: child=%v decode=%v exact_scope=%t entities=%d mismatches=%d", childErr, decodeErr, matched, report.EntitiesChecked, len(report.Rows))
 	}
 }
 

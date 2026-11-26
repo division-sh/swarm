@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -17,8 +18,10 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/bootverify"
+	"github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/failures"
+	storeselected "github.com/division-sh/swarm/internal/store/selected"
 	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/tests/support/testpostgres"
 	"github.com/division-sh/swarm/tests/support/testutil"
@@ -72,7 +75,8 @@ func TestVerifyDeploymentDiscoveryAndPortableOverride(t *testing.T) {
 				configBody := withTestProviderTriggerPlatformInventory(t, "llm: {backend: anthropic}\nserve: {api_listen_addr: '127.0.0.1:0', mcp_listen_addr: '127.0.0.1:0'}\n")
 				switch selection {
 				case "explicit":
-					args = append(args, "--config", writeTestVerifyRuntimeConfig(t))
+					configPath = writeTestVerifyRuntimeConfig(t)
+					args = append(args, "--config", configPath)
 				case "project":
 					writeRuntimeConfigText(t, filepath.Join(root, "swarm.yaml"), configBody)
 				case "user_global":
@@ -87,11 +91,13 @@ func TestVerifyDeploymentDiscoveryAndPortableOverride(t *testing.T) {
 					configPath = writeTestVerifyRuntimeConfig(t)
 					t.Setenv("SWARM_CONFIG", configPath)
 				}
-				if portable {
-					args = append(args, "--portable")
-				}
 				var out, errOut bytes.Buffer
-				code := executeRootCommand(context.Background(), root, args, &out, &errOut)
+				var code int
+				if portable {
+					code = executeRootCommand(context.Background(), root, args, &out, &errOut)
+				} else {
+					code = renderServeChecksForTest(t, context.Background(), root, root, configPath, "json", &out, &errOut)
+				}
 				var result verifyCommandResult
 				if err := json.Unmarshal(out.Bytes(), &result); err != nil {
 					t.Fatalf("result: %v exit=%d stdout=%s stderr=%s", err, code, out.String(), errOut.String())
@@ -100,11 +106,11 @@ func TestVerifyDeploymentDiscoveryAndPortableOverride(t *testing.T) {
 					t.Fatalf("fabricated readiness or unobserved completeness: %#v", result)
 				}
 				configured := selection == "explicit" || selection == "deployment" || selection == "locator"
-				if !configured || portable {
+				if portable {
 					if code != 0 || !result.OK || result.ValidationScope != "structural" {
 						t.Fatalf("portable admission failed: exit=%d result=%#v", code, result)
 					}
-				} else {
+				} else if configured {
 					if code == 0 || result.OK || result.ValidationScope != "deployment" {
 						t.Fatalf("unchecked deployment became success: exit=%d result=%#v", code, result)
 					}
@@ -156,6 +162,201 @@ func TestVerifyDeploymentObservationPreservesFailureAndCancellation(t *testing.T
 			decision := result.BootReport.AdmissionDecision(bootverify.AdmissionFindingPolicy{})
 			if decision.Complete || decision.FailureClass != item.class || decision.Interrupted != item.cancel || called == item.cancel {
 				t.Fatalf("incorrect decision=%#v called=%v", decision, called)
+			}
+		})
+	}
+	t.Run("stage_completion", testVerifyStageCompletionFailure)
+	t.Run("strict_consumer_construction_refusal", testStrictConsumerConstructionRefusal)
+}
+
+func testStrictConsumerConstructionRefusal(t *testing.T) {
+	root := canonicalrouting.CopyLifecycleEmitterStatic(t, canonicalrouting.LifecycleStaticLoopDangling)
+	module, _, err := NewSwarmWorkflowModule(RepoRoot(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts := runtime.DefaultWorkflowContractValidationOptions(nil, executionposture.Live)
+	opts.Purpose = bootverify.ExecutionValidation
+	opts.CheckMCPReachable = false
+	opts.FatalBootWarnings = true
+	validation, summary := runtime.ValidateWorkflowContractSurface(t.Context(), module.SemanticSource(), opts)
+	if !runtime.IsSoleWorkflowAdmissionReportRefusal(summary) {
+		t.Fatalf("strict loop did not return its validation summary: %v", summary)
+	}
+	result := ServeCheckStageResult{Validation: validation, Options: opts}
+	result.recordCompletionFailure(t.Context(), "source:"+validation.BootReport.SourceArtifactHash, summary)
+	t.Run("fresh_sqlite", func(t *testing.T) {
+		testStrictConsumerWithAbsentSQLiteStore(t, result, summary)
+	})
+	stage := ServeConstructionChecks{Result: result, Failure: errors.Join(summary, result.Failure())}
+	cleanup := errors.New("independent native cleanup")
+	for _, cell := range []struct {
+		name string
+		err  error
+		want error
+	}{
+		{"direct", stage.Failure, summary},
+		{"native_join_without_cleanup", errors.Join(stage.Failure, nil), summary},
+		{"cleanup_after", errors.Join(stage.Failure, cleanup), nil},
+		{"cleanup_before", errors.Join(cleanup, stage.Failure), nil},
+		{"cancellation_sibling", errors.Join(stage.Failure, context.Canceled), nil},
+		{"lookalike", errors.New(stage.Failure.Error()), nil},
+	} {
+		t.Run(cell.name, func(t *testing.T) {
+			if got := stage.StrictConsumerRefusal(t.Context(), cell.err); got != cell.want {
+				t.Fatalf("refusal = %v, want exact result %v", got, cell.want)
+			}
+		})
+	}
+	canceled, cancel := context.WithCancel(t.Context())
+	cancel()
+	if got := stage.StrictConsumerRefusal(canceled, stage.Failure); got != nil {
+		t.Fatalf("canceled construction reclassified: %v", got)
+	}
+}
+
+func testStrictConsumerWithAbsentSQLiteStore(t *testing.T, result ServeCheckStageResult, summary error) {
+	absent := &storeselected.AbsentSQLiteStore{Path: filepath.Join(t.TempDir(), "missing.db")}
+	for _, cell := range []struct {
+		name        string
+		cause       error
+		accountTail bool
+		want        error
+	}{
+		{"typed_absence", absent, true, summary},
+		{"incomplete_absence_evidence", absent, false, nil},
+		{"joined_native_failure", errors.Join(absent, errors.New("independent native read failure")), true, nil},
+		{"joined_cancellation", errors.Join(absent, context.Canceled), true, nil},
+	} {
+		t.Run(cell.name, func(t *testing.T) {
+			current := result
+			current.Validation.BootReport.Observations = slices.Clone(result.Validation.BootReport.Observations)
+			recordDeploymentObservation(t.Context(), &current.Validation, "selected_store_access", bootverify.SelectedStoreAccessOwner,
+				"project:test", failures.ClassDependencyUnavailable, time.Now(), cell.cause)
+			if cell.accountTail {
+				accountVerifyStoreAccessFailure(&current.Validation, "project:test")
+			}
+			stage := ServeConstructionChecks{Result: current, Failure: errors.Join(summary, current.Failure())}
+			if got := stage.StrictConsumerRefusal(t.Context(), errors.Join(stage.Failure, nil)); got != cell.want {
+				t.Fatalf("refusal = %v, want exact result %v", got, cell.want)
+			}
+		})
+	}
+}
+
+func testVerifyStageCompletionFailure(t *testing.T) {
+	repo, source := RepoRoot(), canonicalrouting.CopyExample(t, canonicalrouting.TelegramAgent)
+	_, bundle, err := NewSwarmWorkflowModule(repo, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, admitted, err := NewSwarmWorkflowModuleForBundle(bundle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	empty, err := credentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts := runtime.DefaultWorkflowContractValidationOptions(empty, executionposture.Live)
+	opts.CheckMCPReachable = false
+	opts.FatalBootWarnings = true
+	opts.ExcludedFatalBootWarningChecks = []string{"tool_resolution", "inbound_unsigned_webhook"}
+	validation, summary := runtime.ValidateWorkflowContractSurface(t.Context(), admitted, opts)
+	if !runtime.IsSoleWorkflowAdmissionReportRefusal(summary) {
+		t.Fatalf("fixture did not reach a runtime-owned report summary: %v", summary)
+	}
+	auth, schema, native, unavailable := failures.ClassAuthenticationNeeded, failures.ClassSchemaInvalid, failures.ClassOutcomeUncertain, failures.ClassDependencyUnavailable
+	t.Run("sole", func(t *testing.T) {
+		report := validation.BootReport
+		if report.HasErrors() {
+			t.Fatalf("expected fatal warnings, not a source or inspection error: %+v", report.Errors())
+		}
+		for _, key := range []string{"telegram.telegram_bot_token", "telegram.webhook_signing_secret"} {
+			if !slices.ContainsFunc(report.Warnings(), func(f bootverify.Finding) bool {
+				return f.CheckID == "credential_key_exists" && f.Location == key && f.FailureClass == auth &&
+					strings.Contains(f.Message, "credential "+key+" is missing")
+			}) {
+				t.Fatalf("missing exact authentication finding for %s: %+v", key, report.Findings)
+			}
+		}
+		out := ServeCheckStageResult{Validation: validation, Options: opts}
+		got := out.recordCompletionFailure(t.Context(), "source:"+report.SourceArtifactHash, summary)
+		for _, observation := range out.Validation.BootReport.Observations {
+			if observation.CheckID == "check_stage_completion" {
+				if observation.Status != bootverify.AdmissionFailed || observation.FailureClass != auth || observation.Cause != summary ||
+					got != summary || observation.Reason != summary.Error() || out.ExitCode() != 4 {
+					t.Fatalf("completion=%+v, cause=%v, exit=%d; want the original authentication refusal and exit 4", observation, got, out.ExitCode())
+				}
+				stage := ServeConstructionChecks{Result: out, Failure: errors.Join(summary, out.Failure())}
+				if got := stage.StrictConsumerRefusal(t.Context(), errors.Join(stage.Failure, nil)); got != nil {
+					t.Fatalf("authentication refusal reclassified: %v", got)
+				}
+				return
+			}
+		}
+		t.Fatal("completion observation missing from the credential report")
+	})
+	independent := errors.New("independent invalidity")
+	cleanup := failures.Wrap(native, "workspace_worker_outcome_uncertain", "workspace", "join_worker", nil, errors.New("independent cleanup"))
+	wrap := func(err error) error { return fmt.Errorf("wrapped: %w", err) }
+	for _, cell := range []struct {
+		name                  string
+		err, sibling, stopped error
+		report, recorded      failures.Class
+		includeWarning        bool
+		exit                  int
+	}{
+		{"unary", wrap(summary), nil, nil, auth, auth, false, 4},
+		{"singleton_join", errors.Join(summary), nil, nil, auth, schema, false, 2},
+		{"schema_after_summary", errors.Join(summary, independent), independent, nil, auth, schema, false, 2},
+		{"schema_before_summary", errors.Join(independent, summary), independent, nil, auth, schema, false, 2},
+		{"native_after_summary", errors.Join(summary, cleanup), cleanup, nil, auth, native, false, 4},
+		{"native_before_summary", errors.Join(cleanup, summary), cleanup, nil, auth, native, false, 4},
+		{"nested_wrapped_join", wrap(errors.Join(wrap(summary), errors.Join(wrap(cleanup)))), cleanup, nil, auth, native, false, 4},
+		{"unrelated_error", independent, nil, nil, auth, schema, false, 2},
+		{"joined_cancel", errors.Join(summary, context.Canceled), context.Canceled, nil, auth, unavailable, false, 130},
+		{"joined_deadline", errors.Join(context.DeadlineExceeded, summary), context.DeadlineExceeded, nil, auth, unavailable, false, 4},
+		{"already_canceled", summary, nil, context.Canceled, auth, unavailable, false, 130},
+		{"already_expired", errors.Join(summary, cleanup), cleanup, context.DeadlineExceeded, auth, unavailable, false, 4},
+		{"schema_report", summary, nil, nil, schema, schema, false, 2},
+		{"mixed_report", summary, nil, nil, schema, schema, true, 2},
+		{"excluded_warning", summary, nil, nil, unavailable, unavailable, true, 3},
+	} {
+		t.Run(cell.name, func(t *testing.T) {
+			ctx, cancel := t.Context(), func() {}
+			if cell.stopped == context.Canceled {
+				ctx, cancel = context.WithCancel(ctx)
+				cancel()
+			} else if cell.stopped == context.DeadlineExceeded {
+				ctx, cancel = context.WithDeadline(ctx, time.Now().Add(-time.Second))
+			}
+			defer cancel()
+			out := ServeCheckStageResult{Options: runtime.WorkflowContractValidationOptions{FatalBootWarnings: true}}
+			report := &out.Validation.BootReport
+			report.Purpose = bootverify.ExecutionValidation
+			report.Add(bootverify.Finding{CheckID: "owned", Severity: bootverify.SeverityHardInvalidity, FailureClass: cell.report, Message: "owned report refusal"})
+			if cell.includeWarning {
+				report.Add(bootverify.Finding{CheckID: "credential_key_exists", Severity: bootverify.SeveritySemanticDriftWarn, FailureClass: auth, Message: "credential missing"})
+				if cell.report == unavailable {
+					out.Options.ExcludedFatalBootWarningChecks = []string{"credential_key_exists"}
+				}
+			}
+			got := out.recordCompletionFailure(ctx, "source:test", cell.err)
+			if len(report.Observations) != 1 {
+				t.Fatalf("wanted one completion observation, got %+v", report.Observations)
+			}
+			observation := report.Observations[0]
+			if observation.CheckID != "check_stage_completion" || observation.FailureClass != cell.recorded || out.ExitCode() != cell.exit {
+				t.Fatalf("completion=%+v decision=%+v exit=%d", observation, out.Decision(), out.ExitCode())
+			}
+			for _, cause := range []error{cell.err, cell.sibling, cell.stopped} {
+				if cause != nil && (!errors.Is(got, cause) || !errors.Is(observation.Cause, cause)) {
+					t.Fatalf("lost cause %v: returned %v, observed %v", cause, got, observation.Cause)
+				}
+			}
+			if cell.stopped == nil && (got.Error() != cell.err.Error() || observation.Reason != cell.err.Error()) {
+				t.Fatalf("completion changed report text: returned %v, observed %q", got, observation.Reason)
 			}
 		})
 	}
@@ -217,7 +418,7 @@ func TestVerifyDeploymentManagedCatalogConsumesLoadedSourceWithoutExecution(t *t
 	writeRuntimeConfigText(t, configPath, withTestProviderTriggerPlatformInventory(t,
 		"llm: {backend: anthropic}\nserve: {api_listen_addr: '127.0.0.1:0', mcp_listen_addr: '127.0.0.1:0'}\n"))
 	var out, diagnostic bytes.Buffer
-	code := executeRootCommand(context.Background(), root, []string{"verify", root, "--config", configPath, "--json"}, &out, &diagnostic)
+	code := renderServeChecksForTest(t, context.Background(), root, root, configPath, "json", &out, &diagnostic)
 	var result verifyCommandResult
 	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
 		t.Fatalf("public result: %v exit=%d stderr=%s", err, code, &diagnostic)
@@ -256,7 +457,7 @@ func TestVerifyFreshSQLiteSchemaAccountsAbsenceWithoutClaimingPossession(t *test
 	writeRuntimeConfigText(t, configPath, withTestProviderTriggerPlatformInventory(t, fmt.Sprintf(
 		"llm: {backend: anthropic}\nserve: {api_listen_addr: '127.0.0.1:0', mcp_listen_addr: '127.0.0.1:0'}\nstore: {backend: sqlite, sqlite: {path: %q}}\n", storePath)))
 	var out, diagnostic bytes.Buffer
-	code := executeRootCommand(context.Background(), root, []string{"verify", root, "--config", configPath, "--json"}, &out, &diagnostic)
+	code := renderServeChecksForTest(t, context.Background(), root, root, configPath, "json", &out, &diagnostic)
 	var result verifyCommandResult
 	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
 		t.Fatalf("public result: %v exit=%d stderr=%s", err, code, &diagnostic)
@@ -287,7 +488,7 @@ func TestVerifyFreshPostgresSchemaAccountsAbsenceWithoutClaimingPossession(t *te
 		"llm: {backend: anthropic}\nserve: {api_listen_addr: '127.0.0.1:0', mcp_listen_addr: '127.0.0.1:0'}\nstore: {backend: postgres}\ndatabase: {host: %q, port: %d, name: %q, user: %q, password_env: SWARM_VERIFY_TEST_PASSWORD, sslmode: %q}\n",
 		parameters.Host, parameters.Port, parameters.Database, parameters.User, parameters.SSLMode)))
 	var out, diagnostic bytes.Buffer
-	code := executeRootCommand(context.Background(), root, []string{"verify", root, "--config", configPath, "--json"}, &out, &diagnostic)
+	code := renderServeChecksForTest(t, context.Background(), root, root, configPath, "json", &out, &diagnostic)
 	var result verifyCommandResult
 	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
 		t.Fatalf("public result: %v exit=%d stderr=%s", err, code, &diagnostic)
@@ -312,7 +513,7 @@ func assertVerifyFreshStoreAccounting(t *testing.T, code int, result verifyComma
 			if observation.Status != possession {
 				t.Fatalf("fresh schema fabricated or skipped independent possession: %+v", observation)
 			}
-		case "startup_process_generation", "pinned_source_admission", "retained_source_integrity", "startup_recovery_admission", "pending_reset_admission", "retained_route_admission", "retained_channel_admission", "selected_fork_recovery_admission", "retained_actor_admission", "selected_fork_source_dependencies", "retained_actor_provider_dependencies":
+		case "startup_process_generation", "pinned_source_admission", "retained_source_integrity", "startup_recovery_admission", "pending_reset_admission", "retained_route_admission", "retained_channel_admission", "run_mutation_drift", "selected_fork_recovery_admission", "retained_actor_admission", "selected_fork_source_dependencies", "retained_actor_provider_dependencies":
 			if observation.Status != bootverify.AdmissionNotApplicable || !strings.Contains(observation.Reason, "canonical schema inspection") {
 				t.Fatalf("proven absent domain mistaken for unavailable or observed rows: %+v", observation)
 			}
@@ -321,7 +522,7 @@ func assertVerifyFreshStoreAccounting(t *testing.T, code int, result verifyComma
 		}
 		seen[observation.CheckID] = true
 	}
-	if len(seen) != 15 || code == 0 || result.OK || result.AdmissionComplete {
+	if len(seen) != 16 || code == 0 || result.OK || result.AdmissionComplete {
 		t.Fatalf("fresh-store accounting: seen=%v exit=%d result=%+v", seen, code, result)
 	}
 	preparation := false
@@ -500,6 +701,22 @@ func TestVerifyListenerDriverProvesOccupiedAndReleasedExactBindings(t *testing.T
 			if decision := result.BootReport.AdmissionDecision(bootverify.AdmissionFindingPolicy{}); decision.Complete == occupied {
 				t.Fatalf("occupied bindings were admitted or valid observations incomplete: %+v", decision)
 			}
+			dryRun := runtime.WorkflowContractValidationResult{BootReport: bootverify.Report{Purpose: bootverify.ExecutionValidation}}
+			inspectVerifyListeners(context.Background(), root, cfg, &dryRun, ServeOptions{DryRun: true, APIListenAddr: addresses[0], MCPListenAddr: addresses[1]})
+			for _, observation := range dryRun.BootReport.Observations {
+				if observation.CheckID == "listener_availability" {
+					want := bootverify.AdmissionPassed
+					if occupied {
+						want = bootverify.AdmissionNotRun
+					}
+					if observation.Status != want {
+						t.Fatalf("dry run fabricated port evidence: %+v", observation)
+					}
+				}
+			}
+			if dryRun.BootReport.AdmissionDecision(bootverify.AdmissionFindingPolicy{}).Complete == occupied || len(dryRun.BootReport.ExecutionObligations) != 2 {
+				t.Fatal("dry run lost not-checked status or real listener obligation")
+			}
 			if !occupied {
 				for _, address := range addresses {
 					listener, err := net.Listen("tcp", address)
@@ -513,4 +730,75 @@ func TestVerifyListenerDriverProvesOccupiedAndReleasedExactBindings(t *testing.T
 			}
 		})
 	}
+	t.Run("dry_run_keeps_own_binding_collision", func(t *testing.T) {
+		isolateCLIAPIConfigEnv(t)
+		root := t.TempDir()
+		listener, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		addr := listener.Addr().String()
+		if err := listener.Close(); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: root})
+		if err != nil {
+			t.Fatal(err)
+		}
+		result := runtime.WorkflowContractValidationResult{BootReport: bootverify.Report{Purpose: bootverify.ExecutionValidation}}
+		inspectVerifyListeners(context.Background(), root, cfg, &result, ServeOptions{DryRun: true, APIListenAddr: addr, MCPListenAddr: addr})
+		failed := false
+		for _, observation := range result.BootReport.Observations {
+			if observation.CheckID == "listener_availability" && observation.Status == bootverify.AdmissionFailed {
+				failed = true
+			}
+		}
+		if !failed {
+			t.Fatal("dry run excused its own API/MCP collision")
+		}
+	})
+	t.Run("supplied_public_listener_stays_owned_and_closed_refuses", func(t *testing.T) {
+		root := t.TempDir()
+		cfg, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: root})
+		if err != nil {
+			t.Fatal(err)
+		}
+		listener, err := net.ListenTCP("tcp", &net.TCPAddr{IP: net.ParseIP("127.0.0.1")})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer listener.Close()
+		intent := ServeOptions{APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", PublicWebhookListen: listener.Addr().String(), PublicWebhookListener: listener}
+		for _, closed := range []bool{false, true} {
+			if closed {
+				if err := listener.Close(); err != nil {
+					t.Fatal(err)
+				}
+			}
+			result := runtime.WorkflowContractValidationResult{BootReport: bootverify.Report{Purpose: bootverify.ExecutionValidation}}
+			inspectVerifyListeners(context.Background(), root, cfg, &result, intent)
+			found := false
+			for _, observation := range result.BootReport.Observations {
+				if observation.Subject == "public-webhook:"+listener.Addr().String() && observation.CheckID == "listener_availability" {
+					found = true
+					want := bootverify.AdmissionPassed
+					if closed {
+						want = bootverify.AdmissionFailed
+					}
+					if observation.Status != want {
+						t.Fatalf("closed=%t supplied listener evidence=%+v", closed, observation)
+					}
+				}
+			}
+			if !found {
+				t.Fatal("supplied listener was not observed")
+			}
+			if !closed {
+				connection, err := listener.SyscallConn()
+				if err != nil || connection.Control(func(uintptr) {}) != nil {
+					t.Fatalf("stage closed the runtime-owned listener: %v", err)
+				}
+			}
+		}
+	})
 }

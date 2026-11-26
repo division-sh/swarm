@@ -123,6 +123,7 @@ func runMockAgentSupportedSurface(t *testing.T, backend string) time.Duration {
 		opts.StoreMode = "sqlite"
 	case "postgres":
 		dsn, _, cleanup := testutil.StartPostgres(t)
+		recordServePostgresFixture(t, dsn)
 		t.Cleanup(cleanup)
 		location = dsn
 		var runtimePG *store.PostgresStore
@@ -135,9 +136,10 @@ func runMockAgentSupportedSurface(t *testing.T, backend string) time.Duration {
 		}
 		openStore()
 		oldBuildStores := buildStoresForServe
-		buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
+		buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config, bootCheck ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {
+			owner := openSelectedPostgresOwner(t, dsn, storetest.DatabaseForTest(runtimePG), cfg, bootCheck...)
 			storetest.BootstrapPostgresRuntimeStore(t, runtimePG)
-			return openSelectedPostgresOwner(t, dsn, storetest.DatabaseForTest(runtimePG), cfg), nil
+			return owner, nil
 		}
 		t.Cleanup(func() {
 			buildStoresForServe = oldBuildStores
@@ -286,6 +288,8 @@ func writeMockAgentRuntimeConfig(t *testing.T, backend, sqlitePath string) strin
 	)
 	path := filepath.Join(t.TempDir(), "swarm.yaml")
 	source := withTestProviderTriggerPlatformInventory(t, strings.Join(lines, "\n")+"\n")
+	source = withInstalledServePostgresConfig(t, source, backend)
+	source = withServeFixtureStateDirectory(t, source)
 	if err := os.WriteFile(path, []byte(source), 0o644); err != nil {
 		t.Fatalf("write mock runtime config: %v", err)
 	}

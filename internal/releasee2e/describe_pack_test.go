@@ -64,7 +64,7 @@ func TestDescribePackPublicReadOnlyJourney(t *testing.T) {
 		body = strings.ReplaceAll(body, "REPLACE_OPERATOR_ACCOUNT", "420079")
 		writeReleaseFile(t, filepath.Join(source, fragment.File), body)
 	}
-	verified := command("verify", source, "--portable", "--json")
+	verified := command("verify", source, "--json")
 	if !strings.Contains(verified, `"ok":true`) {
 		t.Fatalf("public concrete snippet verification failed: %s", verified)
 	}

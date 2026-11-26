@@ -78,7 +78,7 @@ func TestRunServeSessionRecoveryRegisteredBothStores(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				writeStandingCandidateFile(t, opts.ConfigPath, string(config)+"\npaths:\n  swarm_dir: "+opts.SwarmDir+"\n")
+				writeStandingCandidateFile(t, opts.ConfigPath, withServeFixtureStateDirectory(t, string(config), opts.SwarmDir))
 				op := issue3011RegisterForSend(t, opts, peer)
 				if permanent != "transient" {
 					requireRecoveryPermanentBoot(t, opts, peer, permanent)
@@ -521,6 +521,7 @@ func TestRunServeTerminalAccountDoesNotStarveRecoveryBothStores(t *testing.T) {
 			if !t.Run(string(backend)+"/"+kind, func(t *testing.T) {
 				h := prepareChannelAnchorPublicJourney(t, backend, "bot-token", false, 0, func(opts *cliapp.ServeOptions) {
 					opts.SourceRoot = filepath.Join(repoRootForTest(), "internal/serveapp/testdata/whatsapp-session-reply")
+					declarePrivateRegistrationState(t, opts.ConfigPath)
 				})
 				mux := http.NewServeMux()
 				mux.Handle("/", h.provider)

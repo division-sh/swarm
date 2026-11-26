@@ -58,10 +58,10 @@ func TestClaudeCLIManagedLifecycleFromReleaseBinaryDefaults(t *testing.T) {
 	dockerScript := fmt.Sprintf("#!/bin/sh\n%s=1 exec %s -- \"$@\"\n", fakeDockerHelperEnv, shellQuote(testBinary))
 	writeExecutable(t, filepath.Join(fakeBin, "docker"), dockerScript)
 
-	env := releaseProcessEnv(fakeBin, fakeRoot, home)
+	env := append(releaseProcessEnv(fakeBin, fakeRoot, home), releaseDisposableReadStateEnv+"=1")
 	contracts := filepath.Join(releaseRoot, "contracts")
 	// Source preflight precedes credentials, store creation and the managed CLI test transport.
-	verify := runReleaseCommand(t, 45*time.Second, releaseRoot, env, "", binaryPath, "verify", contracts, "--portable")
+	verify := runReleaseCommand(t, 45*time.Second, releaseRoot, env, "", binaryPath, "verify", contracts)
 	if verify.err != nil {
 		t.Fatalf("release verify failed: %v\n%s", verify.err, verify.output)
 	}
@@ -305,12 +305,16 @@ func runReleaseCommand(t *testing.T, timeout time.Duration, dir string, env []st
 
 func assertReleaseDockerEvidence(t *testing.T, records []fakeDockerRecord) {
 	t.Helper()
-	if err := validateReleaseDockerEvidence(records); err != nil {
+	if err := validateReleaseDockerEvidenceWithStartupTools(records, releaseE2EDisposableReadStateTools(), true); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func validateReleaseDockerEvidence(records []fakeDockerRecord) error {
+func validateReleaseDockerEvidence(records []fakeDockerRecord, observed ...bool) error {
+	return validateReleaseDockerEvidenceWithStartupTools(records, releaseE2EStartupAllowedTools(), observed...)
+}
+
+func validateReleaseDockerEvidenceWithStartupTools(records []fakeDockerRecord, disposableTools []string, observed ...bool) error {
 	required := map[string]int{
 		"docker_version":   0,
 		"network_list":     0,
@@ -330,7 +334,24 @@ func validateReleaseDockerEvidence(records []fakeDockerRecord) error {
 	currentIDs := map[string]string{}
 	admissionContainers := map[string]bool{}
 	probedContainers := map[string]bool{}
+	disposable := map[string]string{}
+	removed := map[string]bool{}
+	answerIndex, removalIndex, answerCount, disposableStarts := -1, -1, 0, 0
 	for index, record := range records {
+		switch record.Class {
+		case "admission_create":
+			if record.ContainerID == "" || disposable[record.ContainerID] != "" {
+				return fmt.Errorf("duplicate or absent disposable identity")
+			}
+			disposable[record.ContainerID] = dockerOptionValue(record.Args, "--name")
+		case "admission_remove":
+			if disposable[record.ContainerID] == "" || removed[record.ContainerID] {
+				return fmt.Errorf("disposable cleanup has no exact unique creation")
+			}
+			removed[record.ContainerID], removalIndex = true, index
+		case "admission_answer":
+			answerIndex, answerCount = index, answerCount+1
+		}
 		if record.Class == "container_create" && record.ContainerID != "" {
 			containerNames[record.ContainerID] = dockerOptionValue(record.Args, "--name")
 			currentIDs[containerNames[record.ContainerID]] = record.ContainerID
@@ -372,15 +393,26 @@ func validateReleaseDockerEvidence(records []fakeDockerRecord) error {
 		}
 		switch record.Class {
 		case "claude_startup":
+			if record.StartupObservation {
+				disposableStarts++
+			}
 			startupIndex, startupSession = index, record.SessionID
 			if selected := splitAllowedTools(dockerOptionValue(record.Args, "--tools")); !equalStrings(selected, releaseE2EBuiltinTools()) {
 				return fmt.Errorf("startup selected builtins = %q, want exact fixture builtin surface", selected)
 			}
 			wantTools := releaseE2EStartupAllowedTools()
+			if record.StartupObservation {
+				wantTools = disposableTools
+			}
 			if allowed := splitAllowedTools(dockerOptionValue(record.Args, "--allowedTools")); !equalStrings(allowed, wantTools) {
 				return fmt.Errorf("startup accepted tools = %q, want exact fixture tool surface", allowed)
 			}
-			if record.RawMCPURL != releaseE2ERawMCPURL || record.MCPURL != releaseE2EHostMCPURL {
+			if record.StartupObservation {
+				translated, err := hostReachableMCPURL(record.RawMCPURL, true)
+				if err != nil || translated != record.MCPURL {
+					return fmt.Errorf("startup observation MCP endpoints disagree: %v", err)
+				}
+			} else if record.RawMCPURL != releaseE2ERawMCPURL || record.MCPURL != releaseE2EHostMCPURL {
 				return fmt.Errorf("startup MCP endpoints = %q/%q, want raw container and translated host defaults", record.RawMCPURL, record.MCPURL)
 			}
 		case "claude_live":
@@ -418,6 +450,11 @@ func validateReleaseDockerEvidence(records []fakeDockerRecord) error {
 			}
 		}
 	}
+	if disposableStarts != 0 || len(observed) != 0 && observed[0] {
+		if answerCount != 1 || len(disposable) != disposableStarts+2 || len(removed) != len(disposable) || answerIndex <= startupIndex || removalIndex < answerIndex || removalIndex >= liveIndex {
+			return fmt.Errorf("disposable answer/cleanup evidence incomplete: starts=%d answers=%d created=%d removed=%d", disposableStarts, answerCount, len(disposable), len(removed))
+		}
+	}
 	var missing []string
 	for class, count := range required {
 		if count == 0 {
@@ -447,6 +484,10 @@ func validateReleaseDockerEvidence(records []fakeDockerRecord) error {
 
 func releaseE2EStartupAllowedTools() []string {
 	return []string{"ExitPlanMode", "WebFetch", "WebSearch", "mcp__runtime-tools__emit_agent_completed", "mcp__runtime-tools__notify_human"}
+}
+
+func releaseE2EDisposableReadStateTools() []string {
+	return append(releaseE2EStartupAllowedTools(), "mcp__runtime-tools__read_state")
 }
 
 func releaseE2ELiveAllowedTools() []string {
@@ -629,6 +670,7 @@ func releaseProcessEnv(fakeBin, fakeRoot, home string) []string {
 		"SWARM_TOOL_GATEWAY_URL":        true,
 		"SWARM_TOOL_GATEWAY_TOKEN":      true,
 		"SWARM_TOOL_GATEWAY_AUTH_TOKEN": true,
+		releaseDisposableReadStateEnv:   true,
 	}
 	env := make([]string, 0, len(os.Environ())+7)
 	for _, entry := range os.Environ() {

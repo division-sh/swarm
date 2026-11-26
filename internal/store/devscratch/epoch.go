@@ -107,6 +107,19 @@ type diagnostic struct {
 // Acquire retains the nonblocking kernel authority lock. It does not replace
 // predecessor files until PrepareFreshStore is called.
 func Acquire(coordinate Coordinate) (*EpochAuthority, error) {
+	authority, err := RetainForChecks(coordinate)
+	if err != nil {
+		return nil, err
+	}
+	if err := authority.BeginEpoch(); err != nil {
+		return nil, errors.Join(err, authority.AbortBeforeStoreOpen())
+	}
+	return authority, nil
+}
+
+// RetainForChecks takes only the existing exclusion; no epoch diagnostic or
+// predecessor contents change until the complete check stage succeeds.
+func RetainForChecks(coordinate Coordinate) (*EpochAuthority, error) {
 	canonical, err := Resolve(coordinate.ProjectRoot)
 	if err != nil {
 		return nil, err
@@ -121,21 +134,34 @@ func Acquire(coordinate Coordinate) (*EpochAuthority, error) {
 	if err != nil {
 		return nil, err
 	}
+	return &EpochAuthority{coordinate: canonical, lock: lock, state: authorityAcquired}, nil
+}
+
+func (a *EpochAuthority) BeginEpoch() error {
+	if a == nil {
+		return errors.New("dev scratch epoch authority is required")
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.state != authorityAcquired || a.lock == nil || a.epochID != "" {
+		return errors.New("dev scratch epoch initialization requires its retained check exclusion")
+	}
 	epochID, err := newEpochID()
 	if err != nil {
-		return nil, errors.Join(err, lock.release())
+		return err
 	}
 	metadata, err := json.Marshal(diagnostic{
-		Version: diagnosticVersion, EpochID: epochID, ProjectRoot: canonical.ProjectRoot,
-		Database: canonical.DatabasePath, PID: os.Getpid(), AcquiredAt: time.Now().UTC().Format(time.RFC3339Nano),
+		Version: diagnosticVersion, EpochID: epochID, ProjectRoot: a.coordinate.ProjectRoot,
+		Database: a.coordinate.DatabasePath, PID: os.Getpid(), AcquiredAt: time.Now().UTC().Format(time.RFC3339Nano),
 	})
 	if err != nil {
-		return nil, errors.Join(err, lock.release())
+		return err
 	}
-	if err := lock.rewrite(append(metadata, '\n')); err != nil {
-		return nil, errors.Join(fmt.Errorf("write dev scratch epoch diagnostic: %w", err), lock.release())
+	if err := a.lock.rewrite(append(metadata, '\n')); err != nil {
+		return fmt.Errorf("write dev scratch epoch diagnostic: %w", err)
 	}
-	return &EpochAuthority{coordinate: canonical, epochID: epochID, lock: lock, state: authorityAcquired}, nil
+	a.epochID = epochID
+	return nil
 }
 
 type directoryIdentity struct {
@@ -215,7 +241,7 @@ func (a *EpochAuthority) PrepareFreshStore() error {
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if a.state != authorityAcquired {
+	if a.state != authorityAcquired || a.epochID == "" {
 		return errors.New("dev scratch replacement requires a newly acquired epoch")
 	}
 	paths := predecessorPaths(a.coordinate.DatabasePath)
@@ -288,7 +314,7 @@ func (a *EpochAuthority) RegistrationGrant() (RegistrationGrant, error) {
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if a.state != authorityAcquired || a.lock == nil {
+	if a.state != authorityAcquired || a.lock == nil || a.epochID == "" {
 		return RegistrationGrant{}, errors.New("dev scratch descriptor registration requires a retained pre-replacement epoch")
 	}
 	return RegistrationGrant{projectRoot: a.coordinate.ProjectRoot, epochID: a.epochID}, nil
@@ -331,6 +357,29 @@ func predecessorPaths(databasePath string) []string {
 		paths = append(paths, databasePath+suffix)
 	}
 	return paths
+}
+
+// InspectPredecessor checks the disposable epoch's physical inputs without
+// acquiring an epoch, reading its application rows or removing anything.
+func InspectPredecessor(coordinate Coordinate) error {
+	canonical, err := Resolve(coordinate.ProjectRoot)
+	if err != nil {
+		return err
+	}
+	if coordinate != canonical {
+		return errors.New("dev scratch coordinate does not match its canonical project owner")
+	}
+	for _, path := range []string{filepath.Join(canonical.ProjectRoot, ".swarm"), filepath.Dir(canonical.DatabasePath)} {
+		if _, err := inspectCanonicalDirectory(path, "dev scratch directory"); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
+	for _, path := range predecessorPaths(canonical.DatabasePath) {
+		if err := validatePredecessorArtifact(path); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func validatePredecessorArtifact(path string) error {

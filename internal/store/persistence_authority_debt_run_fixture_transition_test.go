@@ -33,6 +33,7 @@ const debtPortableAgentFixtureCollectorTo = "90e301f3d5080732c31703c1a9cfa7377cc
 const debtW2DeliveryEvidenceCollectorTo = "0f8b0b73cf2634a5d0d3780795bd73a8e059731621746baa1a852402552c251d"
 const debtChannelCrashPreparationCollectorTo = "3acef74e89c4bf99f03cc63649c398e3706fb3b833240ecbfe21b40655dbb041"
 const debtChannelObservationCollectorTo = "f9aa468bcdd8931e796550d7787c0398b66da97bdafb78f4580cb3965fb1e385"
+const debtBootCheckCollectorTo = "4e94704010e1d48049799122446d090da8f3919064e4d0227e7b30e2f26e5b20"
 const debtR52LiveFixtureCollectorTo = "a2ec4884aba6f3258d74e3cfe0bd68bf6ccc907828fac40d18d1775ce7d4d878"
 
 const debtS2OriginalContextCollectorTo = "97c60588009aa53ed5506745a2497fae2f37aed2c3a14c734effda0053643c70"
@@ -51,6 +52,42 @@ func debtRunFixtureTransitionStates() (map[string]authorityDebtSite, map[string]
 
 func TestPersistenceAuthorityDebtRunFixtureSignatureTransitionIsExact(t *testing.T) {
 	old, current := debtRunFixtureTransitionStates()
+	t.Run("boot-check-exact-signatures", func(t *testing.T) {
+		before, after := debtControlSet(), debtControlSet()
+		pairs := append(debtBootCheckSignatureTransitions(), debtBootCheckOwnerTransitions()...)
+		if len(pairs) != 23 {
+			t.Fatal("boot-check correspondence must contain 19 callers plus four existing-owner identities")
+		}
+		for _, pair := range pairs {
+			before[pair[0].identity()], after[pair[1].identity()] = pair[0], pair[1]
+		}
+		for _, landed := range []bool{false, true} {
+			source := before
+			if landed {
+				source = after
+			}
+			for _, head := range []map[string]authorityDebtSite{before, after} {
+				inputs := [4]map[string]authorityDebtSite{after, head, before, source}
+				var originals [4]map[string]authorityDebtSite
+				for i := range inputs {
+					originals[i] = maps.Clone(inputs[i])
+				}
+				if failures := authorityDebtRatchet(inputs[0], inputs[1], inputs[2], inputs[3]); len(failures) != 0 || authorityDebtCount(before) != authorityDebtCount(after) {
+					t.Fatalf("exact counted correspondence refused: %v", failures)
+				}
+				for i := range inputs {
+					if !maps.Equal(inputs[i], originals[i]) {
+						t.Fatal("correspondence mutated its evidence")
+					}
+				}
+			}
+			for _, pair := range pairs {
+				t.Run(pair[0].Declaration, func(t *testing.T) {
+					debtRunFixtureSignatureHostileControls(t, pair, before, after, landed)
+				})
+			}
+		}
+	})
 	t.Run("channel-observation-counted-signatures", func(t *testing.T) {
 		baseline, source, actual := debtControlSet(), debtControlSet(), debtControlSet()
 		var rows [][3]authorityDebtSite
@@ -782,6 +819,7 @@ func TestPersistenceAuthorityDebtRunFixtureCollectorTransitionIsPinned(t *testin
 			{debtPortableAgentFixtureCollectorTo, debtW2DeliveryEvidenceCollectorTo},
 			{debtW2DeliveryEvidenceCollectorTo, debtChannelCrashPreparationCollectorTo},
 			{debtR241CollectorTo, debtChannelObservationCollectorTo},
+			{debtChannelObservationCollectorTo, debtBootCheckCollectorTo},
 		} {
 			t.Run(edge[0], func(t *testing.T) {
 				for _, mutation := range []string{"exact", "foreign-base", "trusted-collector", "foreign-current", "head-collector", "unreviewed", "foreign-review", "reverse", "bootstrap", "remove-site", "add-site", "multiplicity", "replace-site"} {

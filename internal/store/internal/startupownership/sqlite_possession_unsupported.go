@@ -5,7 +5,13 @@ package startupownership
 import (
 	"context"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
+	"os"
 )
+
+func captureSQLiteInspectionCoordinate(string) (os.FileInfo, error) {
+	_, err := acquireSQLiteFilePossession("")
+	return nil, err
+}
 
 func CaptureSQLiteInspectionIdentity(string) (*SQLiteBackendIdentity, error) {
 	_, err := acquireSQLiteFilePossession("")
@@ -15,6 +21,11 @@ func CaptureSQLiteInspectionIdentity(string) (*SQLiteBackendIdentity, error) {
 func ObserveSQLiteInspectionAbsence(context.Context, string) (bool, error) {
 	_, err := acquireSQLiteFilePossession("")
 	return false, err
+}
+
+func inspectSQLiteCoordinate(ctx context.Context, path string) (string, bool, error) {
+	absent, err := ObserveSQLiteInspectionAbsence(ctx, path)
+	return path, absent, err
 }
 
 func probeSQLitePossession(context.Context, string, *SQLiteBackendIdentity) (bool, error) {
@@ -38,7 +49,12 @@ func waitSQLiteFilePossession(context.Context, string) (sqlitePossession, error)
 	return nil, err
 }
 
-func waitSQLiteConstructionPossession(context.Context, string) (sqlitePossession, error) {
+func waitSQLiteConstructionPossession(context.Context, string, ...*SQLiteInspectionInput) (sqlitePossession, error) {
+	_, err := acquireSQLiteFilePossession("")
+	return nil, err
+}
+
+func waitSQLitePrewritePossession(context.Context, string, ...*SQLiteInspectionInput) (sqlitePossession, error) {
 	_, err := acquireSQLiteFilePossession("")
 	return nil, err
 }

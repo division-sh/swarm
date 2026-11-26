@@ -325,7 +325,7 @@ func TestPublicPublicationCreatingTurnRestartBothStores(t *testing.T) {
 
 func creatingTurnOrderHarness(t *testing.T, backend string) (*cliapp.ServeOptions, func() (*serveRuntimeTestProcess, issue2564ServedFixture)) {
 	t.Helper()
-	opts, start := issue2564ServeHarness(t, backend, issue2564H1WriteCorpus(t), false)
+	opts, start := issue2564ServeHarnessAtLocation(t, backend, issue2564H1WriteCorpus(t), false, "", true)
 	// These roots cover creating-node order, not the separate H1 tool workload.
 	opts.TestLLMRuntime = servedNoopLLMRuntime{}
 	return opts, start

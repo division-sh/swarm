@@ -92,6 +92,26 @@ func TestIssue2567SQLiteAbsencePreservesSystemCanonicalAlias(t *testing.T) {
 	if absent, err := ObserveSQLiteInspectionAbsence(context.Background(), path); err != nil || !absent {
 		t.Fatalf("system coordinate was rejected: %t/%v", absent, err)
 	}
+	input, err := CaptureSQLiteInspectionInput(t.Context(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonical := path
+	if runtime.GOOS == "darwin" {
+		canonical = "/private" + path
+	}
+	if err := input.Revalidate(t.Context(), canonical); err != nil {
+		t.Fatalf("unchanged native system alias refused: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := input.Revalidate(t.Context(), canonical); err == nil {
+		t.Fatal("system alias normalization erased the appeared-store refusal")
+	}
 }
 
 func TestIssue2567SQLiteObservedExistingDisappearanceIsNotAbsence(t *testing.T) {

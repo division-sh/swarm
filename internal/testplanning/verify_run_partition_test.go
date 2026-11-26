@@ -47,7 +47,7 @@ var verifyRunProofs = []verifyRunProof{
 	{pkg: "internal/store/internal/runtimepersistence", name: "TestSelectedContractActivitySourceProjectionBothStores", children: []string{"sqlite/root_source", "sqlite/root_source_independent_target", "sqlite/static_source", "sqlite/static_source_independent_target", "sqlite/root_payload_disagrees", "sqlite/static_payload_disagrees", "postgres/root_source", "postgres/root_source_independent_target", "postgres/static_source", "postgres/static_source_independent_target", "postgres/root_payload_disagrees", "postgres/static_payload_disagrees"}},
 	{pkg: "internal/store/internal/runtimepersistence", name: "TestSelectedContractActivitySourceProjectionPreservesNumericPayloadBothStores", children: []string{"sqlite/root", "sqlite/static", "postgres/root", "postgres/static"}},
 	{pkg: "internal/store/internal/runtimepersistence", name: "TestRunTerminalizationAtomicallyFencesGateActivationsAndCardsOnBothStores", children: []string{"sqlite", "postgres"}},
-	{pkg: "internal/serveapp", name: "TestVerifyRunJobflowRegistryIntegrationBothStores", children: []string{"sqlite/clean/text", "sqlite/clean/json", "sqlite/drift/text", "sqlite/drift/json", "postgres/clean/text", "postgres/clean/json", "postgres/drift/text", "postgres/drift/json"}},
+	{pkg: "internal/serveapp", name: "TestVerifyRunJobflowRegistryIntegrationBothStores", children: []string{"sqlite/clean", "sqlite/drift", "postgres/clean", "postgres/drift"}},
 	{pkg: "internal/runtime/mutationlog", name: "TestVerifyRunJSONPreservesAtomicNumericEvidence"},
 	{pkg: "internal/runtime/mutationlog", name: "TestVerifyRunProjectionDomainComparison"},
 	{pkg: "internal/runtime/mutationlog", name: "TestVerifyRunProjectionEntityMembership"},
@@ -58,12 +58,11 @@ func verifyRunPublicChildren() []string {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, mutations := range []bool{false, true} {
 			for _, missing := range []bool{false, true} {
-				for _, mode := range []string{"json", "text", "quiet"} {
-					for _, uppercase := range []bool{false, true} {
-						children = append(children, fmt.Sprintf("%s/mutations_%t/missing_%t/%s/uppercase_%t", backend, mutations, missing, mode, uppercase))
-					}
-				}
+				children = append(children, fmt.Sprintf("%s/mutations_%t/missing_%t", backend, mutations, missing))
 			}
+		}
+		for _, state := range []string{"running", "paused", "cancelled"} {
+			children = append(children, backend+"/drift_"+state)
 		}
 	}
 	return children

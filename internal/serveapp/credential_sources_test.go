@@ -13,6 +13,29 @@ import (
 // Invariant: both-store public boot names each actual required source without
 // disclosing values or conflating tool environment and channel file custody.
 func TestServeRequiredCredentialSourceReadbackBothStores(t *testing.T) {
+	t.Run("unrelated configured file is not a fixture", func(t *testing.T) {
+		directory, err := os.MkdirTemp("", "unrelated-credentials-")
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.RemoveAll(directory) })
+		path := filepath.Join(directory, "credentials.json")
+		before := []byte("unrelated file, not a credential fixture")
+		if err := os.WriteFile(path, before, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("SWARM_CREDENTIALS_FILE", path)
+		if mockServeCredentialFileOwned(t) {
+			t.Fatal("inherited path granted synthetic credential writes")
+		}
+		if after, err := os.ReadFile(path); err != nil || string(after) != string(before) {
+			t.Fatal("unrelated file changed")
+		}
+		t.Setenv("SWARM_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "fixture.json"))
+		if !mockServeCredentialFileOwned(t) {
+			t.Fatal("explicit test-owned credential fixture refused")
+		}
+	})
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			for _, verbose := range []bool{false, true} {

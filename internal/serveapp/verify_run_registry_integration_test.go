@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -19,8 +20,11 @@ import (
 
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/operatorread"
+	"github.com/division-sh/swarm/internal/packartifact"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/mutationlog"
+	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
+	storeselected "github.com/division-sh/swarm/internal/store/selected"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/tests/support/testutil"
@@ -48,11 +52,12 @@ func TestVerifyRunJobflowRegistryIntegrationBothStores(t *testing.T) {
 			}
 			var selected any
 			captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { selected = p.deps.EventStore })
-			process := startServeRuntimeTestProcess(t, cliapp.ServeOptions{
+			serveOptions := cliapp.ServeOptions{
 				SourceRoot: root, ConfigPath: configPath, SwarmDir: t.TempDir(), SwarmDirSet: true,
 				APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, Verbose: true,
 				TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
-			})
+			}
+			process := startServeRuntimeTestProcess(t, serveOptions)
 			process.waitForReadyLine()
 			endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc"
 			runID := requireServedLiveLandingRunID(t, endpoint, servedEventPublishFixtureBundleHash(t, root), ".")
@@ -83,16 +88,14 @@ func TestVerifyRunJobflowRegistryIntegrationBothStores(t *testing.T) {
 			}
 			registryProofCommittedHistory(t, history, entities)
 			t.Logf("replacement registry run=%s source=%s entities=4 history_rows=%d", runID, servedEventPublishFixtureBundleHash(t, root), len(history))
-			verify := func(t *testing.T, phase, mode, entityID string) {
+			verify := func(t *testing.T, phase, entityID string) {
 				t.Helper()
-				registryProofVerify(t, root, configPath, runID, phase, mode, entityID)
+				registryProofVerify(t, serveOptions, runID, phase, entityID)
 				if after := storetest.ObserveEntityMutationHistory(t, context.Background(), selected, runID); !reflect.DeepEqual(history, after) {
-					t.Fatal("public verification or the injection changed mutation history")
+					t.Fatal("check-stage inspection or the injection changed mutation history")
 				}
 			}
-			for _, mode := range []string{"text", "json"} {
-				t.Run("clean/"+mode, func(t *testing.T) { verify(t, "clean", mode, "") })
-			}
+			t.Run("clean", func(t *testing.T) { verify(t, "clean", "") })
 			if t.Failed() {
 				return
 			}
@@ -104,9 +107,7 @@ func TestVerifyRunJobflowRegistryIntegrationBothStores(t *testing.T) {
 			if err := storetest.CorruptRegistryVerdict(ctx, selected, runID, injectedEntity, "injected-drift"); err != nil {
 				t.Fatal(err)
 			}
-			for _, mode := range []string{"text", "json"} {
-				t.Run("drift/"+mode, func(t *testing.T) { verify(t, "drift", mode, injectedEntity) })
-			}
+			t.Run("drift", func(t *testing.T) { verify(t, "drift", injectedEntity) })
 		})
 	}
 }
@@ -160,71 +161,104 @@ func registryProofCommittedHistory(t *testing.T, history []storetest.EntityMutat
 	}
 }
 
-func registryProofVerify(t *testing.T, root, configPath, runID, phase, mode, entityID string) {
+func registryProofVerify(t *testing.T, options cliapp.ServeOptions, runID, phase, entityID string) {
 	t.Helper()
-	args := []string{"verify", root, "--config", configPath, "--run", runID}
-	if mode == "json" {
-		args = append(args, "--json")
-	}
-	out, errOut, code := registryProofCLI(t, args...)
-	wantCode := 0
-	if phase == "drift" {
-		wantCode = cliapp.CLIExitValidation
-	}
-	if code != wantCode || errOut != "" {
-		t.Fatalf("public verify %s/%s: code=%d want=%d stdout=%s stderr=%s", phase, mode, code, wantCode, out, errOut)
-	}
-	if mode == "text" {
-		registryProofVerifyText(t, phase, entityID, out)
-	} else {
-		registryProofVerifyJSON(t, phase, runID, entityID, out)
-	}
-	t.Logf("%s/%s public transcript: %s", phase, mode, strings.TrimSpace(out))
-}
-
-func registryProofVerifyText(t *testing.T, phase, entityID, out string) {
-	t.Helper()
-	if phase == "clean" {
-		if out != "4 entities checked, no drift\n" {
-			t.Fatalf("clean text is not the actual registry result: %s", out)
-		}
-		return
-	}
-	for _, want := range []string{"4 entities checked, 1 mismatches", entityID, "authored_field", `"verdict"`, "watchlist", "injected-drift"} {
-		if !strings.Contains(out, want) {
-			t.Fatalf("drift text misses %q: %s", want, out)
-		}
-	}
-	if strings.Count(out, entityID) != 1 {
-		t.Fatalf("drift text has extra entity rows: %s", out)
-	}
-}
-
-func registryProofVerifyJSON(t *testing.T, phase, runID, entityID, out string) {
-	t.Helper()
-	var result struct {
-		mutationlog.DriftReport
-		Status string            `json:"status"`
-		OK     bool              `json:"ok"`
-		Errors []json.RawMessage `json:"errors"`
-	}
-	if err := json.Unmarshal([]byte(out), &result); err != nil {
+	ctx := context.Background()
+	cfg, err := cliapp.LoadRuntimeConfigWithOptions(cliapp.RuntimeConfigLoadOptions{RepoRoot: repoRootForTest(), ExplicitPath: options.ConfigPath})
+	if err != nil {
 		t.Fatal(err)
 	}
-	if result.RunID != runID || result.EntitiesChecked != 4 || result.Errors == nil || len(result.Errors) != 0 || result.Rows == nil {
-		t.Fatalf("verification lost actual run evidence: %s", out)
+	paths, err := cliapp.ResolveCLISourcePaths(repoRootForTest(), cliapp.CLISourcePathOptions{SourceRoot: options.SourceRoot, ConfigPath: options.ConfigPath})
+	if err != nil {
+		t.Fatal(err)
+	}
+	invocation, err := cliapp.NewInvocationRoot(repoRootForTest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	directory, err := cliapp.ResolveServeContextRegistrationSwarmDir(invocation, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	local, err := cliapp.ResolveLocalRuntimeState(cliapp.LocalRuntimeStateOptions{RepoRoot: repoRootForTest(), ResolvedPaths: paths, SwarmDir: directory, Config: cfg.Config})
+	if err != nil {
+		t.Fatal(err)
+	}
+	base, err := cliapp.LoadConfiguredPlatformPackBase(repoRootForTest(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bases, err := packartifact.NewPlatformPackBaseGenerationOwner(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	options.DryRun = true
+	options.APIListenAddr, options.MCPListenAddr = "127.0.0.1:0", "127.0.0.1:0"
+	stage, err := cliapp.InspectServeCheckStage(ctx, cliapp.ServeCheckStageRequest{Repo: repoRootForTest(), Paths: paths, Config: cfg, Options: options, Selection: local.StoreSelection, PackBases: bases})
+	if err != nil {
+		t.Fatal(err)
+	}
+	observed := false
+	for _, observation := range stage.Validation.BootReport.Observations {
+		if observation.CheckID == "run_mutation_drift" {
+			observed = true
+			if phase == "clean" && observation.Status != "passed" {
+				t.Fatalf("shared stage drift decision: phase=%s observation=%+v", phase, observation)
+			}
+			if phase == "drift" {
+				if observation.Status != "failed" {
+					t.Fatalf("shared stage did not refuse drift: %+v", observation)
+				}
+				for _, evidence := range []string{runID, entityID, "verdict", "watchlist", "injected-drift"} {
+					if !strings.Contains(observation.Reason, evidence) {
+						t.Fatalf("shared stage drift refusal lost %q: %+v", evidence, observation)
+					}
+				}
+			}
+		}
+	}
+	if !observed {
+		t.Fatal("shared stage omitted active Live drift inspection")
+	}
+	request := storeselected.AuthorityRequest{Selection: local.StoreSelection}
+	if request.Selection.Backend == storebackend.BackendPostgres {
+		request.PostgresDSN, err = postgresDSNFromConfig(ctx, cfg.Config.Database)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	inspection, err := storeselected.OpenAdmissionInspection(ctx, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plans, err := cliapp.StateStoreSchemaPlans(stage.Bundle)
+	if err != nil {
+		t.Fatal(errors.Join(err, inspection.Close()))
+	}
+	schema, err := cliapp.SchemaBootstrapRequest(stage.Bundle.Platform, plans.Platform)
+	if err != nil {
+		t.Fatal(errors.Join(err, inspection.Close()))
+	}
+	var result mutationlog.DriftReport
+	_, err = inspection.Inspect(ctx, schema, func(snapshot *storeselected.AdmissionSnapshot) error {
+		var err error
+		result, err = snapshot.InspectRunMutationDrift(ctx, runID)
+		return err
+	})
+	if err = errors.Join(err, inspection.Close()); err != nil || result.RunID != runID || result.EntitiesChecked != 4 {
+		t.Fatalf("native inspection lost actual run evidence: %+v %v", result, err)
 	}
 	if phase == "clean" {
-		if !result.OK || result.Status != "passed" || len(result.Rows) != 0 {
-			t.Fatalf("real clean registry disagrees: %s", out)
+		if len(result.Rows) != 0 {
+			t.Fatalf("real clean registry disagrees: %+v", result)
 		}
 		return
 	}
 	path := "verdict"
 	want := []mutationlog.DriftRow{{Kind: "value", EntityID: entityID, Domain: mutationlog.DomainAuthoredField, Path: &path,
 		FoldedPresent: true, StoredPresent: true, FoldedValue: "watchlist", StoredValue: "injected-drift", FoldedType: "text", StoredType: "text"}}
-	if result.OK || result.Status != "drift" || !reflect.DeepEqual(result.Rows, want) {
-		t.Fatalf("drift is not the one injected coordinate: rows=%+v want=%+v output=%s", result.Rows, want, out)
+	if !reflect.DeepEqual(result.Rows, want) {
+		t.Fatalf("drift is not the one injected coordinate: rows=%+v want=%+v", result.Rows, want)
 	}
 }
 

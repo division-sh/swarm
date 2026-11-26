@@ -32,6 +32,7 @@ func SelectedStoreDependentAdmissionChecks() []SelectedStoreAdmissionCheck {
 		{"pending_reset_admission", "internal/runtime/destructivereset.InspectPendingOperations"},
 		{"retained_route_admission", "internal/runtime/manager.InspectSelectedContractRouteRecoveries"},
 		{"retained_channel_admission", "internal/channelonboarding.InspectRetainedActivations"},
+		{"run_mutation_drift", "internal/store/selected.AdmissionSnapshot.InspectRunMutationDrift"},
 		{"selected_fork_recovery_admission", "internal/runtime/runforkexecution"},
 		{"retained_actor_admission", "internal/runtime/manager"},
 		{"selected_fork_source_dependencies", "internal/runtime.ValidateWorkflowContractSurface"},
@@ -45,6 +46,13 @@ func SelectedStoreAbsentAdmissionChecks() []SelectedStoreAdmissionCheck {
 	return append(SelectedStoreDependentAdmissionChecks(),
 		SelectedStoreAdmissionCheck{"selected_store_schema", "internal/store/selected.AdmissionInspection.Inspect"},
 		SelectedStoreAdmissionCheck{"startup_process_possession", "internal/store/selected.AdmissionInspection.ProbePossession"})
+}
+
+// HasCompleteSelectedStoreAbsence reports evidence for a single absent
+// selected store, including its complete unobserved inspection tail.
+func (r Report) HasCompleteSelectedStoreAbsence() bool {
+	stores, valid := r.absentStoreEvidence()
+	return valid && len(stores) == 1
 }
 
 func (r Report) absentStoreEvidence() (map[string]map[string]bool, bool) {

@@ -96,7 +96,7 @@ func TestReleaseBinaryUsesEmbeddedPackInventoryWithoutAdjacentPackTree(t *testin
 			t.Fatalf("relocated bare-binary packs show = %#v", show)
 		}
 	}
-	for _, args := range [][]string{{"verify", sourceRoot, "--portable", "--json"}, {"describe", sourceRoot, "--json"}} {
+	for _, args := range [][]string{{"verify", sourceRoot, "--json"}, {"describe", sourceRoot, "--json"}} {
 		command := exec.Command(relocatedBinary, args...)
 		command.Dir, command.Env = relocatedRoot, releaseProviderTriggerProcessEnv()
 		body, err := command.CombinedOutput()

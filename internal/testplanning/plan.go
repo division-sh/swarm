@@ -114,6 +114,9 @@ func BuildPlan(policy Policy, model WeightModel, packages []string, profile, rea
 			return RunPlan{}, err
 		}
 	}
+	if slices.Contains(extraUnits, otherLateUnit) {
+		unitIDs = append(unitIDs, otherLateLifecycle)
+	}
 	profileEnvironment, err := environmentForVenue(profilePolicy.EnvironmentID, profilePolicy.EnvironmentIDs, option.Venue)
 	if err != nil {
 		return RunPlan{}, fmt.Errorf("profile %s: %w", profile, err)

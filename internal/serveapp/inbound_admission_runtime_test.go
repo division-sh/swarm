@@ -52,13 +52,19 @@ func TestInboundAdmissionSupportedSurfaceStartupFailuresSQLiteAndPostgres(t *tes
 			var postgresDSN string
 			if backend == "postgres" {
 				dsn, _, cleanup := testutil.StartPostgres(t)
+				recordServePostgresFixture(t, dsn)
 				postgresDSN = dsn
 				t.Cleanup(cleanup)
 				oldBuildStores := buildStoresForServe
 				oldWorkspace := cliapp.ConfiguredWorkspaceLifecycleForServe
-				buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
+				buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config, bootCheck ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {
+					if firstBootCheckInput(bootCheck) != nil {
+						// Return the authored refusal through serve's ordinary error path.
+						return buildStores(ctx, selection, cfg, bootCheck...)
+					}
+					owner := openSelectedPostgresOwner(t, postgresDSN, storetest.DatabaseForTest(postgresStore), cfg, bootCheck...)
 					storetest.BootstrapPostgresRuntimeStore(t, postgresStore)
-					return openSelectedPostgresOwner(t, postgresDSN, storetest.DatabaseForTest(postgresStore), cfg), nil
+					return owner, nil
 				}
 				cliapp.ConfiguredWorkspaceLifecycleForServe = func(*config.Config, *sourceartifact.RuntimeProjection, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
 					return serveRuntimeWorkspaceStub{}, nil
@@ -181,6 +187,7 @@ func runInboundAdmissionSupportedSurfacePolicyMatrix(t *testing.T, backend strin
 		configPath = writeInboundAdmissionRuntimeConfig(t, backend, sqlitePath)
 	} else {
 		dsn, _, cleanup := testutil.StartPostgres(t)
+		recordServePostgresFixture(t, dsn)
 		postgresDSN = dsn
 		t.Cleanup(cleanup)
 		postgresStore, err = store.NewPostgresStore(dsn)
@@ -189,9 +196,14 @@ func runInboundAdmissionSupportedSurfacePolicyMatrix(t *testing.T, backend strin
 		}
 		oldBuildStores := buildStoresForServe
 		oldWorkspace := cliapp.ConfiguredWorkspaceLifecycleForServe
-		buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
+		buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config, bootCheck ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {
+			openDSN, err := checkedPostgresFixtureDSN(ctx, cfg, dsn, true, bootCheck)
+			if err != nil {
+				return nil, err
+			}
+			owner := openSelectedPostgresOwner(t, openDSN, storetest.DatabaseForTest(postgresStore), cfg, bootCheck...)
 			storetest.BootstrapPostgresRuntimeStore(t, postgresStore)
-			return openSelectedPostgresOwner(t, dsn, storetest.DatabaseForTest(postgresStore), cfg), nil
+			return owner, nil
 		}
 		cliapp.ConfiguredWorkspaceLifecycleForServe = func(*config.Config, *sourceartifact.RuntimeProjection, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
 			return serveRuntimeWorkspaceStub{}, nil
@@ -590,7 +602,7 @@ func writeInboundAdmissionPolicyMatrixFixture(t testing.TB) string {
 	return canonicalrouting.CopyInboundAdmissionPolicyMatrix(t)
 }
 
-func writeInboundAdmissionRuntimeConfig(t testing.TB, backend, sqlitePath string) string {
+func writeInboundAdmissionRuntimeConfig(t *testing.T, backend, sqlitePath string) string {
 	t.Helper()
 	lines := []string{"runtime:", "  recovery_on_startup: true"}
 	if backend == "sqlite" {
@@ -598,7 +610,8 @@ func writeInboundAdmissionRuntimeConfig(t testing.TB, backend, sqlitePath string
 	}
 	lines = append(lines, "llm:", "  backend: anthropic")
 	path := filepath.Join(t.TempDir(), "swarm.yaml")
-	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
+	body := withInstalledServePostgresConfig(t, strings.Join(lines, "\n")+"\n", backend)
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	return path

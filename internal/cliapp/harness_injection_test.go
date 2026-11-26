@@ -24,7 +24,6 @@ func TestVerifyNamesOnlyRootInterfaceHasNoHarnessClassification(t *testing.T) {
 		t.Fatalf("verify retains retired classification: %s", stdout.String())
 	}
 	opts := defaultVerifyCommandOptions()
-	opts.portable = true
 	opts.sourceRoot, opts.configPath, opts.output.asJSON = root, writeTestVerifyRuntimeConfig(t), true
 	stdout.Reset()
 	stderr.Reset()

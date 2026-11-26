@@ -38,7 +38,7 @@ func proveServeVerboseInternalFailure(t *testing.T) {
 					}
 					t.Cleanup(func() { buildSelectedAPICapabilities = prior })
 					if backend == "postgres" {
-						configureCompletion2270PostgresFixture(t)
+						configureCompletion2270PostgresFixture(t, true)
 						stubServeRuntimeWorkspaceLifecycle(t)
 					}
 					var diagnostics lockedBuffer

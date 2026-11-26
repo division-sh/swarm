@@ -14,6 +14,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/runtime"
+	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	"github.com/division-sh/swarm/internal/servedparity"
 	"github.com/division-sh/swarm/tests/support/testutil"
@@ -256,6 +257,14 @@ func TestLifecycleDiagnosticServeProcessHelper(t *testing.T) {
 	opts.Verbose, opts.SelfCheck = true, true
 	opts.Output, opts.ErrorOutput = os.Stdout, os.Stderr
 	opts.TestLLMRuntime = servedLiveAgentProofLLMRuntime{}
+	t.Setenv("SWARM_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "diagnostic-provider-credentials.json"))
+	credentials, err := runtimecredentials.NewFileStore(os.Getenv("SWARM_CREDENTIALS_FILE"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := credentials.Set(t.Context(), "ANTHROPIC_API_KEY", "mocked-startup-credential"); err != nil {
+		t.Fatal(err)
+	}
 	opts.TestRuntimeReadyHook = func(*runtime.Runtime) { fail.Store(os.Getenv("SWARM_TEST_DIAGNOSTIC_FAIL") == "1") }
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()

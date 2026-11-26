@@ -40,6 +40,7 @@ import (
 )
 
 type telegramPhraseBotLLMRuntime struct {
+	servedStartupAnswerObservation
 	onContinue func(context.Context, *runtimellm.Session, runtimellm.Message) error
 }
 
@@ -412,6 +413,7 @@ func TestServeAuthorActivityAttachmentFailureKeepsRuntimeHealthy(t *testing.T) {
 func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndReplies(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	dsn, _, cleanup := testutil.StartPostgres(t)
+	recordServePostgresFixture(t, dsn)
 	t.Cleanup(cleanup)
 	runtimePG, err := store.NewPostgresStore(dsn)
 	if err != nil {
@@ -424,9 +426,14 @@ func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndRepl
 	})
 	oldBuildStores := buildStoresForServe
 	oldWorkspace := cliapp.ConfiguredWorkspaceLifecycleForServe
-	buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
+	buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config, bootCheck ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {
+		target, err := checkedPostgresFixtureDSN(ctx, cfg, dsn, true, bootCheck)
+		if err != nil {
+			return nil, err
+		}
+		owner := openSelectedPostgresOwner(t, target, storetest.DatabaseForTest(runtimePG), cfg, bootCheck...)
 		storetest.BootstrapPostgresRuntimeStore(t, runtimePG)
-		return openSelectedPostgresOwner(t, dsn, storetest.DatabaseForTest(runtimePG), cfg), nil
+		return owner, nil
 	}
 	cliapp.ConfiguredWorkspaceLifecycleForServe = func(*config.Config, *sourceartifact.RuntimeProjection, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
 		return serveRuntimeWorkspaceStub{}, nil
@@ -639,18 +646,23 @@ func TestStandingRestartMixedHealthyAndTerminalProcessParity(t *testing.T) {
 				selectedStore = sqlitePath
 			} else {
 				dsn, _, cleanup := testutil.StartPostgres(t)
+				recordServePostgresFixture(t, dsn)
 				t.Cleanup(cleanup)
 				var opened *store.PostgresStore
 				oldBuildStores := buildStoresForServe
 				oldWorkspace := cliapp.ConfiguredWorkspaceLifecycleForServe
-				buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
-					var err error
+				buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config, bootCheck ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {
+					openDSN, err := checkedPostgresFixtureDSN(ctx, cfg, dsn, true, bootCheck)
+					if err != nil {
+						return nil, err
+					}
 					opened, err = store.NewPostgresStore(dsn)
 					if err != nil {
 						return nil, err
 					}
+					owner := openSelectedPostgresOwner(t, openDSN, storetest.DatabaseForTest(opened), cfg, bootCheck...)
 					storetest.BootstrapPostgresRuntimeStore(t, opened)
-					return openSelectedPostgresOwner(t, dsn, storetest.DatabaseForTest(opened), cfg), nil
+					return owner, nil
 				}
 				cliapp.ConfiguredWorkspaceLifecycleForServe = func(*config.Config, *sourceartifact.RuntimeProjection, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
 					return serveRuntimeWorkspaceStub{}, nil
@@ -912,6 +924,12 @@ func requireChangedStandingColdStartMatrix(t *testing.T, opts cliapp.ServeOption
 			mutation.apply(t)
 			before := prepare(t)
 			if len(mutation.wantStrand) != 0 {
+				if opts.StoreMode == "postgres" {
+					// Keep the declaration's native refusal on the Run return path.
+					original := buildStoresForServe
+					buildStoresForServe = buildStores
+					t.Cleanup(func() { buildStoresForServe = original })
+				}
 				ready := make(chan struct{}, 1)
 				refused := opts
 				refused.TestRuntimeReadyHook = func(*runtimepkg.Runtime) { ready <- struct{}{} }

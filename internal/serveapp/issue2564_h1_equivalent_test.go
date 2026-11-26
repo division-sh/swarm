@@ -10,12 +10,15 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/tests/support/testutil/llmapi"
+	"gopkg.in/yaml.v3"
 )
 
 // Reconstructed equivalent H1, NOT the unchanged/unavailable original archive.
@@ -103,7 +106,7 @@ func issue2564H1WriteCorpus(t *testing.T) string {
 
 func issue2564H1StartServed(t *testing.T, backend, root string, provider *issue2564H1Provider) issue2564ServedFixture {
 	t.Helper()
-	opts, start := issue2564ServeHarness(t, backend, root, false)
+	opts, start := issue2564ServeHarnessAtLocation(t, backend, root, false, "", true)
 	server := httptest.NewServer(provider)
 	t.Cleanup(server.Close)
 	setDoctorProviderSecret(t, "OPENAI_COMPATIBLE_API_KEY", "issue2564-h1-proof-key")
@@ -112,11 +115,26 @@ func issue2564H1StartServed(t *testing.T, backend, root string, provider *issue2
 	if err != nil {
 		t.Fatal(err)
 	}
-	text := strings.Replace(string(config), "  backend: anthropic\n", "  backend: openai_compatible\n  openai_compatible:\n    base_url: "+server.URL+"\n", 1)
-	if text == string(config) {
+	var document map[string]any
+	if err := yaml.Unmarshal(config, &document); err != nil {
+		t.Fatal(err)
+	}
+	llm, ok := document["llm"].(map[string]any)
+	if !ok || llm["backend"] != "anthropic" {
 		t.Fatal("normal served launch no longer exposes the expected provider config")
 	}
-	writeWorkflowValidationFixtureFile(t, opts.ConfigPath, text)
+	llm["backend"] = "openai_compatible"
+	openAI, _ := llm["openai_compatible"].(map[string]any)
+	if openAI == nil {
+		openAI = make(map[string]any)
+		llm["openai_compatible"] = openAI
+	}
+	openAI["base_url"] = server.URL
+	text, err := yaml.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeWorkflowValidationFixtureFile(t, opts.ConfigPath, string(text))
 	process, rt := start()
 	t.Cleanup(func() {
 		if code := process.stop(); code != 0 {
@@ -158,18 +176,29 @@ type issue2564H1Provider struct {
 	mu                    sync.Mutex
 	sessions              map[string]*issue2564H1Session
 	firstActive, firstMax int
+	startup, total        atomic.Int32
 }
 
 var issue2564H1HubPattern = regexp.MustCompile(`\bh0[1-6]\b`)
 
 func (p *issue2564H1Provider) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var request issue2564H1Request
-	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+	var raw json.RawMessage
+	err := json.NewDecoder(r.Body).Decode(&raw)
+	if err == nil {
+		err = json.Unmarshal(raw, &request)
+	}
+	if err != nil {
 		p.refuse(w, fmt.Errorf("decode real OpenAI-compatible request: %w", err))
 		return
 	}
 	if r.URL.Path != "/v1/chat/completions" || r.Header.Get("Authorization") != "Bearer issue2564-h1-proof-key" {
 		p.refuse(w, fmt.Errorf("real provider route/credential mismatch: %s", r.URL.Path))
+		return
+	}
+	n := p.total.Add(1)
+	if replyToFixtureStartup(p.t, w, llmapi.OpenAICompatible, llmapi.Request{Number: int(n), Body: raw}) {
+		p.startup.Add(1)
 		return
 	}
 	side, hub := "", ""
@@ -306,6 +335,10 @@ func (p *issue2564H1Provider) assert(t *testing.T, want int) map[string]issue256
 	}
 	if len(p.sessions) != issue2564H1Hubs*2 || len(acks) != want || p.firstMax < 2 {
 		t.Fatalf("H1 concurrent provider/session acknowledgments: sessions=%d acks=%d want=%d overlapping_first_requests=%d", len(p.sessions), len(acks), want, p.firstMax)
+	}
+	// Fresh H1 boots have only template agents; none is admitted before the first hub.start.
+	if p.startup.Load() != 0 || p.total.Load() != int32(len(p.sessions)*8) {
+		t.Fatalf("H1 provider counts: startup=%d total=%d business=%d", p.startup.Load(), p.total.Load(), len(p.sessions)*8)
 	}
 	t.Logf("H1_PROVIDER_RECEIPT sessions=%d acknowledgments=%d requests=%d overlapping_first_requests=%d first_round_delay=1.5s", len(p.sessions), len(acks), len(p.sessions)*8, p.firstMax)
 	return acks

@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -39,6 +40,7 @@ import (
 	storeselected "github.com/division-sh/swarm/internal/store/selected"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/tests/support/testutil"
+	"github.com/division-sh/swarm/tests/support/testutil/llmapi"
 	"github.com/google/uuid"
 )
 
@@ -54,10 +56,11 @@ type servedWorkspaceProofRuntime struct {
 	Inbound                       interface {
 		LoadInboundPublicationByIdentity(context.Context, inboundpublication.Identity) (inboundpublication.Record, bool, error)
 	}
-	FlowRuns    runlifecycle.LandingRunReader
-	ForkRuntime selectedForkRuntimeProofOptions
-	Restart     func() servedWorkspaceProofRuntime
-	Telegram    *channelOnboardingTelegramProvider
+	FlowRuns      runlifecycle.LandingRunReader
+	ForkRuntime   selectedForkRuntimeProofOptions
+	Restart       func() servedWorkspaceProofRuntime
+	Telegram      *channelOnboardingTelegramProvider
+	providerCalls func() (startup, total int32)
 }
 
 func requireServedLandingRun(t testing.TB, rt *runtimepkg.Runtime, flow string) runlifecycle.LandingRun {
@@ -113,15 +116,15 @@ func configureHostWorkspaceProofLifecycle(t *testing.T) {
 
 func startWorkspaceGatewayProofRuntime(t *testing.T, backend servedparity.Backend, sourceRoot, targetBackend string, factory func(*sourceartifact.RuntimeProjection, semanticview.Source) (cliapp.ServeWorkspaceLifecycle, error), mcpListen string, hooks ...pipeline.WorkflowNodeHandlerStartHook) servedWorkspaceProofRuntime {
 	t.Helper()
-	return startWorkspaceGatewayProofRuntimeWithPosture(t, backend, sourceRoot, targetBackend, factory, mcpListen, executionposture.MockOnly, hooks...)
+	return startWorkspaceGatewayProofRuntimeWithPosture(t, backend, sourceRoot, targetBackend, factory, mcpListen, executionposture.MockOnly, false, hooks...)
 }
 
 func startWorkspaceLiveGatewayProofRuntime(t *testing.T, backend servedparity.Backend, sourceRoot, targetBackend string, factory func(*sourceartifact.RuntimeProjection, semanticview.Source) (cliapp.ServeWorkspaceLifecycle, error), mcpListen string, hooks ...pipeline.WorkflowNodeHandlerStartHook) servedWorkspaceProofRuntime {
 	t.Helper()
-	return startWorkspaceGatewayProofRuntimeWithPosture(t, backend, sourceRoot, targetBackend, factory, mcpListen, executionposture.Live, hooks...)
+	return startWorkspaceGatewayProofRuntimeWithPosture(t, backend, sourceRoot, targetBackend, factory, mcpListen, executionposture.Live, false, hooks...)
 }
 
-func startWorkspaceGatewayProofRuntimeWithPosture(t *testing.T, backend servedparity.Backend, sourceRoot, targetBackend string, factory func(*sourceartifact.RuntimeProjection, semanticview.Source) (cliapp.ServeWorkspaceLifecycle, error), mcpListen string, posture executionposture.Posture, hooks ...pipeline.WorkflowNodeHandlerStartHook) servedWorkspaceProofRuntime {
+func startWorkspaceGatewayProofRuntimeWithPosture(t *testing.T, backend servedparity.Backend, sourceRoot, targetBackend string, factory func(*sourceartifact.RuntimeProjection, semanticview.Source) (cliapp.ServeWorkspaceLifecycle, error), mcpListen string, posture executionposture.Posture, declaredTarget bool, hooks ...pipeline.WorkflowNodeHandlerStartHook) servedWorkspaceProofRuntime {
 	t.Helper()
 	if len(hooks) > 1 {
 		t.Fatal("at most one handler-start barrier is supported")
@@ -191,6 +194,8 @@ func startWorkspaceGatewayProofRuntimeWithPosture(t *testing.T, backend servedpa
 		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 	}
 	if posture == executionposture.Live {
+		var startup, total atomic.Int32
+		proof.providerCalls = func() (int32, int32) { return startup.Load(), total.Load() }
 		provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 			if request.URL.Path != "/v1/messages" || request.Header.Get("x-api-key") != "workspace-live-proof-key" {
 				http.Error(w, "unexpected controlled provider request", http.StatusBadRequest)
@@ -208,9 +213,19 @@ func startWorkspaceGatewayProofRuntimeWithPosture(t *testing.T, backend servedpa
 					Content json.RawMessage `json:"content"`
 				} `json:"messages"`
 			}
-			if err := json.NewDecoder(request.Body).Decode(&turn); err != nil {
+			var raw json.RawMessage
+			err := json.NewDecoder(request.Body).Decode(&raw)
+			if err == nil {
+				err = json.Unmarshal(raw, &turn)
+			}
+			if err != nil {
 				t.Errorf("decode controlled provider turn: %v", err)
 				http.Error(w, "invalid provider turn", http.StatusBadRequest)
+				return
+			}
+			n := total.Add(1)
+			if replyToFixtureStartup(t, w, llmapi.Anthropic, llmapi.Request{Number: int(n), Body: raw}) {
+				startup.Add(1)
 				return
 			}
 			w.Header().Set("Content-Type", "application/json")
@@ -276,13 +291,18 @@ func startWorkspaceGatewayProofRuntimeWithPosture(t *testing.T, backend servedpa
 	case servedparity.BackendExplicitPostgres:
 		proof.Backend = "postgres"
 		dsn := testutil.StartEmptyPostgresDSN(t)
+		useDeclaration := declaredTarget && len(accounts) > 0
 		previous := buildStoresForServe
-		buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
+		buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config, bootCheck ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {
 			if selection.Backend != storebackend.BackendPostgres {
 				t.Fatal("native workspace fixture selected another backend")
 			}
+			target, err := checkedPostgresFixtureDSN(ctx, cfg, dsn, useDeclaration, bootCheck)
+			if err != nil {
+				return nil, err
+			}
 			return storeselected.OpenRuntime(ctx, storeselected.RuntimeRequest{
-				Selection: selection, PostgresDSN: dsn, SessionLockTTL: runtimeSessionLockTTL(cfg),
+				Selection: selection, PostgresDSN: target, SessionLockTTL: runtimeSessionLockTTL(cfg), BootCheckInput: firstBootCheckInput(bootCheck),
 			})
 		}
 		t.Cleanup(func() { buildStoresForServe = previous })

@@ -110,12 +110,12 @@ func newRootCommandAtInvocation(ctx context.Context, root InvocationRoot, out, e
 		Long: `Swarm runs event-driven agent workflows defined by declarative contracts.
 
 The typical path: check your setup with 'swarm doctor', validate authored source
-with 'swarm verify --portable', run 'swarm serve', then
+with 'swarm verify', run 'swarm serve', then
 start work with 'swarm run start' or 'swarm event publish' and watch it
 with 'swarm run trace', 'swarm event list', and 'swarm mailbox'.
-Use default 'swarm verify' to observe admission for an explicitly configured deployment.`,
+Use 'swarm serve --dry-run' for deployment checks; 'swarm verify' never opens a store.`,
 		Example: `  swarm doctor                                      # check local prerequisites
-  swarm verify ./contracts --portable                # validate source only, not deployment readiness
+  swarm verify ./contracts                           # validate source only, not deployment readiness
   swarm serve                                      # start the deployment runtime
   swarm run start --event <event-name> --payload payload.json
   swarm run trace <run-id>                          # see what a run did`,
@@ -356,6 +356,7 @@ func newServeCommand(ctx context.Context, root InvocationRoot, runServe ServeRun
 	cmd.Flags().StringVar(&opts.PublicWebhookListen, "public-webhook-listen", opts.PublicWebhookListen, "Stable loopback ingress-only listener used by the external public origin")
 	cmd.Flags().DurationVar(&opts.ShutdownGrace, "shutdown-grace", opts.ShutdownGrace, "Time to wait for in-flight work to drain after shutdown starts")
 	cmd.Flags().BoolVar(&opts.SelfCheck, "self-check", opts.SelfCheck, "Run runtime self-check during boot")
+	cmd.Flags().BoolVar(&opts.DryRun, "dry-run", false, "Run boot checks and stop before startup")
 	cmd.Flags().BoolVar(&opts.Dev, "dev", opts.Dev, "Enable local development lifecycle: replace local scratch state and use concise boot output")
 	cmd.SetFlagErrorFunc(func(_ *cobra.Command, err error) error {
 		if err.Error() == "unknown flag: --abandon-active-runs" {
@@ -373,8 +374,8 @@ func newVerifyCommand(ctx context.Context, root InvocationRoot, rootOpts rootCom
 	opts := defaultVerifyCommandOptions()
 	cmd := &cobra.Command{
 		Use:     "verify [directory]",
-		Short:   "Validate contract files or compare a run's state with its history.",
-		Example: "  swarm verify\n  swarm verify --run <run_id> --json",
+		Short:   "Validate contract files without opening a store.",
+		Example: "  swarm verify",
 		Args:    argcount.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 1 {
@@ -383,8 +384,6 @@ func newVerifyCommand(ctx context.Context, root InvocationRoot, rootOpts rootCom
 			if rootOpts.rootFlags != nil && rootOpts.rootFlags.configPathSet {
 				opts.configPath = rootOpts.rootFlags.configPath
 			}
-			opts.swarmDir = rootOpts.swarmDirResolutionOptions()
-			opts.runRequested = cmd.Flags().Changed("run")
 			code := runVerifyCommandWithOutput(ctx, root.Path(), opts, cmd.OutOrStdout(), cmd.ErrOrStderr())
 			if code != 0 {
 				return commandExitError{code: code}
@@ -392,8 +391,6 @@ func newVerifyCommand(ctx context.Context, root InvocationRoot, rootOpts rootCom
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&opts.portable, "portable", false, "Validate source structure only; do not observe deployment prerequisites")
-	cmd.Flags().StringVar(&opts.runID, "run", "", "Compare a run's entity state with its committed mutation history (read-only)")
 	bindCLIOutputFlags(cmd, &opts.output)
 	bindCLILoggingFlags(cmd, &opts.logging)
 	return cmd

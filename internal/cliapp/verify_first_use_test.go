@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,6 +12,8 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/bootverify"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	storeselected "github.com/division-sh/swarm/internal/store/selected"
 )
 
 func issue2567VerifySource(t *testing.T) string {
@@ -63,7 +66,7 @@ func TestIssue2567VerifyMissingStoreFormatsAndFlagPrecedence(t *testing.T) {
 				}
 				writeRuntimeConfigText(t, config, body)
 				var out, errOut bytes.Buffer
-				if code := executeRootCommand(context.Background(), RepoRoot(), args, &out, &errOut); code != 0 {
+				if code := executeServeChecksForTest(t, context.Background(), RepoRoot(), args, &out, &errOut); code != 0 {
 					t.Fatalf("exit=%d stdout=%s stderr=%s", code, &out, &errOut)
 				}
 				if mode == "json" {
@@ -162,8 +165,43 @@ func TestIssue2567VerifyExistingBadStoreAndIndependentFailureStillRefuse(t *test
 				args = append(args, "--swarm-dir", "")
 			}
 			var out, errOut bytes.Buffer
-			if code := executeRootCommand(context.Background(), RepoRoot(), args, &out, &errOut); code == 0 {
+			if code := executeServeChecksForTest(t, context.Background(), RepoRoot(), args, &out, &errOut); code == 0 {
 				t.Fatalf("bad %s admitted: %s", shape, &out)
+			}
+			if shape == "bad_binding" {
+				// Serve rejects malformed listener syntax before entering checks.
+				// Keep the independent native absence proof, not verify's retired
+				// JSON projection of those two separate observations.
+				if !strings.Contains(errOut.String(), "not-an-address") {
+					t.Fatalf("malformed listener lost its exact refusal: %s", &errOut)
+				}
+				cfg, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: RepoRoot(), ExplicitPath: config})
+				if err != nil {
+					t.Fatal(err)
+				}
+				_, bundle, err := NewSwarmWorkflowModule(RepoRoot(), root)
+				if err != nil {
+					t.Fatal(err)
+				}
+				request, _, err := prepareVerifySelectedStoreInspection(context.Background(), RepoRoot(), CLISourcePaths{SourceRoot: root}, cfg, cliSwarmDirOptions{}, semanticview.Wrap(bundle))
+				if err != nil {
+					t.Fatal(err)
+				}
+				inspection, err := storeselected.OpenAdmissionInspection(context.Background(), request)
+				if inspection != nil {
+					t.Fatal(errors.Join(errors.New("absent coordinate opened"), inspection.Close()))
+				}
+				var absent *storeselected.AbsentSQLiteStore
+				if !errors.As(err, &absent) || absent.Path != path {
+					t.Fatalf("independent store absence became binding failure: %v", err)
+				}
+				return
+			}
+			if shape == "blank_flag" || shape == "blank_config" {
+				if !strings.Contains(errOut.String(), "must not be empty") && !strings.Contains(errOut.String(), "must be non-empty") {
+					t.Fatalf("blank coordinate lost exact refusal: %s", &errOut)
+				}
+				return
 			}
 			var result verifyCommandResult
 			if err := json.Unmarshal(out.Bytes(), &result); err != nil {
@@ -177,17 +215,6 @@ func TestIssue2567VerifyExistingBadStoreAndIndependentFailureStillRefuse(t *test
 					if observation.NotRunCause != nil {
 						t.Fatalf("bad existing coordinate became absence: %+v", observation)
 					}
-				}
-			}
-			if shape == "bad_binding" {
-				found := false
-				for _, o := range result.Observations {
-					if o.NotRunCause != nil {
-						found = true
-					}
-				}
-				if !found {
-					t.Fatal("independent failure prevented absence observation")
 				}
 			}
 		})
@@ -223,7 +250,7 @@ func TestIssue2567VerifyDoctorRelativeSelectionAndExplicitStoreParity(t *testing
 				writeRuntimeConfigText(t, configPath, body)
 				var verifyOut, doctorOut, errOut bytes.Buffer
 				args := append([]string{"verify", source, "--config", configPath, "--json"}, flags...)
-				if code := executeRootCommand(context.Background(), invocation, args, &verifyOut, &errOut); code != 0 {
+				if code := executeServeChecksForTest(t, context.Background(), invocation, args, &verifyOut, &errOut); code != 0 {
 					t.Fatalf("verify exit=%d: %s %s", code, &verifyOut, &errOut)
 				}
 				var result verifyCommandResult
@@ -272,7 +299,7 @@ func TestIssue2567VerifyLocalProjectFirstUse(t *testing.T) {
 	configBody := "serve: {api_listen_addr: '127.0.0.1:0', mcp_listen_addr: '127.0.0.1:0'}\n"
 	writeRuntimeConfigText(t, configPath, configBody)
 	var out, errOut bytes.Buffer
-	if code := executeRootCommand(context.Background(), root, []string{"verify", ".", "--json"}, &out, &errOut); code != 0 {
+	if code := executeServeChecksForTest(t, context.Background(), root, []string{"verify", ".", "--json"}, &out, &errOut); code != 0 {
 		t.Fatalf("first project verify exit=%d: %s %s", code, &out, &errOut)
 	}
 	var result verifyCommandResult

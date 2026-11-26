@@ -178,8 +178,8 @@ func TestServePostgresSilentMonitorWithdrawsReadinessAndJoins(t *testing.T) {
 	}
 	t.Cleanup(func() { cliapp.ConfiguredWorkspaceLifecycleForServe = oldWorkspace })
 	oldBuild := buildStoresForServe
-	buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
-		return storeselected.OpenRuntime(ctx, storeselected.RuntimeRequest{Selection: storebackend.Selection{Backend: storebackend.BackendPostgres}, PostgresDSN: routed, SessionLockTTL: runtimeSessionLockTTL(cfg)})
+	buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config, bootCheck ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {
+		return storeselected.OpenRuntime(ctx, storeselected.RuntimeRequest{Selection: storebackend.Selection{Backend: storebackend.BackendPostgres}, PostgresDSN: routed, SessionLockTTL: runtimeSessionLockTTL(cfg), BootCheckInput: firstBootCheckInput(bootCheck)})
 	}
 	t.Cleanup(func() { buildStoresForServe = oldBuild })
 	database := make(chan *sql.DB, 1)

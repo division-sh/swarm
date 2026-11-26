@@ -92,7 +92,7 @@ normalized_events:
       to: {from: to, schema: {type: string, pattern: '^\+[1-9][0-9]{1,14}$'}}
 `)
 			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tests/pattern.yaml"), "name: explicit pattern fixture\nderive:\n  flow: '.'\n  input: inbound.partner.message\n  payload: {"+tc.payload+"}\n")
-			for _, args := range [][]string{{"verify", root, "--portable"}, {"test", root}} {
+			for _, args := range [][]string{{"verify", root}, {"test", root}} {
 				t.Run(args[0], func(t *testing.T) {
 					var out, errOut bytes.Buffer
 					code := executeCLIFrom(t.Context(), repoRootForTest(), args, &out, &errOut, nil)
@@ -557,7 +557,7 @@ func startPublicInputRollbackRuntime(t *testing.T, backend servedparity.Backend)
 	case servedparity.BackendDefaultSQLite:
 		stubServeRuntimeWorkspaceLifecycle(t)
 		oldBuildStores := buildStoresForServe
-		buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
+		buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config, bootCheck ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {
 			stores, err := oldBuildStores(ctx, selection, cfg)
 			if err == nil {
 				db = selectedStoreDatabaseForTest(t, stores)
@@ -686,7 +686,7 @@ func runServedPublicMockApprovalBackendProof(t *testing.T, backend servedparity.
 		postgresDSN = testutil.StartEmptyPostgresDSN(t)
 	}
 	oldBuildStores := buildStoresForServe
-	buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
+	buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config, bootCheck ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {
 		var stores *storeselected.Owner
 		var err error
 		if backend == servedparity.BackendExplicitPostgres {
@@ -694,10 +694,10 @@ func runServedPublicMockApprovalBackendProof(t *testing.T, backend servedparity.
 				t.Fatal("public mock approval fixture selected another backend")
 			}
 			stores, err = storeselected.OpenRuntime(ctx, storeselected.RuntimeRequest{
-				Selection: selection, PostgresDSN: postgresDSN, SessionLockTTL: runtimeSessionLockTTL(cfg),
+				Selection: selection, PostgresDSN: postgresDSN, SessionLockTTL: runtimeSessionLockTTL(cfg), BootCheckInput: firstBootCheckInput(bootCheck),
 			})
 		} else {
-			stores, err = oldBuildStores(ctx, selection, cfg)
+			stores, err = oldBuildStores(ctx, selection, cfg, bootCheck...)
 		}
 		if err == nil {
 			db = selectedStoreDatabaseForTest(t, stores)
@@ -727,7 +727,7 @@ func runServedPublicMockApprovalBackendProof(t *testing.T, backend servedparity.
 	opts.ConfigPath = configPath
 	var verifyOut, verifyErr bytes.Buffer
 	if code := executeCLIFrom(context.Background(), repoRootForTest(), []string{
-		"verify", sourceRoot, "--portable", "--config", configPath,
+		"verify", sourceRoot, "--config", configPath,
 	}, &verifyOut, &verifyErr, nil); code != 0 {
 		t.Fatalf("%s verify code = %d stderr=%s stdout=%s", backend, code, verifyErr.String(), verifyOut.String())
 	}
@@ -856,7 +856,7 @@ expect: {events: [fulfillment.requested], no_dead_letters: true}
 	case servedparity.BackendDefaultSQLite:
 		stubServeRuntimeWorkspaceLifecycle(t)
 		oldBuildStores := buildStoresForServe
-		buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
+		buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config, bootCheck ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {
 			stores, err := oldBuildStores(ctx, selection, cfg)
 			if err == nil {
 				db = selectedStoreDatabaseForTest(t, stores)
@@ -1038,9 +1038,10 @@ expect: {events: [fulfillment.requested], no_dead_letters: true}
 		}
 		t.Cleanup(func() { _ = storetest.DatabaseForTest(reopened).Close() })
 		priorBuildStores := buildStoresForServe
-		buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
+		buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config, bootCheck ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {
+			owner := openSelectedPostgresOwner(t, postgresDSN, storetest.DatabaseForTest(reopened), cfg, bootCheck...)
 			storetest.BootstrapPostgresRuntimeStore(t, reopened)
-			return openSelectedPostgresOwner(t, postgresDSN, storetest.DatabaseForTest(reopened), cfg), nil
+			return owner, nil
 		}
 		t.Cleanup(func() { buildStoresForServe = priorBuildStores })
 		db = storetest.DatabaseForTest(reopened)
@@ -1108,13 +1109,13 @@ func runScaffoldArchetypeSQLiteProof(t *testing.T, archetype string) {
 	sourceRoot := scaffoldConformanceArchetype(t, archetype)
 	defer unchangedPrivateTestDeployment(t, sourceRoot)()
 	var verifyOut, verifyErr bytes.Buffer
-	if code := executeCLIFrom(context.Background(), sourceRoot, []string{"verify", sourceRoot, "--portable"}, &verifyOut, &verifyErr, nil); code != 0 {
+	if code := executeCLIFrom(context.Background(), sourceRoot, []string{"verify", sourceRoot}, &verifyOut, &verifyErr, nil); code != 0 {
 		t.Fatalf("%s verify code=%d stdout=%s stderr=%s", archetype, code, verifyOut.String(), verifyErr.String())
 	}
 	oldBuildStores := buildStoresForServe
 	var db *sql.DB
 	var privateStorePath string
-	buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
+	buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config, bootCheck ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {
 		stores, err := oldBuildStores(ctx, selection, cfg)
 		if err == nil {
 			db = selectedStoreDatabaseForTest(t, stores)
@@ -1295,7 +1296,7 @@ func runServedGeneratedInputFixtureBackendProof(t *testing.T, backend servedpari
 		stubServeRuntimeWorkspaceLifecycle(t)
 		sqlitePath := filepath.Join(t.TempDir(), "generated-input.sqlite")
 		oldBuildStores := buildStoresForServe
-		buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
+		buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config, bootCheck ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {
 			stores, err := oldBuildStores(ctx, selection, cfg)
 			if err == nil {
 				db = selectedStoreDatabaseForTest(t, stores)
@@ -1607,7 +1608,7 @@ func TestInternalLifecycleScenariosPreserveCanonicalRoutingPathsSQLite(t *testin
 			t.Cleanup(func() { buildStoresForServe = oldBuildStores })
 			var servedDB *sql.DB
 			replyContextObserved := make(chan string, 1)
-			buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
+			buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config, bootCheck ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {
 				stores, err := oldBuildStores(ctx, selection, cfg)
 				if err == nil {
 					servedDB = selectedStoreDatabaseForTest(t, stores)

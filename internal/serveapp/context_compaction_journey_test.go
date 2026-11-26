@@ -58,6 +58,9 @@ func TestContextCompactionPreservesMemoryAcrossRestartBothStores(t *testing.T) {
 						protocol, providerPath = llmapi.OpenAICompatible, "/v1/chat/completions"
 					}
 					provider = llmapi.New(t, protocol, providerPath, "compaction-key", func(request llmapi.Request) (llmapi.Reply, error) {
+						if reply, boot := llmapi.StartupAnswer(request); boot {
+							return reply, nil
+						}
 						var body struct {
 							Messages []struct {
 								Content json.RawMessage `json:"content"`
@@ -69,7 +72,7 @@ func TestContextCompactionPreservesMemoryAcrossRestartBothStores(t *testing.T) {
 						}
 						if bytes.Contains(body.Messages[len(body.Messages)-1].Content, []byte("Context compaction:")) {
 							var first struct{ Tools json.RawMessage }
-							if err := json.Unmarshal(provider.Requests()[0].Body, &first); err != nil || !bytes.Equal(first.Tools, body.Tools) || !bytes.Contains(request.Body, []byte("cedar-731")) {
+							if err := json.Unmarshal(llmapi.ActorRequests(provider.Requests())[0].Body, &first); err != nil || !bytes.Equal(first.Tools, body.Tools) || !bytes.Contains(request.Body, []byte("cedar-731")) {
 								return llmapi.Reply{}, fmt.Errorf("summary lost its original facts or frozen tools: %v", err)
 							}
 							summaries.Add(1)
@@ -89,7 +92,7 @@ func TestContextCompactionPreservesMemoryAcrossRestartBothStores(t *testing.T) {
 							Text: fmt.Sprintf("ordinary response %d", turn), InputTokens: 125000, OutputTokens: 8}, nil
 					})
 					providerURL = provider.URL
-					firstRequestLength = func() int { return len(provider.Requests()[0].Body) }
+					firstRequestLength = func() int { return len(llmapi.ActorRequests(provider.Requests())[0].Body) }
 				} else {
 					providerURL, firstRequestLength = nativeContextCompactionProvider(t, scenario.name, model, &summaries, &turns, &compacted)
 				}
@@ -99,7 +102,7 @@ func TestContextCompactionPreservesMemoryAcrossRestartBothStores(t *testing.T) {
 					APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", TestLifecycleProbe: probe}
 				storeConfig := fmt.Sprintf("store:\n  backend: sqlite\n  sqlite:\n    path: %s\n", filepath.Join(t.TempDir(), "store.db"))
 				if backend != servedparity.BackendDefaultSQLite {
-					configureCompletion2270PostgresFixture(t)
+					configureCompletion2270PostgresFixture(t, true)
 					opts.StoreMode, opts.StoreModeSet = "postgres", true
 					storeConfig = ""
 				}
@@ -107,6 +110,7 @@ func TestContextCompactionPreservesMemoryAcrossRestartBothStores(t *testing.T) {
 				if scenario.profile == "openai_compatible" {
 					configuration += "  openai_compatible:\n    base_url: https://api.deepseek.com\n"
 				}
+				configuration = withServeFixtureStateDirectory(t, withInstalledServePostgresConfig(t, configuration, ""))
 				if err := os.WriteFile(opts.ConfigPath, []byte(withTestProviderTriggerPlatformInventory(t, configuration)), 0o600); err != nil {
 					t.Fatal(err)
 				}
@@ -261,6 +265,12 @@ func nativeContextCompactionProvider(t *testing.T, method, model string, summari
 		if request.Method != "POST" || credential != "compaction-key" || request.URL.Path != path && request.URL.Path != path+"/compact" {
 			t.Error("native compaction changed the configured route or credential")
 			w.WriteHeader(400)
+			return
+		}
+		if reply, boot := llmapi.StartupAnswer(llmapi.Request{Body: body}); boot {
+			if err := llmapi.WriteReply(w, protocol, reply); err != nil {
+				t.Error(err)
+			}
 			return
 		}
 		mu.Lock()

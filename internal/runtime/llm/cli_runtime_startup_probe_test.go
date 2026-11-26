@@ -15,8 +15,11 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/runtime/agentframe"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
+	"github.com/division-sh/swarm/internal/runtime/toolgateway"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/tests/support/runtime/effects/effecttest"
 )
@@ -45,6 +48,60 @@ func TestCLIStartupProbeJoinsStderrBeforeWait(t *testing.T) {
 			}
 		})
 	}
+	t.Run("raw_observation_failure_cuts", func(t *testing.T) {
+		readerErr := errors.New("startup reader failed")
+		waitErr := errors.New("startup process failed")
+		response := &Response{SessionID: "observed-session", Raw: []byte("raw startup evidence")}
+		for _, tc := range []struct {
+			name      string
+			result    cliStartupProbeResult
+			stderr    string
+			waitErr   error
+			cancelled bool
+			uncertain bool
+			class     runtimefailures.Class
+			code      string
+		}{
+			{name: "init", result: cliStartupProbeResult{found: true, resp: response}},
+			{name: "joined_init_cancellation", result: cliStartupProbeResult{found: true, resp: response}, waitErr: waitErr, cancelled: true},
+			{name: "reader_error", result: cliStartupProbeResult{err: readerErr}, waitErr: waitErr},
+			{name: "init_wait_failure", result: cliStartupProbeResult{found: true, resp: response}, waitErr: waitErr, uncertain: true, class: runtimefailures.ClassConnectorFailure, code: "claude_cli_startup_probe_failed"},
+			{name: "authentication", stderr: "OAuth token expired", uncertain: true, class: runtimefailures.ClassAuthenticationNeeded, code: "provider_unauthorized"},
+			{name: "wait_failure", waitErr: waitErr, uncertain: true, class: runtimefailures.ClassConnectorFailure, code: "claude_cli_startup_probe_failed"},
+			{name: "missing_init", uncertain: true, class: runtimefailures.ClassConnectorFailure, code: "claude_cli_startup_surface_missing"},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				ctx, cancel := context.WithCancel(context.Background())
+				defer cancel()
+				if tc.cancelled {
+					cancel()
+				}
+				got := classifyCLIStartupObservation(ctx, tc.result, [][]byte{[]byte(tc.stderr)}, tc.waitErr, nil)
+				if got.outcomeUncertain != tc.uncertain {
+					t.Fatalf("uncertain=%t want %t: %v", got.outcomeUncertain, tc.uncertain, got.err)
+				}
+				if tc.result.err != nil {
+					if got.err != readerErr || got.response != nil {
+						t.Fatalf("reader error changed: %+v", got)
+					}
+					return
+				}
+				if tc.class == "" {
+					if got.err != nil || got.response != response {
+						t.Fatalf("startup evidence changed: %+v", got)
+					}
+					return
+				}
+				failure, ok := runtimefailures.As(got.err)
+				if !ok || failure.Failure.Class != tc.class || failure.Failure.Detail.Code != tc.code || got.response != nil {
+					t.Fatalf("failure cut changed: %+v", got)
+				}
+				if tc.waitErr != nil && !errors.Is(got.err, tc.waitErr) {
+					t.Fatalf("wait cause lost: %v", got.err)
+				}
+			})
+		}
+	})
 }
 
 func TestStartupProbeConsumesSessionContractWithoutExecutionFrame(t *testing.T) {
@@ -167,6 +224,76 @@ printf '%s\n' '{"type":"system","subtype":"init","session_id":"provider-startup-
 	if string(input) != "Startup validation probe. Do not call any tools. Reply with the exact text ok." || strings.Contains(string(input), agentframe.Version) || strings.Contains(string(input), `"kind":"initial"`) {
 		t.Fatalf("startup input acquired managed execution-frame semantics: %q", input)
 	}
+	t.Run("observation_without_execution_authority", func(t *testing.T) {
+		planned, err := CompileManagedCapabilityAdmission(actor, ClaudeCLIProviderContract(), tools, toolcapabilities.Set{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		target := &workspace.Target{Container: "swarm-admission-probe", Workdir: "/workspace", ClaudeState: claudeStateStub{}}
+		observed, err := ObserveClaudeStartup(context.Background(), cfg, runtime.providerCredentials, actor, "system prompt", planned, target, toolgateway.HTTPObservation{})
+		if err != nil || observed == nil {
+			t.Fatalf("store-free observation: %+v %v", observed, err)
+		}
+		if observed.CapabilitySurface != nil || observed.completionHandle != nil || observed.completionAttempt != nil || observed.SessionID != "provider-startup-1" {
+			t.Fatalf("raw observation minted execution evidence: %+v", observed)
+		}
+		observed.ProviderVisibleTools = []string{"Bash"}
+		observed.VisibleTools = []string{"Bash"}
+		if err := validateStartupCLIObservation(planned, observed); err == nil {
+			t.Fatal("raw observation accepted a foreign provider builtin")
+		}
+	})
+	t.Run("completed_answer_without_execution_authority", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "answer.sh")
+		if err := os.WriteFile(path, []byte("#!/bin/sh\ncat >/dev/null\nprintf '%s\\n' '{\"type\":\"result\",\"is_error\":false,\"result\":\"ok\"}'\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		copy := *cfg
+		copy.Workspace.DockerBin = path
+		copy.LLM.OpenAICompatible.BaseURL = "http://127.0.0.1:1/v1"
+		copy.LLM.OpenAIResponses.BaseURL = "http://127.0.0.1:1/v1"
+		profile, err := llmselection.ResolveActiveBackend(llmselection.BackendClaudeCLI)
+		if err != nil {
+			t.Fatal(err)
+		}
+		target := &workspace.Target{Container: "swarm-admission-probe", Workdir: "/workspace", ClaudeState: claudeStateStub{}}
+		if err := ObserveProviderStartupAnswer(context.Background(), &copy, profile, llmselection.ResolvedModel{ConcreteModel: "selected-model"}, runtime.providerCredentials, target); err != nil {
+			t.Fatalf("completed answer: %v", err)
+		}
+		for _, backend := range []string{llmselection.BackendAnthropic, llmselection.BackendOpenAICompatible, llmselection.BackendOpenAIResponses} {
+			profile, err := llmselection.ResolveActiveBackend(backend)
+			if err != nil {
+				t.Fatal(err)
+			}
+			request, decode, err := startupAnswerRequest(context.Background(), &copy, profile, llmselection.ResolvedModel{ConcreteModel: "selected-model"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, err := io.ReadAll(request.Body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			request.Body.Close()
+			if strings.Contains(string(body), `"tools":[{`) || !strings.Contains(string(body), "selected-model") || !strings.Contains(string(body), cliStartupProbePrompt) {
+				t.Fatalf("answer request has tools or lost selected model/prompt: %s", body)
+			}
+			response := `{"status":"completed","stop_reason":"end_turn","content":[{"type":"text","text":"ok"}],"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}],"output":[{"type":"message","content":[{"text":"ok"}]}]}`
+			answer, err := decode([]byte(response))
+			if err != nil || validateStartupAnswer(answer) != nil {
+				t.Fatalf("%s completed answer: %+v %v", backend, answer, err)
+			}
+			partial := strings.NewReplacer(`"completed"`, `"incomplete"`, `"end_turn"`, `"max_tokens"`, `"finish_reason":"stop"`, `"finish_reason":"length"`).Replace(response)
+			if _, err := decode([]byte(partial)); err == nil {
+				t.Fatalf("%s accepted partial text as a completed answer", backend)
+			}
+		}
+		if validateStartupAnswer(Response{Message: Message{Content: "ready"}}) != nil {
+			t.Fatal("a completed answer was required to have one particular spelling")
+		}
+		if validateStartupAnswer(Response{}) == nil || validateStartupAnswer(Response{Message: Message{Content: "ok"}, ToolCalls: []ToolCall{{Name: "write_file"}}}) == nil {
+			t.Fatal("an absent answer or a tool request counted as a completed no-tool answer")
+		}
+	})
 }
 
 func TestClaudeCLIRuntimeProbeStartupVisibleToolSurface_UsesUUIDSessionID(t *testing.T) {

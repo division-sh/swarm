@@ -38,10 +38,12 @@ type ServeOptions struct {
 	PublicWebhookBaseURL             string
 	PublicWebhookListen              string
 	PublicWebhookListener            *net.TCPListener // Run owns this handle; CLI invocations bind normally.
+	APIListener                      net.Listener     // The original process probe owns this handle across checks.
 	ShutdownGrace                    time.Duration
 	ProcessStop                      func() // Actual serving stop notification to the outer process owner.
 	Dev                              bool
 	SelfCheck                        bool
+	DryRun                           bool
 	Verbose                          bool
 	NoFeed                           bool
 	NoColor                          bool

@@ -844,6 +844,17 @@ func runChannelOnboardingProofRevokeJourney(t *testing.T, configPath, endpoint, 
 	}
 }
 
+func seedChannelCrashProviderCredential(t *testing.T, credentialPath string) {
+	t.Helper()
+	credentials, err := runtimecredentials.NewFileStore(credentialPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := credentials.Set(t.Context(), "ANTHROPIC_API_KEY", "channel-crash-provider-fixture"); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func writeChannelOnboardingLiveToolCredentials(t *testing.T, credentialPath string) map[string]string {
 	t.Helper()
 	// Static tool roles do not satisfy operation-owned onboarding admissions.
@@ -1208,7 +1219,7 @@ llm:
 `,
 		parameters.Host, parameters.Port, parameters.Database, parameters.User, parameters.SSLMode)
 	path := filepath.Join(t.TempDir(), "swarm-postgres.yaml")
-	if err := os.WriteFile(path, []byte(withTestProviderTriggerPlatformInventory(t, configText)), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(withTestProviderTriggerPlatformInventory(t, withServeFixtureStateDirectory(t, configText))), 0o644); err != nil {
 		t.Fatalf("write channel onboarding PostgreSQL runtime config: %v", err)
 	}
 	return path

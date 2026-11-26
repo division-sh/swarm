@@ -21,6 +21,20 @@ import (
 )
 
 func TestSQLitePossessionCoordinateDoesNotBlockDatabaseWrites(t *testing.T) {
+	t.Run("absent_creation_is_exclusive", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "appeared.db")
+		if err := os.WriteFile(path, []byte("unchecked appeared bytes"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		file, _, err := openSQLiteDatabaseIdentity(path, true, true)
+		if err == nil {
+			_ = file.Close()
+			t.Fatal("absent-witness create adopted an existing file")
+		}
+		if body, err := os.ReadFile(path); err != nil || string(body) != "unchecked appeared bytes" {
+			t.Fatalf("exclusive refusal changed appeared bytes: %q, %v", body, err)
+		}
+	})
 	path := filepath.Join(t.TempDir(), "runtime.db")
 	guard, err := AcquireSQLiteConstructionGuard(path)
 	if err != nil {

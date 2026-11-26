@@ -760,7 +760,7 @@ func TestSourceFreeCommandsDoNotRequireSourceCheckout(t *testing.T) {
 		{name: "version", args: []string{"version"}, want: "Swarm dev"},
 		{name: "completion", args: []string{"completion", "bash"}, want: "swarm"},
 		{name: "serve help", args: []string{"serve", ".", "--help"}, want: "For serve-owned HTTPS, opt in through the deployment's `swarm.yaml` under `serve.public_webhook`. With neither `certificate_file` nor `private_key_file` configured, serve uses autocert with Let's Encrypt for exactly the configured name, accepting its terms; contact is omitted unless `email` is set."},
-		{name: "verify help", args: []string{"verify", "--help"}, want: "Validate contract files or compare a run's state with its history"},
+		{name: "verify help", args: []string{"verify", "--help"}, want: "Validate contract files without opening a store."},
 		{name: "run help", args: []string{"run", "start", "--help"}, want: "Publish into a served flow's live run, or reattach to one."},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -847,7 +847,7 @@ func TestVerifyCommandIgnoresInvocationRootDotEnv(t *testing.T) {
 	chdirForTest(t, repo)
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommand(context.Background(), "", []string{"verify", "--portable", "--config", configPath}, &stdout, &stderr)
+	code := executeRootCommand(context.Background(), "", []string{"verify", "--config", configPath}, &stdout, &stderr)
 	if code == 0 {
 		t.Fatalf("verify unexpectedly consumed contracts path from repo .env: stdout=%s stderr=%s", stdout.String(), stderr.String())
 	}
@@ -857,7 +857,7 @@ func TestVerifyCommandIgnoresInvocationRootDotEnv(t *testing.T) {
 
 	stdout.Reset()
 	stderr.Reset()
-	code = executeRootCommand(context.Background(), "", []string{"verify", sourceRoot, "--portable", "--config", configPath}, &stdout, &stderr)
+	code = executeRootCommand(context.Background(), "", []string{"verify", sourceRoot, "--config", configPath}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("verify with explicit contracts code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
@@ -868,6 +868,8 @@ func TestVerifyCommandIgnoresInvocationRootDotEnv(t *testing.T) {
 
 func TestRunVerifyCommandUsesEmbeddedPlatformSpecWithoutRepoRoot(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
+	cache := t.TempDir()
+	t.Setenv("XDG_CACHE_HOME", cache)
 	chdirForTest(t, t.TempDir())
 	root := t.TempDir()
 
@@ -881,6 +883,9 @@ func TestRunVerifyCommandUsesEmbeddedPlatformSpecWithoutRepoRoot(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "verify ok: source=") {
 		t.Fatalf("verify output missing success marker:\n%s", buf.String())
+	}
+	if _, err := os.Stat(filepath.Join(cache, "swarm", "embedded-assets")); !os.IsNotExist(err) {
+		t.Fatalf("source admission materialized the embedded spec before checks: %v", err)
 	}
 }
 
@@ -1693,7 +1698,6 @@ func runVerifyCommandWithContractsOutputForTest(t *testing.T, ctx context.Contex
 	}
 	opts := defaultVerifyCommandOptions()
 	// These fixtures prove declaration semantics, not deployment readiness.
-	opts.portable = true
 	opts.sourceRoot = sourceRoot
 	opts.configPath = writeTestVerifyRuntimeConfig(t)
 	return runVerifyCommandWithOutput(ctx, repo, opts, out, errOut)
@@ -1843,7 +1847,6 @@ func TestRunVerifyCommand_SurfacesLintEvidence(t *testing.T) {
 	}
 
 	opts := defaultVerifyCommandOptions()
-	opts.portable = true
 	opts.sourceRoot = root
 	opts.configPath = writeTestVerifyRuntimeConfig(t)
 	opts.output.asJSON = true
@@ -1868,7 +1871,6 @@ func TestRunVerifyCommand_JSONDoesNotHideLaterValidationErrorBehindAdvisoryBootF
 
 	root := writeVerifyLintEvidenceWithMissingEmitSchemaFixture(t)
 	opts := defaultVerifyCommandOptions()
-	opts.portable = true
 	opts.sourceRoot = root
 	opts.configPath = writeTestVerifyRuntimeConfig(t)
 	opts.output.asJSON = true
@@ -1933,7 +1935,6 @@ func TestRunVerifyCommand_RejectsBootTimerWithCancelOn(t *testing.T) {
 	}
 
 	opts := defaultVerifyCommandOptions()
-	opts.portable = true
 	opts.sourceRoot = root
 	opts.configPath = writeTestVerifyRuntimeConfig(t)
 	opts.output.asJSON = true
@@ -2016,7 +2017,6 @@ func TestRunVerifyCommand_UnreachableStageUsesBlockingAnalyzerOutput(t *testing.
 	}
 
 	opts := defaultVerifyCommandOptions()
-	opts.portable = true
 	opts.sourceRoot = root
 	opts.configPath = writeTestVerifyRuntimeConfig(t)
 	opts.output.asJSON = true
@@ -2142,7 +2142,6 @@ func TestRunVerifyCommand_UsesUnifiedRuntimeConfigModelAliases(t *testing.T) {
 
 	var buf bytes.Buffer
 	opts := defaultVerifyCommandOptions()
-	opts.portable = true
 	opts.sourceRoot = root
 	code := runVerifyCommandWithOutput(context.Background(), RepoRoot(), opts, &buf, &buf)
 	if code != 0 {

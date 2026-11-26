@@ -43,7 +43,7 @@ func TestRunServeRuntimeConsumesCanonicalStoreSelectionBeforeStoreConstruction(t
 			storeMode:   storebackend.ActiveDefaultBackend().String(),
 			wantBackend: storebackend.BackendSQLite,
 			wantSource:  storebackend.SourceRolloutDefault,
-			wantPathSrc: storebackend.SourceProjectDefault,
+			wantPathSrc: storebackend.SourceSwarmDirDefault,
 		},
 		{
 			name:        "flag postgres reaches store construction",
@@ -76,7 +76,7 @@ func TestRunServeRuntimeConsumesCanonicalStoreSelectionBeforeStoreConstruction(t
 			unsetStoreSelectorEnv(t)
 			oldBuildStores := buildStoresForServe
 			var captured storebackend.Selection
-			buildStoresForServe = func(_ context.Context, selection storebackend.Selection, _ *config.Config) (*selectedStoreOwner, error) {
+			buildStoresForServe = func(_ context.Context, selection storebackend.Selection, _ *config.Config, bootCheck ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {
 				captured = selection
 				return nil, errors.New("stop after selector proof")
 			}
@@ -85,8 +85,20 @@ func TestRunServeRuntimeConsumesCanonicalStoreSelectionBeforeStoreConstruction(t
 			})
 
 			var out bytes.Buffer
+			configPath := writeStoreBackendRuntimeConfig(t, tt.configStore, tt.configPath)
+			if tt.wantBackend == storebackend.BackendPostgres {
+				recordServePostgresFixture(t, testutil.StartEmptyPostgresDSN(t))
+				body, err := os.ReadFile(configPath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(configPath, []byte(withInstalledServePostgresConfig(t, string(body), "postgres")), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
 			code := runFrom(context.Background(), t.TempDir(), cliapp.ServeOptions{
-				ConfigPath:    writeStoreBackendRuntimeConfig(t, tt.configStore, tt.configPath),
+				ConfigPath:    configPath,
+				SourceRoot:    filepath.Join(repoRootForTest(), "tests", "tier8-boot-verification", "test-boot-success"),
 				StoreMode:     tt.storeMode,
 				StoreModeSet:  tt.storeFlag,
 				APIListenAddr: defaultAPIListenAddr,
@@ -115,7 +127,7 @@ func TestRunServeRuntimeStoreFlagCanOverrideConfigPostgresBeforePasswordRequirem
 
 	oldBuildStores := buildStoresForServe
 	var captured storebackend.Selection
-	buildStoresForServe = func(_ context.Context, selection storebackend.Selection, _ *config.Config) (*selectedStoreOwner, error) {
+	buildStoresForServe = func(_ context.Context, selection storebackend.Selection, _ *config.Config, bootCheck ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {
 		captured = selection
 		return nil, errors.New("stop after selector proof")
 	}
@@ -126,6 +138,7 @@ func TestRunServeRuntimeStoreFlagCanOverrideConfigPostgresBeforePasswordRequirem
 	var out bytes.Buffer
 	code := runFrom(context.Background(), t.TempDir(), cliapp.ServeOptions{
 		ConfigPath:    configPath,
+		SourceRoot:    filepath.Join(repoRootForTest(), "tests", "tier8-boot-verification", "test-boot-success"),
 		StoreMode:     storebackend.BackendSQLite.String(),
 		StoreModeSet:  true,
 		APIListenAddr: defaultAPIListenAddr,
@@ -443,7 +456,10 @@ func TestBuildStoresSQLiteRuntimeProvidesDiagnosticsAndStateOwners(t *testing.T)
 	}
 }
 
-type storeBackendSelectionNoopLLMRuntime struct{ runtimellm.NoopRuntime }
+type storeBackendSelectionNoopLLMRuntime struct {
+	runtimellm.NoopRuntime
+	servedStartupAnswerObservation
+}
 
 func (storeBackendSelectionNoopLLMRuntime) ProviderContract() runtimellm.ProviderContract {
 	return runtimellm.AnthropicAPIProviderContract()
@@ -510,6 +526,8 @@ func writeStoreBackendRuntimeConfig(t *testing.T, backend string, sqlitePath str
 	)
 	path := filepath.Join(t.TempDir(), "swarm.yaml")
 	configText := withTestProviderTriggerPlatformInventory(t, strings.Join(lines, "\n")+"\n")
+	configText = withInstalledServePostgresConfig(t, configText, backend)
+	configText = withServeFixtureStateDirectory(t, configText)
 	if err := os.WriteFile(path, []byte(configText), 0o644); err != nil {
 		t.Fatalf("write runtime config: %v", err)
 	}

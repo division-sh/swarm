@@ -90,6 +90,9 @@ func (p Policy) selectExtraUnits(tier string, ids []string) ([]string, error) {
 		return nil, fmt.Errorf("unknown CI-Units base tier %q", tier)
 	}
 	for _, id := range ids {
+		if serialProofPrivate(id) {
+			return nil, fmt.Errorf("CI-Units %q is a private batch member", id)
+		}
 		if !slices.Contains(p.Profiles[ProfileFull].Units, id) {
 			return nil, fmt.Errorf("CI-Units %q is not an admitted hosted full unit", id)
 		}
@@ -142,6 +145,9 @@ func (p RunPlan) validateExtraUnits() error {
 		return fmt.Errorf("extra_units require a hosted lower-tier plan")
 	}
 	for _, id := range ids {
+		if serialProofPrivate(id) {
+			return fmt.Errorf("plan extra_units cannot select private unit %s", id)
+		}
 		if _, err := p.Unit(id); err != nil {
 			return fmt.Errorf("requested CI-Units missing from plan: %w", err)
 		}
@@ -149,8 +155,14 @@ func (p RunPlan) validateExtraUnits() error {
 	return nil
 }
 
+func fullUnitObligation(extras []string, id string) bool {
+	return slices.Contains(extras, id) || wholeCatalogUnit(id) ||
+		id == channelJourneys && slices.Contains(extras, channelUnit) ||
+		id == otherLateLifecycle && slices.Contains(extras, otherLateUnit)
+}
+
 func unitWorkloadProfile(tier string, extras []string, id string) string {
-	if slices.Contains(extras, id) || wholeCatalogUnit(id) {
+	if fullUnitObligation(extras, id) {
 		return ProfileFull
 	}
 	return tier
@@ -161,7 +173,7 @@ func unitWorkloadProfile(tier string, extras []string, id string) string {
 func bindFullUnitObligations(plan *RunPlan, full RunPlan) error {
 	for i := range plan.Units {
 		unit := &plan.Units[i]
-		if !slices.Contains(plan.ExtraUnits, unit.ID) && !wholeCatalogUnit(unit.ID) {
+		if !fullUnitObligation(plan.ExtraUnits, unit.ID) {
 			continue
 		}
 		original, err := full.Unit(unit.ID)

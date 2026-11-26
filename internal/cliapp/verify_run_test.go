@@ -8,11 +8,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
+	"github.com/division-sh/swarm/internal/runtime/bootverify"
 	"github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/effects"
@@ -20,6 +23,9 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/mutationlog"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/startuprecovery"
+	storeselected "github.com/division-sh/swarm/internal/store/selected"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/tests/support/testutil/flowactivationfixture"
 	"github.com/google/uuid"
@@ -31,6 +37,9 @@ func TestVerifyRunPublicAdmissionBothStores(t *testing.T) {
 			isolateCLIAPIConfigEnv(t)
 			ctx := context.Background()
 			root := issue2567VerifySource(t)
+			if err := os.WriteFile(filepath.Join(root, "state.yaml"), []byte("verdict: 'original'\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
 			config := filepath.Join(t.TempDir(), "swarm.yaml")
 			_, bundle, err := NewSwarmWorkflowModule(RepoRoot(), root)
 			if err != nil {
@@ -50,129 +59,153 @@ func TestVerifyRunPublicAdmissionBothStores(t *testing.T) {
 			runID := "abcdefab-1234-4000-8000-abcdefabcdef"
 			storetest.RequireRun(t, ctx, selected, storetest.RunFixture{RunID: runID, Origin: storetest.ScenarioSetupOrigin(), Artifact: bundle.SourceArtifact})
 			for _, withMutations := range []bool{false, true} {
-				if withMutations {
-					fact, err := correlation.NewSourceArtifactFact(bundle.SourceArtifact.BundleHash())
-					if err != nil {
-						t.Fatal(err)
+				t.Run(fmt.Sprintf("mutations_%t", withMutations), func(t *testing.T) {
+					if withMutations {
+						fact, err := correlation.NewSourceArtifactFact(bundle.SourceArtifact.BundleHash())
+						if err != nil {
+							t.Fatal(err)
+						}
+						runtimeID := uuid.NewString()
+						constructionContext := correlation.WithRuntimeInstanceID(ctx, runtimeID)
+						constructionContext = correlation.WithSourceArtifactFact(constructionContext, fact)
+						constructionContext = authoractivity.WithScope(constructionContext, authoractivity.BundleScope(runtimeID, fact.BundleHash()))
+						constructionContext = effects.WithExecutionMode(correlation.WithRunID(constructionContext, runID), effects.ExecutionModeLive)
+						at := time.Now().UTC()
+						// Typed component construction supplies nonempty mutation history;
+						// it is a UUID-admission witness, not the required S03 workload.
+						command, err := flowactivationfixture.Command(constructionContext, pipeline.WorkflowInstance{
+							InstanceID: runID, StorageRef: runID, EntityID: runID,
+							WorkflowName: ".", WorkflowVersion: bundle.WorkflowVersion(), EntityType: "work",
+							Mode:         bundle.RootSchema.EffectiveMode(),
+							CurrentState: "waiting", StageDefined: true, CreatedAt: at, EnteredStageAt: at,
+							Fields: map[string]any{"verdict": "original"},
+						}, pipeline.WorkflowLifecycleMutationPlan{}, at)
+						if err != nil {
+							t.Fatal(err)
+						}
+						committed, err := selected.(bus.FlowInstanceActivationCommitOwner).CommitFlowInstanceActivation(constructionContext, command)
+						if err != nil || !committed.Acknowledged || !committed.Created {
+							t.Fatalf("construct mutation-bearing run: %+v %v", committed, err)
+						}
+						if history := storetest.ObserveEntityMutationHistory(t, constructionContext, selected, runID); len(history) == 0 {
+							t.Fatal("UUID fixture has no mutations")
+						}
+						ctx = constructionContext
 					}
-					runtimeID := uuid.NewString()
-					constructionContext := correlation.WithRuntimeInstanceID(ctx, runtimeID)
-					constructionContext = correlation.WithSourceArtifactFact(constructionContext, fact)
-					constructionContext = authoractivity.WithScope(constructionContext, authoractivity.BundleScope(runtimeID, fact.BundleHash()))
-					constructionContext = effects.WithExecutionMode(correlation.WithRunID(constructionContext, runID), effects.ExecutionModeLive)
-					at := time.Now().UTC()
-					// Typed component construction supplies nonempty mutation history;
-					// it is a UUID-admission witness, not the required S03 workload.
-					command, err := flowactivationfixture.Command(constructionContext, pipeline.WorkflowInstance{
-						InstanceID: runID, StorageRef: runID, EntityID: runID,
-						WorkflowName: ".", WorkflowVersion: bundle.WorkflowVersion(), EntityType: "work",
-						Mode:         bundle.RootSchema.EffectiveMode(),
-						CurrentState: "waiting", StageDefined: true, CreatedAt: at, EnteredStageAt: at,
-						Fields: map[string]any{},
-					}, pipeline.WorkflowLifecycleMutationPlan{}, at)
-					if err != nil {
-						t.Fatal(err)
-					}
-					committed, err := selected.(bus.FlowInstanceActivationCommitOwner).CommitFlowInstanceActivation(constructionContext, command)
-					if err != nil || !committed.Acknowledged || !committed.Created {
-						t.Fatalf("construct mutation-bearing run: %+v %v", committed, err)
-					}
-					if history := storetest.ObserveEntityMutationHistory(t, constructionContext, selected, runID); len(history) == 0 {
-						t.Fatal("UUID fixture has no mutations")
-					}
-				}
-				for _, missing := range []bool{false, true} {
-					id := runID
-					if missing {
-						id = uuid.NewString()
-					}
-					for _, mode := range []string{"json", "text", "quiet"} {
-						for _, uppercase := range []bool{false, true} {
-							t.Run(fmt.Sprintf("mutations_%t/missing_%t/%s/uppercase_%t", withMutations, missing, mode, uppercase), func(t *testing.T) {
-								argument := id
-								if uppercase {
-									argument = strings.ToUpper(id)
-								}
-								args := []string{"verify", root, "--config", config, "--run", argument}
-								if mode != "text" {
-									args = append(args, "--"+mode)
-								}
-								var out, errOut bytes.Buffer
-								code := executeRootCommand(ctx, RepoRoot(), args, &out, &errOut)
-								wantEntities := 0
-								if withMutations && !missing {
-									wantEntities = 1
-								}
-								if (code != 0) != missing || errOut.Len() != 0 {
-									t.Fatalf("wrong exit: missing=%t code=%d stdout=%s stderr=%s", missing, code, &out, &errOut)
-								}
-								if mode == "json" {
-									var result verifyRunCommandResult
-									if err := json.Unmarshal(out.Bytes(), &result); err != nil {
-										t.Fatal(err)
-									}
-									if result.RunID != id || result.EntitiesChecked != wantEntities || len(result.Rows) != 0 || result.OK == missing {
-										t.Fatalf("wrong result: %+v", result)
-									}
-									if missing {
-										if result.Status != "failed" || len(result.Errors) != 1 || result.Errors[0].Detail.Code != "run_not_found" || result.Errors[0].Retryable {
-											t.Fatalf("missing run lost typed refusal: %+v", result)
-										}
-									} else if result.Status != "passed" || len(result.Errors) != 0 {
-										t.Fatalf("existing run refused: %+v", result)
-									}
-								} else if missing {
-									if !strings.Contains(out.String(), "run_not_found") || strings.Contains(out.String(), "no drift") {
-										t.Fatalf("missing run reported clean: %s", &out)
-									}
-								} else if want := fmt.Sprintf("%d entities checked, no drift", wantEntities); !strings.Contains(out.String(), want) {
-									t.Fatalf("missing clean transcript: %s", &out)
-								}
+					for _, missing := range []bool{false, true} {
+						t.Run(fmt.Sprintf("missing_%t", missing), func(t *testing.T) {
+							id := runID
+							if missing {
+								id = uuid.NewString()
+							}
+							cfg, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: root, ExplicitPath: config})
+							if err != nil {
+								t.Fatal(err)
+							}
+							request, _, err := prepareVerifySelectedStoreInspection(ctx, root, CLISourcePaths{SourceRoot: root}, cfg, cliSwarmDirOptions{}, semanticview.Wrap(bundle))
+							if err != nil {
+								t.Fatal(err)
+							}
+							inspection, err := storeselected.OpenAdmissionInspection(ctx, request)
+							if err != nil {
+								t.Fatal(err)
+							}
+							var report mutationlog.DriftReport
+							_, err = inspection.Inspect(ctx, schema, func(snapshot *storeselected.AdmissionSnapshot) error {
+								var err error
+								report, err = snapshot.InspectRunMutationDrift(ctx, id)
+								return err
 							})
+							err = errors.Join(err, inspection.Close())
+							if missing {
+								failure, ok := failures.As(verifyRunFailure(id, err))
+								if !ok || failure.Failure.Detail.Code != "run_not_found" || failure.Failure.Retryable {
+									t.Fatalf("missing native run lost typed refusal: %v", err)
+								}
+								return
+							}
+							want := 0
+							if withMutations {
+								want = 1
+							}
+							if err != nil || report.RunID != id || report.EntitiesChecked != want || len(report.Rows) != 0 {
+								t.Fatalf("native drift read lost history/current reach: %+v %v", report, err)
+							}
+							stage, err := serveChecksForTest(t, ctx, root, root, config)
+							if err != nil {
+								t.Fatal(err)
+							}
+							observed := false
+							for _, observation := range stage.Validation.BootReport.Observations {
+								if observation.CheckID == "run_mutation_drift" {
+									observed = observation.Status == "passed"
+								}
+							}
+							if !observed {
+								t.Fatal("boot's snapshot omitted the existing active-run mutation check")
+							}
+						})
+					}
+				})
+			}
+			if t.Failed() {
+				return
+			}
+			history := storetest.ObserveEntityMutationHistory(t, ctx, selected, runID)
+			if err := storetest.CorruptRegistryVerdict(ctx, selected, runID, runID, "hostile-drift"); err != nil {
+				t.Fatal(err)
+			}
+			for _, state := range []runlifecycle.State{runlifecycle.StateRunning, runlifecycle.StatePaused, runlifecycle.StateCancelled} {
+				t.Run("drift_"+string(state), func(t *testing.T) {
+					if state != runlifecycle.StateRunning {
+						if state == runlifecycle.StatePaused {
+							if _, err := selected.TransitionActiveRun(ctx, runlifecycle.ActiveTransitionRequest{RunID: runID, State: state}); err != nil {
+								t.Fatal(err)
+							}
+						} else if _, _, err := selected.MarkTerminalRun(ctx, runlifecycle.TerminalRequest{RunID: runID, State: state, EndedAt: time.Now().UTC()}); err != nil {
+							t.Fatal(err)
 						}
 					}
-				}
+					stage, err := serveChecksForTest(t, ctx, root, root, config)
+					if err != nil {
+						t.Fatal(err)
+					}
+					observed := false
+					for _, observation := range stage.Validation.BootReport.Observations {
+						if observation.CheckID != "run_mutation_drift" {
+							continue
+						}
+						observed = true
+						if state == runlifecycle.StateCancelled {
+							if observation.Status != "passed" {
+								t.Fatalf("terminal history entered active boot checks: %+v", observation)
+							}
+						} else if observation.Status != "failed" || !strings.Contains(observation.Reason, runID) || !strings.Contains(observation.Reason, "verdict") || !strings.Contains(observation.Reason, "hostile-drift") || !strings.Contains(observation.Reason, "original") {
+							t.Fatalf("%s stage lost exact hostile drift refusal: %+v", state, observation)
+						}
+					}
+					if !observed {
+						t.Fatal("stage omitted active-run drift predicate")
+					}
+					if after := storetest.ObserveEntityMutationHistory(t, ctx, selected, runID); !reflect.DeepEqual(history, after) {
+						t.Fatal("read-only stage changed mutation history")
+					}
+				})
 			}
 		})
 	}
 }
 
 func TestVerifyRunPublicFlagAndAbsentStoreAdmission(t *testing.T) {
-	for _, tc := range []struct {
-		name, run string
-		portable  bool
-		want      string
-	}{
-		{"absent", uuid.NewString(), false, "not_run"},
-		{"blank", "", false, "failed"},
-		{"invalid", "not-a-run", false, "failed"},
-		{"portable", uuid.NewString(), true, "failed"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
+	for _, flag := range []string{"--run", "--portable"} {
+		t.Run(flag, func(t *testing.T) {
 			isolateCLIAPIConfigEnv(t)
 			root := issue2567VerifySource(t)
-			stateDir := filepath.Join(t.TempDir(), "never-created")
-			args := []string{"verify", root, "--run", tc.run, "--swarm-dir", stateDir, "--json"}
-			if tc.portable {
-				args = append(args, "--portable")
-			}
+			args := []string{"verify", root, flag}
 			var out, errOut bytes.Buffer
 			code := executeRootCommand(context.Background(), RepoRoot(), args, &out, &errOut)
-			var got verifyRunCommandResult
-			if err := json.Unmarshal(out.Bytes(), &got); err != nil {
-				t.Fatalf("%v: out=%s err=%s", err, &out, &errOut)
-			}
-			if got.Status != tc.want || got.OK || len(got.Rows) != 0 || got.EntitiesChecked != 0 || (code == 0) != (tc.want == "not_run") {
-				t.Fatalf("result=%+v code=%d err=%s", got, code, &errOut)
-			}
-			if tc.want == "failed" && (len(got.Errors) != 1 || got.Errors[0].Retryable) {
-				t.Fatalf("untyped/retryable refusal: %+v", got)
-			}
-			if tc.want == "not_run" && (!strings.Contains(got.Reason, stateDir) || strings.Contains(out.String(), "no drift")) {
-				t.Fatalf("false empty verdict: %s", &out)
-			}
-			if _, err := os.Stat(stateDir); !os.IsNotExist(err) {
-				t.Fatalf("inspection created state: %v", err)
+			if code == 0 || !strings.Contains(errOut.String(), "unknown flag: "+flag) {
+				t.Fatalf("retired flag remained accepted: code=%d stderr=%s", code, &errOut)
 			}
 		})
 	}
@@ -210,6 +243,15 @@ func TestVerifyRunTypedFailuresRetainCoordinatesAndCancellation(t *testing.T) {
 				t.Fatal("coordinates lost")
 			}
 		})
+	}
+	cleanup := errors.New("independent check cleanup failure")
+	result := runtime.WorkflowContractValidationResult{BootReport: bootverify.Report{Purpose: bootverify.ExecutionValidation}}
+	verifyDeploymentObservation(context.Background(), &result, "retained_source_integrity", "native source reader", "run:"+run, failures.ClassLifecycleConflict, func(context.Context) error {
+		return errors.Join(startuprecovery.DataIntegrityError{}, cleanup)
+	})
+	stage := ServeCheckStageResult{Validation: result}
+	if failure := stage.Failure(); !startuprecovery.IsDataIntegrityError(failure) || !errors.Is(failure, cleanup) {
+		t.Fatalf("check presentation erased native integrity or cleanup classification: %v", failure)
 	}
 }
 

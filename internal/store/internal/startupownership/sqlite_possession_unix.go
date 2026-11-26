@@ -32,7 +32,8 @@ type sqliteFilePossession struct {
 	coordinateInfo os.FileInfo
 	coordinatePath string
 
-	released bool
+	released         bool
+	deferredDatabase bool
 }
 
 func acquireSQLiteFilePossession(selectedPath string) (sqlitePossession, error) {
@@ -40,7 +41,7 @@ func acquireSQLiteFilePossession(selectedPath string) (sqlitePossession, error) 
 }
 
 func waitSQLiteFilePossession(ctx context.Context, selectedPath string) (sqlitePossession, error) {
-	return sqlitePossessionForConstruction(ctx, selectedPath, false, true)
+	return sqlitePossessionForConstruction(ctx, selectedPath, false, true, false)
 }
 
 func acquireSQLiteConstructionPossession(selectedPath string) (sqlitePossession, error) {
@@ -48,14 +49,18 @@ func acquireSQLiteConstructionPossession(selectedPath string) (sqlitePossession,
 }
 
 func acquireSQLitePossession(selectedPath string, createDatabase bool) (sqlitePossession, error) {
-	return sqlitePossessionForConstruction(context.Background(), selectedPath, createDatabase, false)
+	return sqlitePossessionForConstruction(context.Background(), selectedPath, createDatabase, false, false)
 }
 
-func waitSQLiteConstructionPossession(ctx context.Context, selectedPath string) (sqlitePossession, error) {
-	return sqlitePossessionForConstruction(ctx, selectedPath, true, true)
+func waitSQLiteConstructionPossession(ctx context.Context, selectedPath string, input ...*SQLiteInspectionInput) (sqlitePossession, error) {
+	return sqlitePossessionForConstruction(ctx, selectedPath, true, true, false, input...)
 }
 
-func sqlitePossessionForConstruction(ctx context.Context, selectedPath string, createDatabase, wait bool) (sqlitePossession, error) {
+func waitSQLitePrewritePossession(ctx context.Context, selectedPath string, input ...*SQLiteInspectionInput) (sqlitePossession, error) {
+	return sqlitePossessionForConstruction(ctx, selectedPath, true, true, true, input...)
+}
+
+func sqlitePossessionForConstruction(ctx context.Context, selectedPath string, createDatabase, wait, deferDatabase bool, input ...*SQLiteInspectionInput) (sqlitePossession, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -71,9 +76,43 @@ func sqlitePossessionForConstruction(ctx context.Context, selectedPath string, c
 	}
 
 	coordinatePath := databasePath + sqlitePossessionSuffix
-	coordinate, coordinateInfo, err := lockSQLitePossessionCoordinate(ctx, coordinatePath, true, wait)
+	observed, explicit, err := observeSQLiteConstructionInput(ctx, databasePath, deferDatabase, input)
 	if err != nil {
 		return nil, err
+	}
+	coordinate, coordinateInfo, err := lockSQLitePossessionCoordinate(ctx, coordinatePath, observed == nil || observed.coordinate == nil, wait)
+	if err != nil {
+		return nil, err
+	}
+	if observed != nil {
+		expected := *observed
+		if expected.coordinate == nil {
+			expected.coordinate = coordinateInfo // Only our first coordinate creation is allowed.
+		}
+		if !explicit && observed.Absent() {
+			// A predecessor may lawfully create its first database before joining.
+			// Its observed coordinate, not a speculative absence, is retained.
+			current, err := CaptureSQLiteInspectionInput(ctx, databasePath)
+			if err != nil {
+				return nil, errors.Join(err, releaseSQLitePossessionCoordinate(coordinate))
+			}
+			expected.file = current.file
+		}
+		if err := expected.Revalidate(ctx, databasePath); err != nil {
+			return nil, errors.Join(err, releaseSQLitePossessionCoordinate(coordinate))
+		}
+	}
+	if deferDatabase {
+		current, err := CaptureSQLiteInspectionInput(ctx, databasePath)
+		if err != nil {
+			return nil, errors.Join(err, releaseSQLitePossessionCoordinate(coordinate))
+		}
+		possession := &sqliteFilePossession{databasePath: databasePath, databaseInfo: current.file,
+			coordinate: coordinate, coordinateInfo: coordinateInfo, coordinatePath: coordinatePath, deferredDatabase: true}
+		if err := possession.ProveCurrent(ctx); err != nil {
+			return nil, errors.Join(err, possession.Release())
+		}
+		return possession, nil
 	}
 	database, databaseInfo, err := openSQLiteDatabaseIdentity(databasePath, createDatabase)
 	if err != nil {
@@ -92,6 +131,56 @@ func sqlitePossessionForConstruction(ctx context.Context, selectedPath string, c
 		return nil, errors.Join(err, possession.Release())
 	}
 	return possession, nil
+}
+
+func observeSQLiteConstructionInput(ctx context.Context, databasePath string, deferDatabase bool, input []*SQLiteInspectionInput) (*SQLiteInspectionInput, bool, error) {
+	if len(input) != 0 && input[0] != nil {
+		return input[0], true, nil
+	}
+	if deferDatabase {
+		current, err := CaptureSQLiteInspectionInput(ctx, databasePath)
+		if err != nil || !current.Absent() || current.coordinate != nil {
+			return current, false, err
+		}
+	}
+	return nil, false, nil
+}
+
+func captureSQLiteInspectionCoordinate(path string) (os.FileInfo, error) {
+	info, err := os.Lstat(path + sqlitePossessionSuffix)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if !isSafeSQLitePossessionCoordinate(info) {
+		return nil, sqlitePriorOwnerAmbiguous("SQLite possession coordinate must be one owner-only unaliased regular file")
+	}
+	return info, nil
+}
+
+func (p *sqliteFilePossession) prepareDatabase(ctx context.Context) error {
+	if p == nil {
+		return errors.New("SQLite construction possession is required")
+	}
+	if err := p.ProveCurrent(ctx); err != nil {
+		return err
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if !p.deferredDatabase {
+		return nil
+	}
+	database, info, err := openSQLiteDatabaseIdentity(p.databasePath, true, p.databaseInfo == nil)
+	if err != nil {
+		return err
+	}
+	if p.databaseInfo != nil && !os.SameFile(p.databaseInfo, info) {
+		return errors.Join(errors.New("SQLite selected-store changed before writable construction"), database.Close())
+	}
+	p.database, p.databaseInfo, p.deferredDatabase = database, info, false
+	return nil
 }
 
 func canonicalSQLiteSelectedPath(selectedPath string) (string, error) {
@@ -209,10 +298,13 @@ func lockSQLitePossessionCoordinate(ctx context.Context, path string, create, wa
 	return coordinate, info, nil
 }
 
-func openSQLiteDatabaseIdentity(path string, create bool) (*os.File, os.FileInfo, error) {
+func openSQLiteDatabaseIdentity(path string, create bool, exclusive ...bool) (*os.File, os.FileInfo, error) {
 	flags := unix.O_RDWR | unix.O_CLOEXEC | unix.O_NOFOLLOW | unix.O_NONBLOCK
 	if create {
 		flags |= unix.O_CREAT
+	}
+	if len(exclusive) != 0 && exclusive[0] {
+		flags |= unix.O_EXCL
 	}
 	fd, err := unix.Open(path, flags, 0o600)
 	if err != nil {
@@ -368,13 +460,17 @@ func (p *sqliteFilePossession) ProveCurrent(ctx context.Context) error {
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.released || p.database == nil || p.coordinate == nil {
+	if p.released || p.coordinate == nil || !p.deferredDatabase && p.database == nil {
 		return errors.New("SQLite selected-store possession is released")
 	}
-	if err := proveSQLitePossessionIdentity(
-		p.databasePath, p.databaseInfo, false, "SQLite selected-store file identity changed",
-	); err != nil {
-		return err
+	if p.deferredDatabase && p.databaseInfo == nil {
+		if _, err := os.Lstat(p.databasePath); !errors.Is(err, os.ErrNotExist) {
+			return errors.Join(errors.New("SQLite selected-store appeared during boot checks"), err)
+		}
+	} else {
+		if err := proveSQLitePossessionIdentity(p.databasePath, p.databaseInfo, false, "SQLite selected-store file identity changed"); err != nil {
+			return err
+		}
 	}
 	return proveSQLitePossessionIdentity(
 		p.coordinatePath, p.coordinateInfo, true, "SQLite possession coordinate identity changed",

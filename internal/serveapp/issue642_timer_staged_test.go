@@ -67,7 +67,7 @@ func issue642CaptureTimerStagedOwners(t *testing.T) <-chan issue642TimerStagedOw
 func issue642StagedOrdinaryTimerFork(t *testing.T, backend string) {
 	t.Helper()
 	captured := issue642CaptureTimerStagedOwners(t)
-	_, start := issue2564ServeHarness(t, backend, issue642TimerContinuationSource(t), false)
+	_, start := issue2564ServeHarnessAtLocation(t, backend, issue642TimerContinuationSource(t), false, "", true)
 	process, rt := start()
 	t.Cleanup(func() {
 		if code := process.stop(); code != 0 {

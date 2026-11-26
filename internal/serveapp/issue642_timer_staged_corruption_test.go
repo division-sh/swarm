@@ -30,7 +30,7 @@ func TestIssue642StagedTimerCorruptionRefusesBeforeActivationBothStores(t *testi
 func issue642StagedTimerCorruption(t *testing.T, backend string, fault storetest.StagedWorkflowTimerFault) {
 	t.Helper()
 	captured := issue642CaptureTimerStagedOwners(t)
-	_, start := issue2564ServeHarness(t, backend, issue642TimerContinuationSource(t), false)
+	_, start := issue2564ServeHarnessAtLocation(t, backend, issue642TimerContinuationSource(t), false, "", true)
 	process, rt := start()
 	t.Cleanup(func() {
 		if code := process.stop(); code != 0 {

@@ -86,6 +86,7 @@ profiles:
     - runtime-full
     - delivery-continuation-full
     - serveapp-channel
+    - serveapp-channel-journeys
     - serveapp-channel-neutral
     - serveapp-channel-delivery
     - serveapp-channel-process-temporal
@@ -102,6 +103,7 @@ profiles:
     - conformance-2394-pressure
     - serveapp-other
     - serveapp-other-late
+    - serveapp-other-late-lifecycle
     - serveapp-2564-h1
     - serveapp-2564-h2
     - serveapp-delayed-commit-preservation
@@ -168,6 +170,7 @@ profiles:
     - runtime-full
     - delivery-continuation-full
     - serveapp-channel
+    - serveapp-channel-journeys
     - serveapp-channel-neutral
     - serveapp-channel-delivery
     - serveapp-channel-process-temporal
@@ -191,6 +194,7 @@ profiles:
     - serveapp-i-reporter
     - serveapp-i-reporter-all-commit
     - serveapp-other-late
+    - serveapp-other-late-lifecycle
     - serveapp-2564-h1
     - serveapp-2564-h2
     - serveapp-delayed-commit-preservation
@@ -622,54 +626,20 @@ units:
       - github.com/division-sh/swarm/internal/cliapp
     required_children:
       TestVerifyRunPublicAdmissionBothStores:
-        - sqlite/mutations_false/missing_false/json/uppercase_false
-        - sqlite/mutations_false/missing_false/json/uppercase_true
-        - sqlite/mutations_false/missing_false/text/uppercase_false
-        - sqlite/mutations_false/missing_false/text/uppercase_true
-        - sqlite/mutations_false/missing_false/quiet/uppercase_false
-        - sqlite/mutations_false/missing_false/quiet/uppercase_true
-        - sqlite/mutations_false/missing_true/json/uppercase_false
-        - sqlite/mutations_false/missing_true/json/uppercase_true
-        - sqlite/mutations_false/missing_true/text/uppercase_false
-        - sqlite/mutations_false/missing_true/text/uppercase_true
-        - sqlite/mutations_false/missing_true/quiet/uppercase_false
-        - sqlite/mutations_false/missing_true/quiet/uppercase_true
-        - sqlite/mutations_true/missing_false/json/uppercase_false
-        - sqlite/mutations_true/missing_false/json/uppercase_true
-        - sqlite/mutations_true/missing_false/text/uppercase_false
-        - sqlite/mutations_true/missing_false/text/uppercase_true
-        - sqlite/mutations_true/missing_false/quiet/uppercase_false
-        - sqlite/mutations_true/missing_false/quiet/uppercase_true
-        - sqlite/mutations_true/missing_true/json/uppercase_false
-        - sqlite/mutations_true/missing_true/json/uppercase_true
-        - sqlite/mutations_true/missing_true/text/uppercase_false
-        - sqlite/mutations_true/missing_true/text/uppercase_true
-        - sqlite/mutations_true/missing_true/quiet/uppercase_false
-        - sqlite/mutations_true/missing_true/quiet/uppercase_true
-        - postgres/mutations_false/missing_false/json/uppercase_false
-        - postgres/mutations_false/missing_false/json/uppercase_true
-        - postgres/mutations_false/missing_false/text/uppercase_false
-        - postgres/mutations_false/missing_false/text/uppercase_true
-        - postgres/mutations_false/missing_false/quiet/uppercase_false
-        - postgres/mutations_false/missing_false/quiet/uppercase_true
-        - postgres/mutations_false/missing_true/json/uppercase_false
-        - postgres/mutations_false/missing_true/json/uppercase_true
-        - postgres/mutations_false/missing_true/text/uppercase_false
-        - postgres/mutations_false/missing_true/text/uppercase_true
-        - postgres/mutations_false/missing_true/quiet/uppercase_false
-        - postgres/mutations_false/missing_true/quiet/uppercase_true
-        - postgres/mutations_true/missing_false/json/uppercase_false
-        - postgres/mutations_true/missing_false/json/uppercase_true
-        - postgres/mutations_true/missing_false/text/uppercase_false
-        - postgres/mutations_true/missing_false/text/uppercase_true
-        - postgres/mutations_true/missing_false/quiet/uppercase_false
-        - postgres/mutations_true/missing_false/quiet/uppercase_true
-        - postgres/mutations_true/missing_true/json/uppercase_false
-        - postgres/mutations_true/missing_true/json/uppercase_true
-        - postgres/mutations_true/missing_true/text/uppercase_false
-        - postgres/mutations_true/missing_true/text/uppercase_true
-        - postgres/mutations_true/missing_true/quiet/uppercase_false
-        - postgres/mutations_true/missing_true/quiet/uppercase_true
+        - sqlite/mutations_false/missing_false
+        - sqlite/mutations_false/missing_true
+        - sqlite/mutations_true/missing_false
+        - sqlite/mutations_true/missing_true
+        - sqlite/drift_running
+        - sqlite/drift_paused
+        - sqlite/drift_cancelled
+        - postgres/mutations_false/missing_false
+        - postgres/mutations_false/missing_true
+        - postgres/mutations_true/missing_false
+        - postgres/mutations_true/missing_true
+        - postgres/drift_running
+        - postgres/drift_paused
+        - postgres/drift_cancelled
     count_mode: count-1
     environment_ids: *postgres_gateway_empty
     budget_class: broad
@@ -904,11 +874,17 @@ units:
   serveapp-channel:
     packages:
       - github.com/division-sh/swarm/internal/serveapp
-    # 36644617733 exhausted the unchanged 600s budget after passing whole
-    # delivery families. Keep complete journeys together in distinct units.
-    run: '^Test(Canonical.*|Channel(Connect.*|Draft.*|Duplicate.*|Effect.*|Listener.*|OneBot.*|Onboarding(Admitted.*|Early.*|E2E.*|Crash.*|PendingResetRestartToReadyE2E))|Claude.*|CLI_.*|Composed.*|Configure.*|Connected.*|Create.*|Receiver.*)$'
+    # The second member runs on the same runner with its own unchanged 600s budget.
+    run: '^Test(Channel(Connect.*|Effect.*|Listener.*|Onboarding(Admitted.*|Early.*|E2E.*|Crash.*|PendingResetRestartToReadyE2E))|Claude.*|CLI_.*|Composed.*|Configure.*|Connected.*|Create.*|Receiver.*)$'
     required_children:
       TestReceiverCompositionRestartBothStores: [sqlite, postgres]
+    count_mode: count-1
+    environment_ids: *postgres_gateway_empty
+    budget_class: full
+  serveapp-channel-journeys:
+    packages:
+      - github.com/division-sh/swarm/internal/serveapp
+    run: '^Test(Canonical.*|Channel(Draft.*|Duplicate.*|OneBot.*))$'
     count_mode: count-1
     environment_ids: *postgres_gateway_empty
     budget_class: full
@@ -1117,7 +1093,7 @@ units:
   serveapp-other-late:
     packages:
       - github.com/division-sh/swarm/internal/serveapp
-    run: '^(Test([J-LNOQ].*|P($|[^r].*|r($|[^o].*|o($|[^v].*)))|Issue2394(Held.*|Served(F.*|S.*)|Stop.*|Selected.*)|Issue2564(DecisionCard.*|Served(H3.*|M33.*))|Issue2566ReporterFiniteFixtureCanCloseBothStores|Inbound.*|Initialize.*|Internal.*|M($|[^a].*)|Ma[^i].*|ServedPublicationDirect.*)|Example.*|Fuzz.*)$'
+    run: '^(Test(P($|[^r].*|r($|[^o].*|o($|[^v].*)))|Issue2566ReporterFiniteFixtureCanCloseBothStores|Initialize.*|Internal.*|M($|[^a].*)|Ma[^i].*|ServedPublicationDirect.*)|Example.*|Fuzz.*)$'
     required_children:
       TestPublicCompletionPreAckRetirementBothStores: [default_sqlite/event.publish, default_sqlite/run.start, explicit_postgres/event.publish, explicit_postgres/run.start]
       TestPublicCompletionNativePreAckRetirementBothStores: [default_sqlite/event.publish, default_sqlite/run.start, explicit_postgres/event.publish, explicit_postgres/run.start]
@@ -1136,6 +1112,13 @@ units:
       TestPublicFeedOnlyInvalidAcknowledgedResultBothStores: [default_sqlite, explicit_postgres]
       TestIssue2566ReporterFiniteFixtureCanCloseBothStores: [sqlite, postgres]
       TestManagedEmitPublicationExactScopeBothStores: [default_sqlite/root, default_sqlite/imported, default_sqlite/nested, default_sqlite/template, explicit_postgres/root, explicit_postgres/imported, explicit_postgres/nested, explicit_postgres/template]
+    count_mode: count-1
+    environment_ids: *postgres_gateway_empty
+    budget_class: full
+  serveapp-other-late-lifecycle:
+    packages:
+      - github.com/division-sh/swarm/internal/serveapp
+    run: '^Test([J-LNOQ].*|Issue2394(Held.*|Served(F.*|S.*)|Stop.*|Selected.*)|Issue2564(DecisionCard.*|Served(H3.*|M33.*))|Inbound.*)$'
     count_mode: count-1
     environment_ids: *postgres_gateway_empty
     budget_class: full

@@ -235,9 +235,9 @@ func runOrdinaryRetryProofChild(t *testing.T, req ordinaryRetryRequest) {
 	configureHostWorkspaceProofLifecycle(t)
 	var selected *selectedStoreOwner
 	open := buildStoresForServe
-	buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
+	buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config, bootCheck ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {
 		var err error
-		selected, err = open(ctx, selection, cfg)
+		selected, err = open(ctx, selection, cfg, bootCheck...)
 		return selected, err
 	}
 	ctx, stop := signal.NotifyContext(t.Context(), os.Interrupt, syscall.SIGTERM)

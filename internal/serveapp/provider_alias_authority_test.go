@@ -23,6 +23,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/servedparity"
@@ -47,6 +48,7 @@ func TestProviderAliasesDeliverOnlyLocalAndConnectedConsumersBothStores(t *testi
 		{name: "edge-redirected", rootObserver: true, alphaReceiver: "redirected-receiver"},
 		{name: "edge-to-root", rootObserver: true, alphaReceiver: "."},
 	} {
+		scenario.declaredTarget = true
 		t.Run(scenario.name, func(t *testing.T) {
 			runProviderAliasAuthorityScenario(t, scenario)
 		})
@@ -72,7 +74,21 @@ func runProviderAliasAuthorityScenario(t *testing.T, scenario providerAliasScena
 				t.Cleanup(func() { projectRuntimePersistenceForServe = previous })
 			}
 			root := writeProviderAliasAuthorityFixture(t, scenario)
-			rt := startWorkspaceLiveGatewayProofRuntime(t, backend, root, "", nil, "127.0.0.1:0")
+			rt := startWorkspaceGatewayProofRuntimeWithPosture(t, backend, root, "", nil, "127.0.0.1:0", executionposture.Live, scenario.declaredTarget)
+			var wantStartup, wantBusiness int32
+			if scenario.agents {
+				wantStartup, wantBusiness = 1, 4 // Two raw and two normalized text deliveries.
+			}
+			if scenario.replay {
+				wantBusiness += 2
+			}
+			requireTraffic := func(want int32) {
+				startup, total := rt.providerCalls()
+				if startup != wantStartup || total != wantStartup+want {
+					t.Fatalf("alias provider counts: startup=%d business=%d total=%d; want %d/%d/%d", startup, total-startup, total, wantStartup, want, wantStartup+want)
+				}
+			}
+			requireTraffic(0)
 			requireIndependentStandingRootTrees(t, rt, scenario)
 			for aliasIndex, alias := range []string{"alpha", "beta"} {
 				account := "420079"
@@ -193,6 +209,7 @@ func runProviderAliasAuthorityScenario(t *testing.T, scenario providerAliasScena
 			if scenario.publicConnected {
 				requireProviderAliasRootConnection(t, rt, scenario.alphaReceiver)
 			}
+			requireTraffic(wantBusiness)
 		})
 	}
 }
@@ -256,6 +273,7 @@ func requireIndependentStandingRootTrees(t *testing.T, rt servedWorkspaceProofRu
 
 type providerAliasScenario struct {
 	name                  string
+	declaredTarget        bool
 	rawConnected          bool
 	rootObserver          bool
 	rootProvider          bool

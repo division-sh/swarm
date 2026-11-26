@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -11,14 +12,24 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/division-sh/swarm/internal/packartifact"
+	"github.com/division-sh/swarm/internal/runtime"
+	"github.com/division-sh/swarm/internal/runtime/agenttopology"
+	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/bootverify"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/destructivereset"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/backendselection"
 	"github.com/division-sh/swarm/internal/store/construction"
+	"github.com/division-sh/swarm/internal/store/devscratch"
+	storeselected "github.com/division-sh/swarm/internal/store/selected"
 	"github.com/division-sh/swarm/internal/store/selected/selectedtest"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
@@ -89,6 +100,33 @@ func newVerifyCompositionBootStore(t *testing.T, backend, root string, schema st
 }
 
 func TestVerifyPublicListenerSetMatchesBootAndReleasesBindings(t *testing.T) {
+	t.Run("borrowed_api_handle", func(t *testing.T) {
+		listener, err := ListenServeHTTPListener("api", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer listener.Close()
+		address := listener.Addr().String()
+		if err := inspectBorrowedAPIListener(address, listener); err != nil {
+			t.Fatal(err)
+		}
+		if err := inspectBorrowedAPIListener("0.0.0.0:1", listener); err == nil {
+			t.Fatal("borrowed handle bypassed exact address admission")
+		}
+		if err := listener.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if err := inspectBorrowedAPIListener(address, listener); err == nil {
+			t.Fatal("closed borrowed handle was admitted")
+		}
+		reclaimed, err := ListenServeHTTPListener("api", address)
+		if err != nil {
+			t.Fatalf("borrowed-handle inspection retained its socket: %v", err)
+		}
+		if err := reclaimed.Close(); err != nil {
+			t.Fatal(err)
+		}
+	})
 	for _, mode := range []string{"same_fixed", "wildcard_specific", "specific_wildcard", "distinct_fixed", "ephemeral"} {
 		t.Run(mode, func(t *testing.T) {
 			isolateCLIAPIConfigEnv(t)
@@ -136,7 +174,7 @@ func TestVerifyPublicListenerSetMatchesBootAndReleasesBindings(t *testing.T) {
 			configPath := filepath.Join(t.TempDir(), "runtime.yaml")
 			writeRuntimeConfigText(t, configPath, configText+fmt.Sprintf("llm: {backend: anthropic}\nserve: {api_listen_addr: %q, mcp_listen_addr: %q, api_token_file: %q}\n", api, mcp, writeCLIAPITokenFile(t, "composition-token")))
 			var out, diagnostic bytes.Buffer
-			code := executeRootCommand(context.Background(), root, []string{"verify", root, "--config", configPath, "--json"}, &out, &diagnostic)
+			code := renderServeChecksForTest(t, context.Background(), root, root, configPath, "json", &out, &diagnostic)
 			var result verifyCommandResult
 			if err := json.Unmarshal(out.Bytes(), &result); err != nil {
 				t.Fatalf("public result: %v output=%s stderr=%s", err, &out, &diagnostic)
@@ -210,8 +248,95 @@ func TestVerifyPublicExistingStoreReportsDeploymentPreparationBothStores(t *test
 				if err != nil || before.Fresh || (len(before.MissingDeploymentTables) == 0) != prepared {
 					t.Fatalf("boot inspection: %+v %v", before, err)
 				}
+				t.Run(fmt.Sprintf("serve_stage_held=%t", prepared), func(t *testing.T) {
+					cfg, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: root, ExplicitPath: configPath})
+					if err != nil {
+						t.Fatal(err)
+					}
+					paths, err := ResolveCLISourcePaths(root, CLISourcePathOptions{SourceRoot: root, ConfigPath: configPath})
+					if err != nil {
+						t.Fatal(err)
+					}
+					request, _, err := prepareVerifySelectedStoreInspection(ctx, root, paths, cfg, cliSwarmDirOptions{}, semanticview.Wrap(bundle))
+					if err != nil {
+						t.Fatal(err)
+					}
+					base, err := LoadConfiguredPlatformPackBase(root, cfg)
+					if err != nil {
+						t.Fatal(err)
+					}
+					bases, err := packartifact.NewPlatformPackBaseGenerationOwner(base)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if prepared {
+						capability, err := owner.AcquireProcessCapability(ctx, startupownership.AcquireRequest{OwnerID: "stage-held-control", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString()})
+						if err != nil {
+							t.Fatal(err)
+						}
+						before, err := capability.Evidence()
+						if err != nil {
+							t.Fatal(err)
+						}
+						defer func() {
+							after, err := capability.Evidence()
+							if err != nil || !reflect.DeepEqual(before, after) {
+								t.Errorf("check changed held authority: %v", err)
+							}
+							if err := capability.Release(ctx); err != nil {
+								t.Error(err)
+							}
+						}()
+					}
+					opts := DefaultServeOptions()
+					opts.SourceRoot, opts.ConfigPath, opts.DryRun = root, configPath, true
+					opts.APIListenAddr, opts.MCPListenAddr = "127.0.0.1:0", "127.0.0.1:0"
+					input := ServeCheckStageRequest{Repo: root, Paths: paths, Config: cfg, Options: opts, Selection: request.Selection, PackBases: bases}
+					stage, err := InspectServeCheckStage(ctx, input)
+					if err != nil || stage.Decision().FailureClass != "" {
+						t.Fatalf("serve-owned stage failed: err=%v report=%+v", err, stage.Validation.BootReport)
+					}
+					if err := stage.Revalidate(ctx, input); err != nil {
+						t.Fatalf("unchanged inputs refused: %v", err)
+					}
+					if err := os.WriteFile(path, append(append([]byte(nil), body...), '\n'), 0o600); err != nil {
+						t.Fatal(err)
+					}
+					if err := stage.Revalidate(ctx, input); err == nil {
+						t.Fatal("changed source reused check observations")
+					}
+					if err := os.WriteFile(path, body, 0o600); err != nil {
+						t.Fatal(err)
+					}
+					after, err := owner.InspectSchema(ctx, complete)
+					if err != nil || !reflect.DeepEqual(before, after) {
+						t.Fatalf("stage changed native schema: %v", err)
+					}
+					if backend == "sqlite" && !prepared {
+						coordinate, err := devscratch.Resolve(root)
+						if err != nil {
+							t.Fatal(err)
+						}
+						if err := os.MkdirAll(filepath.Dir(coordinate.DatabasePath), 0700); err != nil {
+							t.Fatal(err)
+						}
+						predecessor := []byte("disposable predecessor, not a retained SQLite source")
+						if err := os.WriteFile(coordinate.DatabasePath, predecessor, 0600); err != nil {
+							t.Fatal(err)
+						}
+						input.Options.Dev = true
+						input.Selection = backendselection.Selection{Backend: backendselection.BackendSQLite, SQLitePath: coordinate.DatabasePath, SQLitePathSource: backendselection.SourceProjectScratch}
+						scratch, err := InspectServeCheckStage(ctx, input)
+						if err != nil || scratch.Failure() != nil || scratch.BootStoreInput() != nil {
+							t.Fatalf("disposable predecessor became retained application state: %v %v", err, scratch.Failure())
+						}
+						if actual, err := os.ReadFile(coordinate.DatabasePath); err != nil || string(actual) != string(predecessor) {
+							t.Fatalf("dry run replaced the predecessor: %v", err)
+						}
+					}
+				})
 				var out, diagnostic bytes.Buffer
-				code := executeRootCommand(ctx, root, []string{"verify", root, "--config", configPath, "--json"}, &out, &diagnostic)
+				code := renderServeChecksForTest(t, ctx, root, root, configPath, "json", &out, &diagnostic)
 				var result verifyCommandResult
 				if err := json.Unmarshal(out.Bytes(), &result); err != nil || code != 0 || !result.OK || !result.AdmissionComplete {
 					t.Fatalf("preparable state refused: code=%d result=%+v err=%v stderr=%s", code, result, err, &diagnostic)
@@ -232,9 +357,18 @@ func TestVerifyPublicExistingStoreReportsDeploymentPreparationBothStores(t *test
 				if err != nil || !reflect.DeepEqual(before, after) {
 					t.Fatalf("verify changed schema: before=%+v after=%+v err=%v", before, after, err)
 				}
-				for _, observation := range result.Observations {
-					if observation.CheckID == "selected_store_schema" && observation.Status != bootverify.AdmissionPassed {
-						t.Fatalf("preparation mistaken for invalidity: %+v", observation)
+				for _, check := range []string{"selected_store_access", "selected_store_schema"} {
+					passed := false
+					for _, observation := range result.Observations {
+						if observation.CheckID == check {
+							if observation.Status != bootverify.AdmissionPassed {
+								t.Fatalf("native store read did not pass: %+v", observation)
+							}
+							passed = true
+						}
+					}
+					if !passed {
+						t.Fatalf("missing explicit %s observation", check)
 					}
 				}
 				if !prepared {
@@ -259,6 +393,36 @@ func TestVerifyPublicExistingStoreReportsDeploymentPreparationBothStores(t *test
 				storetest.RequireRun(t, original, owner, storetest.RunFixture{
 					RunID: runID, Origin: storetest.ScenarioSetupOrigin(), Artifact: bundle.SourceArtifact,
 				})
+				reader := owner.(destructivereset.InventoryReader)
+				operation, err := destructivereset.NewOperation(destructivereset.Request{
+					OperationID: uuid.NewString(), ActorTokenID: "operator", RequestHash: "phase-aware-checks", RequestedAt: time.Now().UTC(), IncludeSourceArtifactsSet: true,
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				plan, err := (destructivereset.InventoryPlanner{Reader: reader}).BuildPlan(ctx, operation.Request)
+				if err != nil {
+					t.Fatal(err)
+				}
+				operation.Phase, operation.Revision = destructivereset.PhasePlanned, 2
+				operation.Plan = &destructivereset.Result{OperationName: destructivereset.DefaultOperationName, PlannedAt: operation.Request.RequestedAt, Plan: plan}
+				if _, err := inspectServeResetDiscard(ctx, reader, operation); err != nil {
+					t.Fatalf("unchanged pre-cleanup population refused: %v", err)
+				}
+				storetest.RequireRun(t, original, owner, storetest.RunFixture{
+					RunID: uuid.NewString(), Origin: storetest.ScenarioSetupOrigin(), Artifact: bundle.SourceArtifact,
+				})
+				if _, err := inspectServeResetDiscard(ctx, reader, operation); !errors.Is(err, destructivereset.ErrOperationChanged) {
+					t.Fatalf("pre-cleanup new membership was accepted: %v", err)
+				}
+				operation.Phase, operation.Revision = destructivereset.PhaseCleanupCommitted, 4
+				operation.Quiescence = &destructivereset.QuiescenceResult{OperationName: destructivereset.DefaultOperationName}
+				operation.Cleanup = &destructivereset.CleanupResult{OperationName: destructivereset.DefaultOperationName}
+				beforeOperation := operation
+				discard, err := inspectServeResetDiscard(ctx, reader, operation)
+				if err != nil || len(discard.CleanupRuns) != 0 || !reflect.DeepEqual(beforeOperation, operation) {
+					t.Fatalf("committed cleanup was reapplied or hid current survivors: %+v, %v", discard, err)
+				}
 				if err := process.Release(ctx); err != nil {
 					t.Fatal(err)
 				}
@@ -266,7 +430,7 @@ func TestVerifyPublicExistingStoreReportsDeploymentPreparationBothStores(t *test
 					t.Fatal(err)
 				}
 				var out, diagnostic bytes.Buffer
-				code := executeRootCommand(ctx, root, []string{"verify", root, "--config", configPath, "--json"}, &out, &diagnostic)
+				code := renderServeChecksForTest(t, ctx, root, root, configPath, "json", &out, &diagnostic)
 				var result verifyCommandResult
 				if err := json.Unmarshal(out.Bytes(), &result); err != nil || code != 0 || !result.OK || !result.AdmissionComplete {
 					t.Fatalf("compatible retained run refused: code=%d result=%+v err=%v stderr=%s", code, result, err, &diagnostic)
@@ -281,6 +445,202 @@ func TestVerifyPublicExistingStoreReportsDeploymentPreparationBothStores(t *test
 					t.Fatalf("read-only upgrade inspection changed admitted source: %+v, %v", availability, err)
 				}
 			})
+			for _, survivor := range []string{"valid", "invalid_kept_source", "clear_to_empty"} {
+				t.Run("committed_cleanup_snapshot_"+survivor, func(t *testing.T) {
+					native, text := newVerifyCompositionBootStore(t, backend, root, complete)
+					configPath := filepath.Join(t.TempDir(), "runtime.yaml")
+					writeRuntimeConfigText(t, configPath, text+"llm: {backend: anthropic}\n")
+					runtimeID := uuid.NewString()
+					process, err := native.AcquireProcessCapability(ctx, startupownership.AcquireRequest{
+						OwnerID: "cleanup-survivors", BootID: uuid.NewString(), RuntimeInstanceID: runtimeID,
+					})
+					if err != nil {
+						t.Fatal(err)
+					}
+					t.Cleanup(func() { _ = process.Release(context.Background()) })
+					original, err := startupownership.WithProcessMutationAuthority(authoractivity.WithScope(ctx, authoractivity.RuntimeScope(runtimeID)), process)
+					if err != nil {
+						t.Fatal(err)
+					}
+					runID := uuid.NewString()
+					storetest.RequireRun(t, original, native, storetest.RunFixture{RunID: runID, Origin: storetest.ScenarioSetupOrigin(), Artifact: bundle.SourceArtifact})
+					rooted, err := bundle.SourceArtifact.RootedSource()
+					if err != nil {
+						t.Fatal(err)
+					}
+					coordinate, err := agenttopology.NewSourceCoordinate(rooted.Admission())
+					if err != nil {
+						t.Fatal(err)
+					}
+					sources, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{coordinate}, nil)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if _, err := process.InstallCompleteSourceSet(ctx, agenttopology.SourceSetCommitRequest{OperationID: uuid.NewString(), Plan: sources}); err != nil {
+						t.Fatal(err)
+					}
+					operation, err := process.AdmitResetOperation(ctx, destructivereset.Request{
+						OperationID: uuid.NewString(), ActorTokenID: "operator", RequestHash: "snapshot-survivors", RequestedAt: time.Now().UTC(), IncludeSourceArtifactsSet: true, IncludeSourceArtifacts: survivor == "clear_to_empty",
+					})
+					if err != nil {
+						t.Fatal(err)
+					}
+					if !reflect.DeepEqual(operation.SourceSet, &sources) {
+						t.Fatalf("reset did not capture the installed source set: %+v", operation)
+					}
+					reader := native.(destructivereset.InventoryReader)
+					plan, err := (destructivereset.InventoryPlanner{Reader: reader}).BuildPlan(ctx, operation.Request)
+					if err != nil {
+						t.Fatal(err)
+					}
+					planned := operation
+					planned.Phase, planned.Revision = destructivereset.PhasePlanned, operation.Revision+1
+					planned.Plan = &destructivereset.Result{OperationName: destructivereset.DefaultOperationName, PlannedAt: operation.Request.RequestedAt, IncludeSourceArtifacts: operation.Request.IncludeSourceArtifacts, Plan: plan}
+					if err := process.AdvanceResetOperation(ctx, operation, planned); err != nil {
+						t.Fatal(err)
+					}
+					quiescence, err := native.(destructivereset.QuiescenceStore).ApplyDestructiveResetQuiescence(original, destructivereset.QuiescenceRequest{
+						OperationID: operation.Request.OperationID, ActorTokenID: operation.Request.ActorTokenID, RequestedAt: operation.Request.RequestedAt, Result: *planned.Plan,
+					})
+					if err != nil {
+						t.Fatal(err)
+					}
+					var topology *agenttopology.SourceSetCommitRequest
+					if operation.Request.IncludeSourceArtifacts {
+						empty, err := agenttopology.EmptySourceSetPlan()
+						if err != nil {
+							t.Fatal(err)
+						}
+						topology = &agenttopology.SourceSetCommitRequest{OperationID: operation.Request.OperationID, ExpectedRevision: sources.Revision, Plan: empty}
+					}
+					if _, err := process.ApplyDestructiveResetCleanup(original, destructivereset.CleanupRequest{
+						OperationID: operation.Request.OperationID, ActorTokenID: operation.Request.ActorTokenID, RequestedAt: operation.Request.RequestedAt, Result: *planned.Plan, Quiescence: quiescence,
+					}, topology); err != nil {
+						t.Fatal(err)
+					}
+					committed, err := process.ReadResetOperation(ctx, operation.Request.OperationID)
+					if err != nil || committed.Phase != destructivereset.PhaseCleanupCommitted || committed.Cleanup == nil {
+						t.Fatalf("cleanup did not commit through its owner: %+v, %v", committed, err)
+					}
+					artifact := bundle.SourceArtifact
+					if survivor == "invalid_kept_source" {
+						invalidRoot := canonicalrouting.CopyExample(t, canonicalrouting.RootIngress)
+						nodes := filepath.Join(invalidRoot, "nodes.yaml")
+						validNodes, err := os.ReadFile(nodes)
+						if err != nil {
+							t.Fatal(err)
+						}
+						writeRuntimeConfigText(t, nodes, string(validNodes)+"\ninvalid-survivor:\n  item.received:\n    logic: retired\n")
+						artifact, err = sourceartifact.AdmitDirectory(invalidRoot)
+						if err != nil {
+							t.Fatalf("admit canonical survivor bytes: %v", err)
+						}
+					}
+					// Reuse a member of P after cleanup. Its current row must not be
+					// discarded by the old cleanup receipt's membership list.
+					storetest.RequireRun(t, original, native, storetest.RunFixture{RunID: runID, Origin: storetest.ScenarioSetupOrigin(), Artifact: artifact})
+					before, err := reader.ReadResetInventory(ctx)
+					if err != nil {
+						t.Fatal(err)
+					}
+					cfg, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: root, ExplicitPath: configPath})
+					if err != nil {
+						t.Fatal(err)
+					}
+					paths, err := ResolveCLISourcePaths(root, CLISourcePathOptions{SourceRoot: root, ConfigPath: configPath})
+					if err != nil {
+						t.Fatal(err)
+					}
+					request, _, err := prepareVerifySelectedStoreInspection(ctx, root, paths, cfg, cliSwarmDirOptions{}, nil)
+					if err != nil {
+						t.Fatal(err)
+					}
+					base, err := LoadConfiguredPlatformPackBase(root, cfg)
+					if err != nil {
+						t.Fatal(err)
+					}
+					bases, err := packartifact.NewPlatformPackBaseGenerationOwner(base)
+					if err != nil {
+						t.Fatal(err)
+					}
+					inspection, err := storeselected.OpenAdmissionInspection(ctx, request)
+					if err != nil {
+						t.Fatal(err)
+					}
+					var source semanticview.Source
+					_, inspectErr := inspection.Inspect(ctx, complete, func(snapshot *storeselected.AdmissionSnapshot) error {
+						selected, observed, err := inspectServeResetSource(ctx, ServeCheckStageRequest{Repo: root, PackBases: bases}, snapshot)
+						if err != nil {
+							return err
+						}
+						if !reflect.DeepEqual(observed, &committed) {
+							t.Fatalf("reset source selection did not read the exact committed operation: %+v", observed)
+						}
+						kept, err := observed.RecoverySourceSet()
+						if err != nil {
+							return err
+						}
+						if survivor == "clear_to_empty" {
+							if selected != nil || len(kept.Sources) != 0 || len(kept.Agents) != 0 {
+								t.Fatal("clear reset selected an executable source")
+							}
+						} else {
+							if selected == nil || !reflect.DeepEqual(kept, sources) || selected.SourceArtifact.BundleHash() != coordinate.BundleHash {
+								t.Fatal("kept reset selected a source outside its captured set")
+							}
+							selectedRoot, err := selected.RootedSource()
+							if err != nil || selectedRoot.Admission().Reference() != coordinate.RootReference() {
+								t.Fatalf("kept source changed the captured root: %v", err)
+							}
+							source = semanticview.Wrap(selected)
+						}
+						return nil
+					})
+					if err := errors.Join(inspectErr, inspection.Close()); err != nil {
+						t.Fatal(err)
+					}
+					profile, err := cfg.Config.LLMBackendProfile()
+					if err != nil {
+						t.Fatal(err)
+					}
+					report := runtime.WorkflowContractValidationResult{BootReport: bootverify.Report{Purpose: bootverify.ExecutionValidation, SourceArtifactHash: bundle.SourceArtifact.BundleHash()}}
+					inspectVerifySelectedStore(ctx, root, paths, cfg, cliSwarmDirOptions{}, source, runtime.WorkflowContractValidationOptions{LLMProfile: profile}, bases, nil, false, &report,
+						serveStoreInspection{selection: request.Selection, dryRun: true, reset: &committed})
+					failed, exactRefusal := false, false
+					seen := map[string]bool{}
+					for _, observation := range report.BootReport.Observations {
+						failed = failed || observation.Status == bootverify.AdmissionFailed || observation.Status == bootverify.AdmissionUnavailable
+						seen[observation.CheckID] = observation.Status == bootverify.AdmissionPassed
+						if observation.Status == bootverify.AdmissionFailed {
+							if survivor == "invalid_kept_source" && observation.CheckID == "retained_source_integrity" &&
+								observation.Subject == "run:"+runID+"/source:"+artifact.BundleHash() && strings.Contains(observation.Reason, `handler field "logic" is not supported`) {
+								exactRefusal = true
+							}
+							if survivor == "clear_to_empty" && observation.CheckID == "pinned_source_admission" && strings.Contains(observation.Reason, "surviving runs or deliveries") {
+								exactRefusal = true
+							}
+						}
+					}
+					if failed != (survivor != "valid") || (survivor != "valid" && !exactRefusal) {
+						t.Fatalf("committed cleanup concealed or invented survivor refusal: %+v", report.BootReport)
+					}
+					if survivor == "valid" {
+						for _, check := range bootverify.SelectedStoreDependentAdmissionChecks() {
+							if !seen[check.ID] {
+								t.Fatalf("surviving population did not pass %s: %+v", check.ID, report.BootReport)
+							}
+						}
+					}
+					after, err := reader.ReadResetInventory(ctx)
+					if err != nil || !reflect.DeepEqual(before, after) {
+						t.Fatalf("snapshot changed surviving inventory: %v", err)
+					}
+					afterOperation, err := process.ReadResetOperation(ctx, operation.Request.OperationID)
+					if err != nil || !reflect.DeepEqual(committed, afterOperation) {
+						t.Fatalf("snapshot advanced the committed operation: %v", err)
+					}
+				})
+			}
 		})
 	}
 }

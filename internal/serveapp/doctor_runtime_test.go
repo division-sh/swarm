@@ -10,7 +10,9 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/cliapp"
+	"github.com/division-sh/swarm/internal/config"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 )
 
 func setDoctorEmptyProviderSecrets(t *testing.T) {
@@ -34,6 +36,18 @@ func setDoctorProviderSecrets(t *testing.T, values map[string]string) {
 }
 
 func TestRunServeRuntimeConsumesLocalClaudePreflightAfterBundleDecision(t *testing.T) {
+	unsetStoreSelectorEnv(t)
+	storePath := filepath.Join(t.TempDir(), "runtime.db")
+	if _, err := os.Lstat(storePath); !os.IsNotExist(err) {
+		t.Fatalf("expected absent SQLite database before checks: %v", err)
+	}
+	previous := buildStoresForServe
+	var selected storebackend.Selection
+	buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, config *config.Config, checked ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {
+		selected = selection
+		return previous(ctx, selection, config, checked...)
+	}
+	t.Cleanup(func() { buildStoresForServe = previous })
 	dockerBin := configureDoctorDockerStub(t)
 	setDoctorEmptyProviderSecrets(t)
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
@@ -47,7 +61,7 @@ func TestRunServeRuntimeConsumesLocalClaudePreflightAfterBundleDecision(t *testi
 
 	var out bytes.Buffer
 	code := runFrom(context.Background(), invocation, cliapp.ServeOptions{
-		ConfigPath:    writeDoctorClaudeConfig(t, dockerBin),
+		ConfigPath:    writeDoctorClaudeConfig(t, dockerBin, storePath),
 		SourceRoot:    filepath.Join(repoRootForTest(), doctorAgentContractsPath),
 		StoreMode:     "not-a-store",
 		APIListenAddr: "127.0.0.1:0",
@@ -61,13 +75,19 @@ func TestRunServeRuntimeConsumesLocalClaudePreflightAfterBundleDecision(t *testi
 	if code == 0 {
 		t.Fatalf("Run unexpectedly succeeded\noutput:\n%s", out.String())
 	}
-	if !strings.Contains(out.String(), "claude_cli preflight: failed") || !strings.Contains(out.String(), "missing_backend_credential") {
+	if !strings.Contains(out.String(), "provider_credential_admission") || !strings.Contains(out.String(), "provider_credential_missing") {
 		t.Fatalf("serve output missing shared local preflight failure:\n%s", out.String())
 	}
-	for _, want := range []string{"db_connection", "bundle_load", "workspace backend: docker"} {
+	for _, want := range []string{"admission validation failed", "startup execution not performed", "workspace_image_observation"} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("serve output missing preflight ordering proof %q:\n%s", want, out.String())
 		}
+	}
+	if selected.Backend != storebackend.BackendSQLite || selected.SQLitePath != storePath {
+		t.Fatalf("checks did not reach the selected SQLite database: %+v", selected)
+	}
+	if _, err := os.Lstat(selected.SQLitePath); !os.IsNotExist(err) {
+		t.Fatalf("failed checks did not preserve the absent SQLite database: %v", err)
 	}
 }
 
@@ -117,10 +137,13 @@ func TestRunServeRuntimeRejectsDeclaredDevelopmentPackInventoryBeforeStoreSelect
 
 const doctorAgentContractsPath = "tests/tier8-boot-verification/test-boot-prompt-stub"
 
-func writeDoctorClaudeConfig(t *testing.T, dockerBin string) string {
+func writeDoctorClaudeConfig(t *testing.T, dockerBin string, database ...string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "claude.yaml")
 	storePath := filepath.Join(t.TempDir(), "runtime.db")
+	if len(database) != 0 {
+		storePath = database[0]
+	}
 	workspace := []string{
 		"workspace:",
 		"  image: doctor-test-image:latest",

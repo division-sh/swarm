@@ -24,6 +24,9 @@ import (
 func TestAudit2277ForkDurableResultBypassesGenericCompletionBothStores(t *testing.T) {
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
+			if backend == servedparity.BackendExplicitPostgres {
+				useDeclaredServePostgresTarget(t)
+			}
 			rt := startServedControlProofRuntimeWithFixture(t, backend, func(t *testing.T) string { return canonicalrouting.CopyRootIngressServedFollowUp(t) })
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"bundle_hash": rt.BundleHash, "event_name": "item.received", "payload": map[string]any{"item_id": "hold"}, "idempotency_key": "audit2277-source"})
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
@@ -109,16 +112,22 @@ func TestAudit2277StoppedRunReadinessRestart(t *testing.T) {
 				captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { db, _, _ = selectedRuntimeStoreForTest(t, p) })
 			} else {
 				dsn, _, cleanup := testutil.StartPostgres(t)
+				recordServePostgresFixture(t, dsn)
 				t.Cleanup(cleanup)
 				original := buildStoresForServe
-				buildStoresForServe = func(_ context.Context, _ storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
+				buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config, bootCheck ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {
+					target, err := checkedPostgresFixtureDSN(ctx, cfg, dsn, true, bootCheck)
+					if err != nil {
+						return nil, err
+					}
 					pg, err := store.NewPostgresStore(dsn)
 					if err != nil {
 						return nil, err
 					}
-					storetest.BootstrapPostgresRuntimeStore(t, pg)
 					db = storetest.DatabaseForTest(pg)
-					return openSelectedPostgresOwner(t, dsn, db, cfg), nil
+					owner := openSelectedPostgresOwner(t, target, db, cfg, bootCheck...)
+					storetest.BootstrapPostgresRuntimeStore(t, pg)
+					return owner, nil
 				}
 				t.Cleanup(func() { buildStoresForServe = original })
 				opts.ConfigPath = writeServeRuntimeTestConfig(t)

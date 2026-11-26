@@ -178,8 +178,12 @@ func selectedStoreBoundaryViolations(path, body string) []string {
 		"internal/serveapp/channel_deployment_unsupported.go": true,
 		// Verification borrows a revocable, consistent read-only inspection;
 		// construction and concrete backend handles remain forbidden here.
-		"internal/cliapp/verify_deployment_store.go": true,
-		"internal/cliapp/verify_run.go":              true,
+		"internal/cliapp/verify_deployment_store.go":   true,
+		"internal/cliapp/serve_check_stage.go":         true,
+		"internal/cliapp/serve_check_source.go":        true,
+		"internal/cliapp/serve_check_reset.go":         true,
+		"internal/cliapp/serve_construction_checks.go": true,
+		"internal/cliapp/verify_run.go":                true,
 	}
 	insideSelected := strings.HasPrefix(path, "internal/store/selected/")
 	insideStore := strings.HasPrefix(path, "internal/store/")

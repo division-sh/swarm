@@ -57,6 +57,7 @@ type admissionInspectionPort interface {
 	PipelineObligations() pipelineobligation.Store
 	ObserveOrdinaryRunSource(context.Context, correlation.SourceArtifactFact, string) (bool, error)
 	channelonboarding.RetainedActivationReader
+	ListDeploymentChannelOperations(context.Context) ([]channelonboarding.Operation, error)
 	channelonboarding.PendingTeardownReader
 }
 
@@ -64,13 +65,15 @@ type admissionInspectionPort interface {
 // Its reads are scoped to one consistent callback; momentary possession is a
 // separate, joined observation outside that MVCC snapshot.
 type AdmissionInspection struct {
-	store admissionInspectionPort
+	store  admissionInspectionPort
+	sqlite *storeconstruction.SQLiteInspectionInput
 }
 
 // AbsentSQLiteStore is a non-creating observation, not an empty database or
 // permission to skip the independent construction checks at serve time.
 type AbsentSQLiteStore struct {
-	Path string
+	Path  string
+	input *storeconstruction.SQLiteInspectionInput
 }
 
 func (e *AbsentSQLiteStore) Error() string {
@@ -78,20 +81,27 @@ func (e *AbsentSQLiteStore) Error() string {
 }
 
 func OpenAdmissionInspection(ctx context.Context, req AuthorityRequest) (*AdmissionInspection, error) {
+	var input *storeconstruction.SQLiteInspectionInput
 	if req.Selection.Backend == storebackend.BackendSQLite {
-		absent, err := storeconstruction.ObserveSQLiteInspectionAbsence(ctx, req.Selection.SQLitePath)
+		var err error
+		input, err = storeconstruction.CaptureSQLiteInspectionInput(ctx, req.Selection.SQLitePath)
 		if err != nil {
 			return nil, err
 		}
-		if absent {
-			return nil, &AbsentSQLiteStore{Path: req.Selection.SQLitePath}
+		if input.Absent() {
+			return nil, &AbsentSQLiteStore{Path: req.Selection.SQLitePath, input: input}
 		}
 	}
 	selected, err := openInspectionStore(ctx, req)
 	if err != nil {
 		return nil, err
 	}
-	return &AdmissionInspection{store: selected}, nil
+	if input != nil {
+		if err := input.Revalidate(ctx, req.Selection.SQLitePath); err != nil {
+			return nil, errors.Join(err, selected.Close())
+		}
+	}
+	return &AdmissionInspection{store: selected, sqlite: input}, nil
 }
 
 func openInspectionStore(ctx context.Context, req AuthorityRequest) (admissionInspectionPort, error) {
@@ -101,7 +111,7 @@ func openInspectionStore(ctx context.Context, req AuthorityRequest) (admissionIn
 	case storebackend.BackendSQLite:
 		selected, err = storeconstruction.OpenSQLiteRuntimeReadOnly(req.Selection.SQLitePath)
 	case storebackend.BackendPostgres:
-		selected, err = storeconstruction.OpenPostgresReadOnly(req.PostgresDSN)
+		selected, err = storeconstruction.OpenPostgresReadOnly(req.PostgresDSN, req.CheckTarget)
 	default:
 		return nil, errors.New("selected store backend is required")
 	}
@@ -127,7 +137,7 @@ func (s *AdmissionInspection) Inspect(ctx context.Context, request store.SchemaB
 		}
 		scoped, cancel := context.WithCancel(ctx)
 		defer cancel()
-		return observe(&AdmissionSnapshot{ctx: scoped, store: s.store, fresh: schema.Fresh})
+		return observe(&AdmissionSnapshot{ctx: scoped, store: s.store, fresh: schema.Fresh, schema: schema, request: request, sqlite: s.sqlite})
 	})
 	return schema, err
 }
@@ -152,9 +162,12 @@ func (s *AdmissionInspection) ProbePossession(ctx context.Context) (startupowner
 // AdmissionSnapshot cannot expose writes, raw SQL, process possession or a
 // runtime projection. Passing another context cannot escape its read snapshot.
 type AdmissionSnapshot struct {
-	ctx   context.Context
-	store admissionInspectionPort
-	fresh bool
+	ctx     context.Context
+	store   admissionInspectionPort
+	fresh   bool
+	schema  store.SchemaInspection
+	request store.SchemaBootstrapRequest
+	sqlite  *storeconstruction.SQLiteInspectionInput
 }
 
 func (s *AdmissionSnapshot) ReadBundleUpgradeState(ctx context.Context, runID string, source semanticview.Source) (runbundle.UpgradeState, error) {
@@ -225,6 +238,15 @@ func (s *AdmissionSnapshot) ListChannelOnboardingOperations(ctx context.Context)
 	}
 	defer done()
 	return s.store.ListChannelOnboardingOperations(ctx)
+}
+
+func (s *AdmissionSnapshot) ListDeploymentChannelOperations(ctx context.Context) ([]channelonboarding.Operation, error) {
+	ctx, done, err := s.readContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer done()
+	return s.store.ListDeploymentChannelOperations(ctx)
 }
 
 func (s *AdmissionSnapshot) ListCurrentConnectedChannelActivations(ctx context.Context) ([]channelonboarding.ConnectedChannelActivation, error) {

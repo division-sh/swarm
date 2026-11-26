@@ -32,12 +32,12 @@ func TestReceiverCompositionMixedAgentBothStores(t *testing.T) {
 			} else {
 				dsn := testutil.StartEmptyPostgresDSN(t)
 				previous := buildStoresForServe
-				buildStoresForServe = func(ctx context.Context, selection backendselection.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
+				buildStoresForServe = func(ctx context.Context, selection backendselection.Selection, cfg *config.Config, bootCheck ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {
 					if selection.Backend != backendselection.BackendPostgres {
 						t.Fatal("mixed receiver fixture selected another backend")
 					}
 					return storeselected.OpenRuntime(ctx, storeselected.RuntimeRequest{
-						Selection: selection, PostgresDSN: dsn, SessionLockTTL: runtimeSessionLockTTL(cfg),
+						Selection: selection, PostgresDSN: dsn, SessionLockTTL: runtimeSessionLockTTL(cfg), BootCheckInput: firstBootCheckInput(bootCheck),
 					})
 				}
 				t.Cleanup(func() { buildStoresForServe = previous })

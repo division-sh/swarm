@@ -46,14 +46,23 @@ func runProviderEvidenceJourney(t *testing.T, backend servedparity.Backend, cell
 	unsetEnvForTest(t, realModelCellsEnv)
 	unsetEnvForTest(t, realModelTransportEnv)
 	baseURL := "https://api.deepseek.com"
+	var synthetic *llmapi.Server
 	if live {
 		t.Setenv("SWARM_CREDENTIALS_FILE", credentialPath)
 	} else {
 		denyProviderJourneyExternalNetwork(t)
-		server := llmapi.New(t, llmapi.OpenAICompatible, "/v1/chat/completions", "synthetic-evidence-key", func(request llmapi.Request) (llmapi.Reply, error) {
+		synthetic = llmapi.New(t, llmapi.OpenAICompatible, "/v1/chat/completions", "synthetic-evidence-key", func(request llmapi.Request) (llmapi.Reply, error) {
+			if cell == "instance_life" {
+				if reply, ok := llmapi.StartupAnswer(request); ok {
+					if reply.Model != "deepseek-flash" {
+						return llmapi.Reply{}, fmt.Errorf("startup answer used the wrong evidence model")
+					}
+					return reply, nil
+				}
+			}
 			return providerEvidenceReply(request, cell)
 		})
-		baseURL = server.URL
+		baseURL = synthetic.URL
 		credentials, err := runtimecredentials.NewFileStore(h.credentialPath)
 		if err != nil {
 			t.Fatal("prepare synthetic credential store")
@@ -75,6 +84,10 @@ func runProviderEvidenceJourney(t *testing.T, backend servedparity.Backend, cell
 	t.Cleanup(func() { observation.report(t) })
 	h.start(t)
 	defer h.stop(t)
+	if synthetic != nil && cell == "instance_life" {
+		// The fresh boot has only the worker template, not a retained witness.
+		requireFixtureLLMHistory(t, synthetic, 0, 0)
+	}
 	turns := 1
 	if cell == "memory" || cell == "empty_content" || cell == "instance_life" {
 		turns = 2
@@ -155,6 +168,10 @@ func runProviderEvidenceJourney(t *testing.T, backend servedparity.Backend, cell
 			}
 			h.stop(t)
 			h.start(t)
+			if synthetic != nil {
+				// Each joined restart observes the retained witness exactly once.
+				requireFixtureLLMHistory(t, synthetic, sequence, sequence)
+			}
 		} else {
 			requireProviderEvidenceOutput(t, h, runID, published.EventID, sequence)
 		}

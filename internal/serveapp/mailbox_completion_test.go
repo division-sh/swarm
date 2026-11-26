@@ -211,17 +211,24 @@ func gateCompletionHarness(t *testing.T, backend, root string) (*cliapp.ServeOpt
 		captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { db, selectedPG, selectedSQLite = selectedRuntimeStoreForTest(t, p) })
 	} else {
 		dsn, _, cleanup := testutil.StartPostgres(t)
+		recordServePostgresFixture(t, dsn)
 		t.Cleanup(cleanup)
 		original := buildStoresForServe
-		buildStoresForServe = func(_ context.Context, _ storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
+		_, useDeclaration := declaredServePostgresTargets.Load(t)
+		buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config, bootCheck ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {
+			target, err := checkedPostgresFixtureDSN(ctx, cfg, dsn, useDeclaration, bootCheck)
+			if err != nil {
+				return nil, err
+			}
 			pg, err := store.NewPostgresStore(dsn)
 			if err != nil {
 				return nil, err
 			}
-			storetest.BootstrapPostgresRuntimeStore(t, pg)
 			db = storetest.DatabaseForTest(pg)
 			selectedPG = pg
-			return openSelectedPostgresOwner(t, dsn, db, cfg), nil
+			owner := openSelectedPostgresOwner(t, target, db, cfg, bootCheck...)
+			storetest.BootstrapPostgresRuntimeStore(t, pg)
+			return owner, nil
 		}
 		t.Cleanup(func() { buildStoresForServe = original })
 		opts.ConfigPath = writeServeRuntimeTestConfig(t)
@@ -238,6 +245,9 @@ func TestServedMailboxCompletionInsertRollbackAndRestartBothStores(t *testing.T)
 	requireMailboxCompletionFaultFunction(t)
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
+			if backend == "postgres" {
+				useDeclaredServePostgresTarget(t)
+			}
 			opts, start := gateCompletionHarness(t, backend, canonicalrouting.CopyGateCompletionDiagnostic(t))
 			first, rt := start()
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "completion-seed"})

@@ -73,7 +73,7 @@ func TestSwarmTestUsesCompleteDeploymentLLMConfig(t *testing.T) {
 			original := buildStoresForServe
 			t.Cleanup(func() { buildStoresForServe = original })
 			acquired := false
-			buildStoresForServe = func(ctx context.Context, selected storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
+			buildStoresForServe = func(ctx context.Context, selected storebackend.Selection, cfg *config.Config, bootCheck ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {
 				acquired = true
 				if test.refusal != "" {
 					t.Fatal("invalid endpoint reached private resource acquisition")
@@ -84,7 +84,7 @@ func TestSwarmTestUsesCompleteDeploymentLLMConfig(t *testing.T) {
 				if selected.Backend != storebackend.BackendSQLite || strings.HasPrefix(selected.SQLitePath, source+string(os.PathSeparator)) {
 					t.Fatalf("test did not keep its private store: %#v", selected)
 				}
-				return original(ctx, selected, cfg)
+				return original(ctx, selected, cfg, bootCheck...)
 			}
 			var out, errOut bytes.Buffer
 			code := executeCLIFrom(t.Context(), source, args, &out, &errOut, nil)
@@ -154,7 +154,7 @@ serve:
 			original := buildStoresForServe
 			t.Cleanup(func() { buildStoresForServe = original })
 			acquired := false
-			buildStoresForServe = func(ctx context.Context, selected storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
+			buildStoresForServe = func(ctx context.Context, selected storebackend.Selection, cfg *config.Config, bootCheck ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {
 				acquired = true
 				if selected.Backend != storebackend.BackendSQLite || selected.SQLitePath == storePath ||
 					strings.HasPrefix(selected.SQLitePath, deployment+string(os.PathSeparator)) {
@@ -163,7 +163,7 @@ serve:
 				if cfg.Database.PasswordFile != "" || cfg.Workspace.HostRoot == filepath.Join(deployment, "must-not-create") {
 					t.Fatal("deployment resource configuration crossed private construction boundary")
 				}
-				return original(ctx, selected, cfg)
+				return original(ctx, selected, cfg, bootCheck...)
 			}
 			var out, errOut bytes.Buffer
 			code := executeCLIFrom(context.Background(), source,

@@ -2,16 +2,21 @@ package testplanning
 
 import (
 	"maps"
+	"path/filepath"
 	"reflect"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
 )
 
+const originalChannelSelection = `^Test(Canonical.*|Channel(Connect.*|Draft.*|Duplicate.*|Effect.*|Listener.*|OneBot.*|Onboarding(Admitted.*|Early.*|E2E.*|Crash.*|PendingResetRestartToReadyE2E))|Claude.*|CLI_.*|Composed.*|Configure.*|Connected.*|Create.*|Receiver.*)$`
+
 func TestServeappChannelCompositionPreservesWholeWorkload(t *testing.T) {
 	f := loadCatalogTierFixture(t)
 	full := f.bind(t, ProfileFull)
 	channel, _ := full.Unit(channelUnit)
+	journeys, _ := full.Unit(channelJourneys)
 	for _, catalog := range [][]string{nil, {"catalog-runtime"}, {"catalog-replay-1"}, {"catalog-runtime", "catalog-replay-1", "catalog-replay-2-3"}} {
 		t.Run(strings.Join(catalog, "+"), func(t *testing.T) {
 			base := f.bind(t, ProfileCore, catalog...)
@@ -22,7 +27,7 @@ func TestServeappChannelCompositionPreservesWholeWorkload(t *testing.T) {
 			if !reflect.DeepEqual(plan, reordered) {
 				t.Fatal("supplement ordering changed the bound plan")
 			}
-			want, got := channelRequiredUnion(base, channel), channelRequiredUnion(plan)
+			want, got := channelRequiredUnion(base, channel, journeys), channelRequiredUnion(plan)
 			if !reflect.DeepEqual(want, got) {
 				t.Fatal("core + canonical channel root/child union changed")
 			}
@@ -30,6 +35,11 @@ func TestServeappChannelCompositionPreservesWholeWorkload(t *testing.T) {
 			actual.WeightSeconds = channel.WeightSeconds
 			if !reflect.DeepEqual(actual, channel) {
 				t.Fatal("complete channel roots, deferrals or execution recipe changed")
+			}
+			actualJourneys, err := plan.Unit(channelJourneys)
+			actualJourneys.WeightSeconds = journeys.WeightSeconds
+			if err != nil || !reflect.DeepEqual(actualJourneys, journeys) {
+				t.Fatal("private member differs from its full recipe or obligations")
 			}
 			complement, err := plan.Unit(channelComplement)
 			if err != nil || len(complement.SelectedRoots) != 11 {
@@ -60,6 +70,64 @@ func TestServeappChannelCompositionPreservesWholeWorkload(t *testing.T) {
 			}
 			t.Logf("complete channel: %d roots, %d completion2270 roots; complement: eleven; exact child union retained", len(actual.SelectedRoots), completionRoots)
 		})
+	}
+}
+
+func TestServeappChannelSplitPreservesSelectionAndDeadlines(t *testing.T) {
+	f := loadCatalogTierFixture(t)
+	original := regexp.MustCompile(originalChannelSelection)
+	dir := filepath.Join("..", "serveapp")
+	main := regexp.MustCompile(f.policy.Units[channelUnit].Run).MatchString
+	journeys := regexp.MustCompile(f.policy.Units[channelJourneys].Run).MatchString
+	for _, tc := range []struct {
+		name    string
+		members []func(string) bool
+		pass    bool
+	}{
+		{"original union", []func(string) bool{main, journeys}, true},
+		{"omission", []func(string) bool{main}, false},
+		{"overlap", []func(string) bool{original.MatchString, journeys}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			outside := func(name string) bool { return !original.MatchString(name) }
+			if err := validateGoProofMatchers(dir, append([]func(string) bool{outside}, tc.members...)); (err == nil) != tc.pass {
+				t.Fatalf("original channel partition: %v", err)
+			}
+		})
+	}
+	plan := f.bind(t, ProfileFull)
+	i := slices.IndexFunc(plan.Batches, func(batch ProofBatch) bool { return batch.ID == channelUnit })
+	if i < 0 || !slices.Equal(plan.Batches[i].Units, []string{channelUnit, channelJourneys}) || plan.Batches[i].TimeoutMinutes != 18 {
+		t.Fatal("channel needs one original 18m runner with two members")
+	}
+	for _, edit := range []func(*ProofBatch){
+		func(b *ProofBatch) { b.Units = b.Units[:1] },
+		func(b *ProofBatch) { b.Units = []string{channelUnit, channelUnit} },
+		func(b *ProofBatch) { b.Units = []string{channelUnit, "serveapp-other-late"} },
+		func(b *ProofBatch) { b.TimeoutMinutes = 36 },
+	} {
+		bad := plan
+		bad.Batches = slices.Clone(plan.Batches)
+		edit(&bad.Batches[i])
+		if err := bad.validateBatches(); err == nil {
+			t.Fatal("altered channel runner placement admitted")
+		}
+	}
+	for _, tc := range []struct {
+		id   string
+		edit func(*ProofUnit)
+	}{
+		{channelUnit, func(u *ProofUnit) { u.GoTimeout = "11m" }},
+		{channelJourneys, func(u *ProofUnit) { u.Run += "/sqlite" }},
+		{channelJourneys, func(u *ProofUnit) { u.Skip = "^TestChannelDraft.*$" }},
+	} {
+		bad := plan
+		bad.Units = slices.Clone(plan.Units)
+		j := slices.IndexFunc(bad.Units, func(u ProofUnit) bool { return u.ID == tc.id })
+		tc.edit(&bad.Units[j])
+		if err := bad.validateBatches(); err == nil {
+			t.Fatal("altered channel invocation admitted")
+		}
 	}
 }
 
@@ -178,7 +246,7 @@ func TestServeappChannelCompositionRefusesPolicyDrift(t *testing.T) {
 			t.Log(err)
 		})
 	}
-	for _, ids := range [][]string{{channelComplement}, {channelUnit, channelUnit}, {channelUnit, "foreign"}, {channelUnit, "serveapp-channel-neutral"}, {channelUnit, "serveapp-other-late"}} {
+	for _, ids := range [][]string{{channelComplement}, {channelJourneys}, {otherLateLifecycle}, {channelUnit, channelJourneys}, {channelUnit, channelUnit}, {channelUnit, "foreign"}, {channelUnit, "serveapp-channel-neutral"}, {channelUnit, otherLateUnit}} {
 		t.Run(strings.Join(ids, "+"), func(t *testing.T) {
 			plan, err := BuildPlan(f.policy, f.model, f.packages, ProfileCore, "invalid supplement", "same-head", BuildOptions{ExtraUnits: ids})
 			if err == nil {

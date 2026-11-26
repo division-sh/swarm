@@ -18,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/runtime"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
+	"github.com/division-sh/swarm/internal/runtime/bootverify"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimechanneldelivery "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	runtimechannelnative "github.com/division-sh/swarm/internal/runtime/channelnative"
@@ -47,6 +48,7 @@ type RuntimeRequest struct {
 	Selection      storebackend.Selection
 	PostgresDSN    string
 	SessionLockTTL time.Duration
+	BootCheckInput *BootCheckInput
 }
 
 type closeResource interface {
@@ -308,9 +310,9 @@ func OpenRuntime(ctx context.Context, req RuntimeRequest) (*Owner, error) {
 	var err error
 	switch req.Selection.Backend {
 	case storebackend.BackendPostgres:
-		owner, err = openPostgresRuntime(ctx, req.PostgresDSN, req.SessionLockTTL)
+		owner, err = openPostgresRuntime(ctx, req.PostgresDSN, req.SessionLockTTL, req.BootCheckInput)
 	case storebackend.BackendSQLite:
-		owner, err = openSQLiteRuntime(ctx, req.Selection.SQLitePath, req.SessionLockTTL)
+		owner, err = openSQLiteRuntime(ctx, req.Selection.SQLitePath, req.SessionLockTTL, req.BootCheckInput)
 	default:
 		return nil, fmt.Errorf("store backend selection is required; supported backends: %s, %s", storebackend.BackendPostgres, storebackend.BackendSQLite)
 	}
@@ -327,10 +329,17 @@ func validateOpenedRuntime(ctx context.Context, owner *Owner) (*Owner, error) {
 	return owner, nil
 }
 
-func openPostgresRuntime(ctx context.Context, dsn string, ttl time.Duration) (*Owner, error) {
-	selected, _, err := storeconstruction.OpenPostgresRuntime(ctx, dsn)
+func openPostgresRuntime(ctx context.Context, dsn string, ttl time.Duration, input *BootCheckInput) (*Owner, error) {
+	var checks bootverify.ConstructionChecks
+	if input != nil {
+		checks = input.checks
+	}
+	selected, _, err := storeconstruction.OpenPostgresRuntime(ctx, dsn, checks)
 	if err != nil {
 		return nil, err
+	}
+	if err := input.revalidate(ctx, selected); err != nil {
+		return nil, errors.Join(err, selected.Close())
 	}
 	selected.SetSessionLockTTL(ttl)
 	owner, err := composePostgres(selected)
@@ -340,10 +349,19 @@ func openPostgresRuntime(ctx context.Context, dsn string, ttl time.Duration) (*O
 	return owner, nil
 }
 
-func openSQLiteRuntime(ctx context.Context, path string, ttl time.Duration) (*Owner, error) {
-	selected, _, err := storeconstruction.OpenSQLiteRuntimeForServing(ctx, path)
+func openSQLiteRuntime(ctx context.Context, path string, ttl time.Duration, input *BootCheckInput) (*Owner, error) {
+	var sqliteInput *storeconstruction.SQLiteInspectionInput
+	var checks bootverify.ConstructionChecks
+	if input != nil {
+		sqliteInput = input.sqlite
+		checks = input.checks
+	}
+	selected, _, err := storeconstruction.OpenSQLiteRuntimeWithChecks(ctx, path, checks, sqliteInput)
 	if err != nil {
 		return nil, err
+	}
+	if err := input.revalidate(ctx, selected); err != nil {
+		return nil, errors.Join(err, selected.Close())
 	}
 	selected.SetSessionLockTTL(ttl)
 	owner, err := composeSQLite(selected)

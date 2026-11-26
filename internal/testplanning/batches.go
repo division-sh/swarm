@@ -3,7 +3,9 @@ package testplanning
 import (
 	"fmt"
 	"math"
+	"slices"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -16,10 +18,28 @@ type ProofBatch struct {
 	TimeoutMinutes int      `json:"timeout_minutes"`
 }
 
+const otherLateUnit, otherLateLifecycle = "serveapp-other-late", "serveapp-other-late-lifecycle"
+
+var serialProofCompanions = map[string]string{channelUnit: channelJourneys, otherLateUnit: otherLateLifecycle}
+
+func serialProofPrivate(id string) bool { return id == channelJourneys || id == otherLateLifecycle }
+
 func buildBatches(units []ProofUnit, policy Policy, model WeightModel, profile string) []ProofBatch {
 	var batches []ProofBatch
 	var short []ProofUnit
 	for _, unit := range units {
+		if peer := serialProofCompanions[unit.ID]; peer != "" {
+			batch := singleBatch(unit)
+			if i := slices.IndexFunc(units, func(u ProofUnit) bool { return u.ID == peer }); i >= 0 {
+				batch.Units = append(batch.Units, peer)
+				batch.WeightSeconds += units[i].WeightSeconds
+			}
+			batches = append(batches, batch)
+			continue
+		}
+		if serialProofPrivate(unit.ID) {
+			continue
+		}
 		_, measured := model.UnitSeconds(profile, unit)
 		if policy.Units[unit.ID].Packable && measured && unit.BudgetClass != "soak" && unit.WeightSeconds <= 120 {
 			short = append(short, unit)
@@ -71,6 +91,10 @@ func (p RunPlan) validateBatches() error {
 			return fmt.Errorf("empty/duplicate/oversized proof batch %q", batch.ID)
 		}
 		seenIDs[batch.ID] = true
+		peer := serialProofCompanions[batch.ID]
+		if peer != "" && !slices.Equal(batch.Units, []string{batch.ID, peer}) {
+			return fmt.Errorf("serial proof batch %s must run both complete members in order", batch.ID)
+		}
 		var weight float64
 		deadline := 0
 		for _, id := range batch.Units {
@@ -78,9 +102,14 @@ func (p RunPlan) validateBatches() error {
 			if err != nil || owners[id] || unit.BudgetClass != batch.BudgetClass || len(batch.Units) > 1 && unit.BudgetClass == "soak" {
 				return fmt.Errorf("invalid/duplicate proof batch ownership: %s/%s", batch.ID, id)
 			}
+			if (serialProofCompanions[id] != "" || serialProofPrivate(id)) && (peer == "" || !validSerialInvocation(unit, p.Venue)) {
+				return fmt.Errorf("serial proof member %s changed its complete-root execution envelope", id)
+			}
 			owners[id] = true
 			weight += unit.WeightSeconds
-			deadline += singleBatch(unit).TimeoutMinutes
+			if peer == "" || id == batch.ID {
+				deadline += singleBatch(unit).TimeoutMinutes
+			}
 		}
 		if batch.WeightSeconds != weight || batch.TimeoutMinutes != deadline {
 			return fmt.Errorf("proof batch %s has wrong weight/deadline", batch.ID)
@@ -90,4 +119,15 @@ func (p RunPlan) validateBatches() error {
 		return fmt.Errorf("proof batches own %d units, want %d", len(owners), len(p.Units))
 	}
 	return nil
+}
+
+func validSerialInvocation(unit ProofUnit, venue string) bool {
+	wantEnv := "ci-postgres-gateway-empty-v1"
+	if venue == VenueLocal {
+		wantEnv = "local-postgres-gateway-empty-v1"
+	}
+	return slices.Equal(unit.Packages, []string{ServedReporterPackage}) &&
+		unit.Run != "" && !strings.Contains(unit.Run, "/") && unit.Skip == "" &&
+		unit.GoTimeout == "" && unit.CountMode == "count-1" &&
+		unit.EnvironmentID == wantEnv && unit.BudgetClass == "full"
 }
