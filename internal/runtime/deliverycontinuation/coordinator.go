@@ -111,8 +111,10 @@ type Coordinator struct {
 	scanSeen      map[string]struct{}
 	scanSkipped   bool
 
-	admissionClosed  chan struct{}
-	admissionFailure error
+	admissionClosed     chan struct{}
+	admissionFailure    error
+	selectedScanStamp   uint64
+	selectedScansSealed bool
 }
 
 func New(
@@ -315,13 +317,43 @@ func (c *Coordinator) BeginRetirement() {
 		return
 	}
 	c.mu.Lock()
-	retired := c.retired
-	c.closeAdmissionLocked()
-	cancel := c.cancel
+	cancel := c.beginRetirementLocked()
 	c.mu.Unlock()
-	if cancel != nil && !retired {
+	if cancel != nil {
 		cancel()
 	}
+}
+
+func (c *Coordinator) beginRetirementLocked() context.CancelFunc {
+	if c.retired {
+		return nil
+	}
+	c.closeAdmissionLocked()
+	return c.cancel
+}
+
+// SelectedScanStamp marks the start of the caller's selected-work quiet check.
+func (c *Coordinator) SelectedScanStamp() uint64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.selectedScanStamp
+}
+
+// SealQuietSelectedScans begins retirement only if no scan entered during or
+// after the quiet check. The caller still joins through Retire.
+func (c *Coordinator) SealQuietSelectedScans(stamp uint64) bool {
+	c.mu.Lock()
+	if stamp != c.selectedScanStamp {
+		c.mu.Unlock()
+		return false
+	}
+	c.selectedScansSealed = true
+	cancel := c.beginRetirementLocked()
+	c.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	return true
 }
 
 // Admission closure wakes unaccepted scans without publishing the joined result.
@@ -873,10 +905,23 @@ func (c *Coordinator) beginRecipientDispatch(ctx context.Context) (*worklifetime
 	return c.beginDispatchWork(ctx)
 }
 
+func (c *Coordinator) beginSelectedScan(ctx context.Context) (*worklifetime.Lease, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.selectedScansSealed {
+		return nil, errCoordinatorRetired
+	}
+	lease, err := c.beginDispatchWork(ctx)
+	if err == nil {
+		c.selectedScanStamp++
+	}
+	return lease, err
+}
+
 func (c *Coordinator) scan(ctx context.Context, exhaustive bool) (delay time.Duration, shouldWake bool, resultErr error) {
 	dispatchCtx := ctx
 	if c.selectedReconcile != nil {
-		lease, err := c.beginDispatchWork(ctx)
+		lease, err := c.beginSelectedScan(ctx)
 		if err != nil {
 			if err == worklifetime.ErrAdmissionFenced && ctx.Err() == nil {
 				owner, selected := c.workOwner.(*worklifetime.SelectedForkOccurrence)
