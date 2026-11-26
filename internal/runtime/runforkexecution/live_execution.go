@@ -613,5 +613,16 @@ func (c selectedContractForkLocalRuntimeContainer) joinLiveSelectedWork(continua
 	}
 	ctx, cancel := context.WithTimeout(c.attachment.ctx, timeout)
 	defer cancel()
-	return c.attachment.runtime.WaitForQuiescence(ctx, c.attachment.runtime.bus)
+	for {
+		stamp := continuations.SelectedScanStamp()
+		if err := c.attachment.runtime.WaitForQuiescence(ctx, c.attachment.runtime.bus); err != nil {
+			return err
+		}
+		if continuations.SealQuietSelectedScans(stamp) {
+			return nil
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+	}
 }
