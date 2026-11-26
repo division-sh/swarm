@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
@@ -102,7 +103,7 @@ func replayDecisionCardMutation(ctx context.Context, owner decisionCardReplayOwn
 		return nil, false, err
 	}
 	defer func() {
-		if releaseErr := lease.Release(context.WithoutCancel(ctx)); releaseErr != nil {
+		if releaseErr := lease.Release(forkcancelcapture.WithoutCancel(ctx)); releaseErr != nil {
 			response, replayed = nil, false
 			err = errors.Join(err, releaseErr)
 		}

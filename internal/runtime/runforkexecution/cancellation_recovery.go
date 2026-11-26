@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 )
@@ -26,7 +27,7 @@ func (o SelectedContractExecutionOwner) settleRecoveredSelectedCancellations(ctx
 	}
 	defer func() {
 		for _, reaction := range reactions {
-			finalErr = errors.Join(finalErr, reaction.owner.ReleaseTurnTimeoutReaction(context.WithoutCancel(ctx), reaction.plan))
+			finalErr = errors.Join(finalErr, reaction.owner.ReleaseTurnTimeoutReaction(forkcancelcapture.WithoutCancel(ctx), reaction.plan))
 		}
 		finalErr = errors.Join(finalErr, preparation.Close())
 	}()

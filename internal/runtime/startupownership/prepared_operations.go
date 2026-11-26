@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -111,9 +112,9 @@ func (p *processCapability) RunPreparedOperation(ctx context.Context, operation 
 	if err := p.proveCurrent(ctx); err != nil {
 		return err
 	}
-	life, end := context.WithCancel(context.WithoutCancel(ctx))
+	life, end := forkcancelcapture.WithCancel(forkcancelcapture.WithoutCancel(ctx))
 	defer end()
-	operationCtx := context.WithValue(ctx, preparedOperationContextKey{}, preparedOperationScope{operation.kind, operation.target, life})
+	operationCtx := forkcancelcapture.RecordValue(ctx, context.WithValue(ctx, preparedOperationContextKey{}, preparedOperationScope{operation.kind, operation.target, life}))
 	operationCtx = p.processMutationContext(operationCtx)
 	err = operation.run(operationCtx)
 	if err != nil {

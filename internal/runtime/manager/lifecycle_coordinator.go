@@ -24,6 +24,7 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
@@ -68,7 +69,7 @@ func newRuntimeLifecycleTransition(kind runtimeLifecycleTransitionKind, grace ..
 		if len(grace) != 0 {
 			budget = grace[0]
 		}
-		transition.drainCtx, transition.drainCancel = context.WithTimeout(context.Background(), budget)
+		transition.drainCtx, transition.drainCancel = forkcancelcapture.WithTimeout(context.Background(), budget)
 		transition.drainGrace = budget
 	}
 	return transition
@@ -736,7 +737,7 @@ func prepareManagerRunAuthorities(parent context.Context, owner worklifetime.Occ
 	if parent == nil {
 		parent = context.Background()
 	}
-	root := runtimebus.WithRuntimeEpoch(context.WithoutCancel(parent), runtimebus.CurrentRuntimeEpoch())
+	root := runtimebus.WithRuntimeEpoch(forkcancelcapture.WithoutCancel(parent), runtimebus.CurrentRuntimeEpoch())
 	transitionExecutor, err := owner.BeginStanding(root)
 	if err != nil {
 		return nil, nil, fmt.Errorf("reserve manager transition executor: %w", err)
@@ -1111,7 +1112,7 @@ func (c *agentLifecycleCoordinator) registerExecutionCandidate(
 		if err != nil {
 			return err
 		}
-		view, err = c.committedAgentView(context.WithoutCancel(ctx), result)
+		view, err = c.committedAgentView(forkcancelcapture.WithoutCancel(ctx), result)
 		if err != nil {
 			return err
 		}
@@ -1156,7 +1157,7 @@ func (c *agentLifecycleCoordinator) beginRunWithClaimHold(parent context.Context
 	}
 	c.workMu.Unlock()
 	root := runtimebus.WithRuntimeEpoch(parent, runtimebus.CurrentRuntimeEpoch())
-	runCtx, cancelRun := context.WithCancel(root)
+	runCtx, cancelRun := forkcancelcapture.WithCancel(root)
 	c.runCtx, c.cancelRun = runCtx, cancelRun
 	c.startupClaimsHeld = holdClaims
 	c.phase = runtimeLifecycleRunning
@@ -1912,7 +1913,7 @@ func (c *agentLifecycleCoordinator) acquireExecutionLocked(
 	if ctx == nil {
 		ctx = c.context()
 	}
-	leaseCtx, cancel := context.WithCancel(ctx)
+	leaseCtx, cancel := forkcancelcapture.WithCancel(ctx)
 	stopGenerationCancel := context.AfterFunc(generationCtx, cancel)
 	if admission, ok := managedexecution.FromContext(runCtx); ok {
 		leaseCtx = managedexecution.WithAdmission(leaseCtx, admission)
@@ -1921,7 +1922,7 @@ func (c *agentLifecycleCoordinator) acquireExecutionLocked(
 	if c.effectsStore != nil {
 		leaseCtx = runtimeeffects.WithController(leaseCtx, runtimeeffects.NewController(c.effectsStore).WithExecutionPosture(c.executionPosture))
 	}
-	lease.Context = context.WithValue(leaseCtx, agentExecutionLeaseContextKey{}, lease)
+	lease.Context = forkcancelcapture.RecordValue(leaseCtx, context.WithValue(leaseCtx, agentExecutionLeaseContextKey{}, lease))
 	lease.release = sync.OnceFunc(func() {
 		stopGenerationCancel()
 		cancel()
@@ -2068,14 +2069,14 @@ func (c *agentLifecycleCoordinator) replaceLoopLocked(
 		}
 		result = pending.outcome
 	} else {
-		result, err = store.CommitAgentLifecycleTransition(context.WithoutCancel(ctx), request)
+		result, err = store.CommitAgentLifecycleTransition(forkcancelcapture.WithoutCancel(ctx), request)
 		if err != nil {
 			cell.unacknowledged = &unacknowledgedAgentReplacement{request: request}
 			c.mu.Unlock()
 			return nil, runtimeeffects.LifecycleToken{}, nil, err
 		}
 	}
-	view, err := c.committedAgentView(context.WithoutCancel(ctx), result)
+	view, err := c.committedAgentView(forkcancelcapture.WithoutCancel(ctx), result)
 	if err != nil {
 		c.mu.Unlock()
 		return nil, runtimeeffects.LifecycleToken{}, nil, err
@@ -2119,7 +2120,7 @@ func (c *agentLifecycleCoordinator) replaceLoopLocked(
 	if result.Phase == AgentLifecycleRunning {
 		baseCtx = runCtx
 	}
-	generationCtx, cancelGeneration := context.WithCancel(baseCtx)
+	generationCtx, cancelGeneration := forkcancelcapture.WithCancel(baseCtx)
 	nextExecution := &agentExecutionProjection{token: token, generationCtx: generationCtx, cancelGeneration: cancelGeneration}
 	if previousExecution != nil {
 		nextExecution.agent = previousExecution.agent
@@ -2324,7 +2325,7 @@ func (c *agentLifecycleCoordinator) commitDeferredAgentTerminationLocked(
 		cell.view.ProcessBinding.ProcessAuthorityID, cell.view.ProcessBinding.ProcessBootID,
 		targetBinding.ProcessAuthorityID, targetBinding.ProcessBootID, targetBinding.GenerationGrantID,
 	)
-	return c.commitLifecycleTransition(context.WithoutCancel(ctx), store, AgentLifecycleTransition{
+	return c.commitLifecycleTransition(forkcancelcapture.WithoutCancel(ctx), store, AgentLifecycleTransition{
 		OperationID: operationID, OperationKind: operationKind, RequestHash: requestHash,
 		Identity: cell.identity, AgentID: cell.identity.AgentID(), Trigger: pending.trigger,
 		ExpectedEpoch: cell.view.RuntimeEpoch, ExpectedGeneration: cell.view.Generation, ExpectedPhase: cell.view.Phase,
@@ -2361,7 +2362,7 @@ func (c *agentLifecycleCoordinator) abortUnlaunchedLoopLocked(ctx context.Contex
 	operationID := uuid.NewString()
 	requestHash := lifecycleRequestHashForIdentity(cell.identity, cell.view.Topology, "start_failed", cell.view.ConfigRevision, planHash)
 	store := c.persistence()
-	result, err := c.commitLifecycleTransition(context.WithoutCancel(ctx), store, AgentLifecycleTransition{
+	result, err := c.commitLifecycleTransition(forkcancelcapture.WithoutCancel(ctx), store, AgentLifecycleTransition{
 		OperationID: operationID, OperationKind: "self_release", RequestHash: requestHash, Identity: cell.identity,
 		AgentID: identity.AgentID(), Trigger: "start_failed", ExpectedEpoch: cell.view.RuntimeEpoch, ExpectedGeneration: cell.view.Generation,
 		ExpectedPhase: cell.view.Phase, TargetEpoch: cell.view.RuntimeEpoch, TargetGeneration: cell.view.Generation,
@@ -2369,7 +2370,7 @@ func (c *agentLifecycleCoordinator) abortUnlaunchedLoopLocked(ctx context.Contex
 		Subordinate: plan, Topology: cell.view.Topology, Now: time.Now().UTC(),
 	})
 	if err == nil {
-		view, viewErr := c.committedAgentView(context.WithoutCancel(ctx), result)
+		view, viewErr := c.committedAgentView(forkcancelcapture.WithoutCancel(ctx), result)
 		err = viewErr
 		if err == nil {
 			cell.view = view
@@ -2538,7 +2539,7 @@ func (c *agentLifecycleCoordinator) commitIdentityTerminationLocked(
 				cell.view.ProcessBinding.ProcessAuthorityID, cell.view.ProcessBinding.ProcessBootID,
 				targetBinding.ProcessAuthorityID, targetBinding.ProcessBootID, targetBinding.GenerationGrantID,
 			)
-			result, err := c.commitLifecycleTransition(context.WithoutCancel(ctx), store, AgentLifecycleTransition{
+			result, err := c.commitLifecycleTransition(forkcancelcapture.WithoutCancel(ctx), store, AgentLifecycleTransition{
 				OperationID: operationID, OperationKind: operationKind, RequestHash: requestHash, Identity: identity,
 				AgentID: agentID, Trigger: trigger, ExpectedEpoch: epoch, ExpectedGeneration: generation, ExpectedPhase: phase,
 				TargetEpoch: nextEpoch, TargetGeneration: nextGeneration, TargetPhase: target,
@@ -2548,7 +2549,7 @@ func (c *agentLifecycleCoordinator) commitIdentityTerminationLocked(
 			if err != nil {
 				return agentTerminalCommit{}, err
 			}
-			view, err := c.committedAgentView(context.WithoutCancel(ctx), result)
+			view, err := c.committedAgentView(forkcancelcapture.WithoutCancel(ctx), result)
 			if err != nil {
 				return agentTerminalCommit{}, err
 			}

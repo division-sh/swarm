@@ -14,6 +14,7 @@ import (
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 )
 
@@ -123,7 +124,7 @@ func (r *ClaudeCLIRuntime) runWorkspaceCommand(ctx context.Context, target *work
 			slog.WarnContext(ctx, "tool-result relay launch committed with cleanup error", "error", err)
 		}
 		if err := ctx.Err(); err != nil {
-			return nil, nil, 0, attempt.Fail(context.WithoutCancel(ctx), runtimeeffects.StateTerminalFailure, runtimefailures.ClassLifecycleConflict, "tool_result_relay_cancelled_before_dispatch", "claude-cli-adapter", "write_tool_result_relay", map[string]any{"prelaunch": true}, errors.Join(err, launchCleanupErr))
+			return nil, nil, 0, attempt.Fail(forkcancelcapture.WithoutCancel(ctx), runtimeeffects.StateTerminalFailure, runtimefailures.ClassLifecycleConflict, "tool_result_relay_cancelled_before_dispatch", "claude-cli-adapter", "write_tool_result_relay", map[string]any{"prelaunch": true}, errors.Join(err, launchCleanupErr))
 		}
 		stdout, stderr, exitCode, runErr := r.execWorkspaceFn(ctx, target, stdin, args...)
 		if runErr != nil || exitCode != 0 {
@@ -161,7 +162,7 @@ func (r *ClaudeCLIRuntime) runWorkspaceCommand(ctx context.Context, target *work
 		slog.WarnContext(ctx, "tool-result relay launch committed with cleanup error", "error", err)
 	}
 	if err := ctx.Err(); err != nil {
-		return stdout.Bytes(), stderr.Bytes(), -1, attempt.Fail(context.WithoutCancel(ctx), runtimeeffects.StateTerminalFailure, runtimefailures.ClassLifecycleConflict, "tool_result_relay_cancelled_before_dispatch", "claude-cli-adapter", "write_tool_result_relay", map[string]any{"prelaunch": true}, errors.Join(err, launchCleanupErr))
+		return stdout.Bytes(), stderr.Bytes(), -1, attempt.Fail(forkcancelcapture.WithoutCancel(ctx), runtimeeffects.StateTerminalFailure, runtimefailures.ClassLifecycleConflict, "tool_result_relay_cancelled_before_dispatch", "claude-cli-adapter", "write_tool_result_relay", map[string]any{"prelaunch": true}, errors.Join(err, launchCleanupErr))
 	}
 	if err := cmd.Start(); err != nil {
 		return stdout.Bytes(), stderr.Bytes(), -1, attempt.Fail(ctx, runtimeeffects.StateTerminalFailure, runtimefailures.ClassDependencyUnavailable, "claude_tool_result_relay_start_failed", "claude-cli-adapter", "write_tool_result_relay", map[string]any{"launch_rejected": true}, err)

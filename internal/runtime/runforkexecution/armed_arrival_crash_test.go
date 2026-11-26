@@ -145,7 +145,7 @@ func testArmedArrivalTimeoutCrashRestartBothStores(t *testing.T, phase string) {
 					selected = s
 					construct = func() SelectedContractExecutionOwner { return newSelectedContractExecutionOwnerForTest(t, s) }
 				}
-				checkpoint := killSelectedForkAtCheckpoint(t, backend, dsn, cut)
+				checkpoint := killSelectedForkAtObservedActivationCheckpoint(t, backend, dsn, cut)
 				operations := selected.(interface {
 					LoadForkOperation(context.Context, string, string, string) (runfork.ForkOperationRecord, bool, error)
 				})
@@ -296,7 +296,9 @@ func testArmedArrivalTimeoutCrashRestartBothStores(t *testing.T, phase string) {
 					t.Fatal(err)
 				}
 				ordinary, liveContexts := ordinaryForkRuntimeFixture(t, ctx, selected, owner, loaded, executionposture.MockOnly)
-				recovered, err := owner.RecoverSelectedForkContexts(ctx, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.MockOnly), SelectedForkRecoveryEnvironment{
+				recoveryCtx, recoveryTrace := armSelectedForkActivation(ctx, backend, capability)
+				defer recoveryTrace.Close()
+				recovered, err := owner.RecoverSelectedForkContexts(recoveryCtx, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.MockOnly), SelectedForkRecoveryEnvironment{
 					SourceLoader: loader, AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability},
 					LiveContexts: liveContexts, LiveRuns: selected.(runlifecycle.LiveRunReader),
 					AcquireLiveRuntime: func(ctx context.Context, reference sourceartifact.RootAdmissionReference) (*rootruntime.RuntimeContextUse, error) {
@@ -310,6 +312,8 @@ func testArmedArrivalTimeoutCrashRestartBothStores(t *testing.T, phase string) {
 					wantDisposition = runfork.SelectedForkRecoveryResume
 				}
 				if err != nil || len(recovered) != 1 || recovered[0].RunID != child || recovered[0].Disposition != wantDisposition {
+					logPostgresForkActivationFailure(t, backend, capability)
+					logSelectedForkActivationTrace(t, recoveryTrace, ctx, err)
 					t.Fatalf("armed arrival successor recovery: %+v err=%v", recovered, err)
 				}
 				rebootGrant, err := ordinary.CurrentStartupGrantEvidence()

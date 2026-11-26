@@ -29,6 +29,7 @@ import (
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
@@ -577,7 +578,7 @@ func (d pipelineActivityDispatcher) publishCommittedActivityAttempt(ctx context.
 	if commitErr != nil {
 		commitErr = activityDependencyFailure(commitErr, intent.Tool, operation)
 	}
-	return errors.Join(commitErr, d.publishJournaledActivityResult(context.WithoutCancel(ctx), intent, stored))
+	return errors.Join(commitErr, d.publishJournaledActivityResult(forkcancelcapture.WithoutCancel(ctx), intent, stored))
 }
 
 func activityDependencyFailure(err error, tool, operation string) error {
@@ -707,7 +708,7 @@ func (pc *PipelineCoordinator) ExecuteDurableActivity(ctx context.Context, inten
 	}
 	publishCtx := events.WithDeliveryContext(ctx, request.Context)
 	publishErr := pc.bus.Publish(publishCtx, request.Event)
-	waitCtx, cancel := context.WithTimeout(ctx, 35*time.Second)
+	waitCtx, cancel := forkcancelcapture.WithTimeout(ctx, 35*time.Second)
 	defer cancel()
 	ticker := time.NewTicker(5 * time.Millisecond)
 	defer ticker.Stop()
@@ -1089,7 +1090,7 @@ func executePreparedActivityHTTPTool(ctx context.Context, prepared preparedActiv
 	if err := ctx.Err(); err != nil {
 		return nil, runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict, "activity_dispatch_not_attempted", "activity-runtime", "dispatch_http_request", map[string]any{"tool": prepared.toolName, "dispatch_attempted": false}, err)
 	}
-	reqCtx, cancel := context.WithTimeout(ctx, prepared.timeout)
+	reqCtx, cancel := forkcancelcapture.WithTimeout(ctx, prepared.timeout)
 	defer cancel()
 	client := *prepared.client
 	client.Timeout = 0
@@ -1401,7 +1402,7 @@ type activityChannelTargetContextValue struct {
 }
 
 func withActivityChannelTarget(ctx context.Context, target ChannelActivityTarget, private bool) context.Context {
-	return context.WithValue(ctx, activityChannelTargetContextKey{}, activityChannelTargetContextValue{target: target, private: private})
+	return forkcancelcapture.RecordValue(ctx, context.WithValue(ctx, activityChannelTargetContextKey{}, activityChannelTargetContextValue{target: target, private: private}))
 }
 
 func activityChannelTargetFromContext(ctx context.Context) (ChannelActivityTarget, bool) {

@@ -30,6 +30,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	"github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
@@ -431,13 +432,21 @@ func (c *selectedContractForkLocalRuntimeContainer) PrepareAttachment(ctx contex
 	runCtx = runtimeeffects.WithAuthority(runCtx, c.authority)
 	runCtx = runtimeeffects.WithController(runCtx, controller)
 	runCtx = managedexecution.WithAdmission(runCtx, c.admission)
+	childParent := runCtx
 	runCtx, cancelRuntime := context.WithCancelCause(runCtx)
+	trace := forkcancelcapture.From(runCtx)
+	lease.BindForkCancelCapture("selected child attachment")
+	trace.Note("child admission derived from selected lease", childParent, lease.Context(), childParent, nil, false)
+	trace.Link("child cancel context", runCtx, childParent)
+	cancelRuntime = trace.Wrap("child attachment", runCtx, cancelRuntime)
+	child := runCtx
 	runCtx, agentRuntime, admission, err := c.prepareServingScope(runCtx, req, bus, pipeline)
 	if err != nil {
 		cancelRuntime(err)
 		return errors.Join(err, lease.Done())
 	}
 	runCtx = managedexecution.WithAdmission(agentRuntime.operationContext, admission)
+	trace.Note("serving context derived from child", runCtx, child, runCtx, nil, false)
 	if agentRuntime == nil || agentRuntime.manager == nil || agentRuntime.generationGrant == nil {
 		cancelRuntime(errors.New("selected lifecycle manager missing"))
 		return errors.Join(errors.New("selected-contract fork-local lifecycle manager was not materialized"), lease.Done())
@@ -665,14 +674,14 @@ func (c selectedContractForkLocalRuntimeContainer) serveCommittedAttachment() (f
 	}
 	defer func() {
 		for _, input := range inputs {
-			finalErr = errors.Join(finalErr, bus.AbandonPreparedPublish(context.WithoutCancel(input.ctx), input.prepared))
+			finalErr = errors.Join(finalErr, bus.AbandonPreparedPublish(forkcancelcapture.WithoutCancel(input.ctx), input.prepared))
 		}
 	}()
 	if err := continuations.Start(runCtx); err != nil {
 		return fmt.Errorf("start selected delivery continuations: %w", err)
 	}
 	defer func() {
-		finalErr = errors.Join(finalErr, continuations.Retire(context.WithoutCancel(runCtx)))
+		finalErr = errors.Join(finalErr, continuations.Retire(forkcancelcapture.WithoutCancel(runCtx)))
 	}()
 	if err := pipeline.RestoreWorkflowTimers(runCtx); err != nil {
 		return fmt.Errorf("restore selected child workflow timers: %w", err)
@@ -771,7 +780,7 @@ func (c selectedContractForkLocalRuntimeContainer) commitSelectedInputs() (input
 	defer func() {
 		if finalErr != nil {
 			for _, input := range inputs {
-				finalErr = errors.Join(finalErr, bus.AbandonPreparedPublish(context.WithoutCancel(input.ctx), input.prepared))
+				finalErr = errors.Join(finalErr, bus.AbandonPreparedPublish(forkcancelcapture.WithoutCancel(input.ctx), input.prepared))
 			}
 		}
 	}()
@@ -969,7 +978,7 @@ func (c selectedContractForkLocalRuntimeContainer) awaitTerminalSettlement(ctx c
 			if timeout <= 0 {
 				timeout = selectedContractAgentRuntimeDefaultQuiescenceTimeout
 			}
-			waitCtx, cancel := context.WithTimeout(ctx, timeout)
+			waitCtx, cancel := forkcancelcapture.WithTimeout(ctx, timeout)
 			err := c.attachment.runtime.WaitForQuiescence(waitCtx, c.attachment.runtime.bus)
 			cancel()
 			if err != nil {
@@ -1209,7 +1218,7 @@ func projectSelectedContractSourceEvents(
 }
 
 func (c selectedContractForkLocalRuntimeContainer) Quiesce(ctx context.Context) error {
-	return c.settle(context.WithoutCancel(ctx), startupownership.PreparedForkQuiesce, nil, 0)
+	return c.settle(forkcancelcapture.WithoutCancel(ctx), startupownership.PreparedForkQuiesce, nil, 0)
 }
 
 func (c selectedContractForkLocalRuntimeContainer) activate(ctx context.Context, request runfork.RunForkSelectedContractExecutionActivateRequest) (result runfork.RunForkActivation, err error) {
@@ -1258,7 +1267,7 @@ func (c selectedContractForkLocalRuntimeContainer) Fail(ctx context.Context, cau
 	if err != nil {
 		return false, err
 	}
-	if err := c.settle(context.WithoutCancel(ctx), startupownership.PreparedForkFail, raw, 0); err != nil {
+	if err := c.settle(forkcancelcapture.WithoutCancel(ctx), startupownership.PreparedForkFail, raw, 0); err != nil {
 		return false, err
 	}
 	return c.closeAcknowledged(ctx)
@@ -1270,7 +1279,7 @@ func (c selectedContractForkLocalRuntimeContainer) FailActivated(ctx context.Con
 	if err != nil {
 		return false, err
 	}
-	return c.settleAcknowledged(context.WithoutCancel(ctx), startupownership.PreparedForkFailActivated, raw, 0)
+	return c.settleAcknowledged(forkcancelcapture.WithoutCancel(ctx), startupownership.PreparedForkFailActivated, raw, 0)
 }
 
 func (c selectedContractForkLocalRuntimeContainer) failureDispositionContext(ctx context.Context) context.Context {

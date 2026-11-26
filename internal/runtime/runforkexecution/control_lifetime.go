@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
@@ -172,7 +173,7 @@ func (o SelectedContractExecutionOwner) StopSelectedFork(ctx context.Context, re
 			return result, true, cleanupErr
 		}
 	}
-	state, err := o.ports.fork.StopSelectedFork(context.WithoutCancel(use.ctx), runcontrol.SelectedStopRequest{Transition: req, Binding: use.binding, Process: use.process.LeaseStamp()})
+	state, err := o.ports.fork.StopSelectedFork(forkcancelcapture.WithoutCancel(use.ctx), runcontrol.SelectedStopRequest{Transition: req, Binding: use.binding, Process: use.process.LeaseStamp()})
 	if state.RunID == "" {
 		return result, true, err
 	}

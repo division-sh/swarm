@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/forkrecipient"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -177,7 +178,7 @@ func (v SelectedInputValidation) bind(ctx context.Context, event events.Event, b
 		!bytes.Equal(event.Payload(), payload) || bundleHash != v.bundleHash {
 		return nil, fmt.Errorf("selected input validation differs from exact source/event/artifact")
 	}
-	return context.WithValue(ctx, selectedInputValidationContextKey{}, v), nil
+	return forkcancelcapture.RecordValue(ctx, context.WithValue(ctx, selectedInputValidationContextKey{}, v)), nil
 }
 
 func selectedInputValidationFromContext(ctx context.Context, event events.Event) (SelectedInputValidation, bool) {

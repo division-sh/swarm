@@ -3,6 +3,8 @@ package worklifetime
 import (
 	"context"
 	"errors"
+
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 )
 
 // DeliveryCarrierGuard keeps one exact delivery capability reachable until it
@@ -31,7 +33,7 @@ func WithDirectDeliveryCarrier(ctx context.Context, guard *DeliveryCarrierGuard)
 	if guard == nil || guard.continuation == nil {
 		return ctx, errors.New("direct delivery carrier is required")
 	}
-	return context.WithValue(ctx, directDeliveryCarrierKey{}, guard), nil
+	return forkcancelcapture.RecordValue(ctx, context.WithValue(ctx, directDeliveryCarrierKey{}, guard)), nil
 }
 
 func DirectDeliveryCarrier(ctx context.Context, deliveryID string) (*DeliveryCarrierGuard, bool, error) {
@@ -78,7 +80,7 @@ func (g *DeliveryCarrierGuard) Consume(report func(error)) (DeliveryContinuation
 	if g.delivery != nil {
 		resolution, err = g.delivery.resolveContinuation(DeliveryContinuationConsume)
 	} else if g.continuation != nil {
-		resolution, err = g.continuation.Resolve(context.WithoutCancel(g.ctx), DeliveryContinuationConsume)
+		resolution, err = g.continuation.Resolve(forkcancelcapture.WithoutCancel(g.ctx), DeliveryContinuationConsume)
 	} else {
 		return 0, errors.New("delivery carrier capability is required")
 	}
@@ -115,7 +117,7 @@ func (g *DeliveryCarrierGuard) Complete(report func(error)) (DeliveryContinuatio
 	if g.delivery != nil {
 		resolution, err = g.delivery.completeCarrier()
 	} else if g.continuation != nil {
-		resolution, err = g.continuation.Resolve(context.WithoutCancel(g.ctx), DeliveryContinuationReturnUnqueued)
+		resolution, err = g.continuation.Resolve(forkcancelcapture.WithoutCancel(g.ctx), DeliveryContinuationReturnUnqueued)
 	} else {
 		return 0, errors.New("delivery carrier capability is required")
 	}

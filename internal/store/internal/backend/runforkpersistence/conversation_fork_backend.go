@@ -10,6 +10,7 @@ import (
 	"time"
 
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 )
@@ -195,7 +196,7 @@ func (s conversationForkStore) withPostgresMutationSession(ctx context.Context, 
 	if forkID != nil {
 		// The session lock precedes BEGIN so serializable snapshots are taken
 		// only after competing fork mutations settle. Admitted lock SQL drains.
-		if _, lockErr := conn.ExecContext(context.WithoutCancel(ctx), `SELECT pg_advisory_lock(hashtextextended($1, 0))`, *forkID); lockErr != nil {
+		if _, lockErr := conn.ExecContext(forkcancelcapture.WithoutCancel(ctx), `SELECT pg_advisory_lock(hashtextextended($1, 0))`, *forkID); lockErr != nil {
 			return errors.Join(ctx.Err(), fmt.Errorf("lock postgres conversation fork %s: %w", *forkID, lockErr), session.ForceDiscard())
 		}
 		defer func() {
@@ -206,7 +207,7 @@ func (s conversationForkStore) withPostgresMutationSession(ctx context.Context, 
 			}
 			unlockErr := probeErr
 			if unlockErr == nil {
-				unlockCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				unlockCtx, cancel := forkcancelcapture.WithTimeout(context.Background(), 5*time.Second)
 				defer cancel()
 				var unlocked bool
 				unlockErr = conn.QueryRowContext(unlockCtx, `SELECT pg_advisory_unlock(hashtextextended($1, 0))`, *forkID).Scan(&unlocked)

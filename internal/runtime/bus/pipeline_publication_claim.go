@@ -8,6 +8,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 )
 
@@ -63,7 +64,7 @@ func (c *pipelinePublicationClaim) Release(ctx context.Context) error {
 		}
 		panic("pipeline publication claim owner is required")
 	}
-	return c.bus.pipelineObligations.Release(context.WithoutCancel(ctx), c.claim)
+	return c.bus.pipelineObligations.Release(forkcancelcapture.WithoutCancel(ctx), c.claim)
 }
 
 // Retiring exact group callbacks transfers their remaining backend cleanup to
@@ -100,7 +101,7 @@ func (c *pipelinePublicationClaim) Settle(ctx context.Context, disposition runti
 		if outcome.Committed() {
 			return outcome, fmt.Errorf("settle pipeline publication %s: %w", c.eventID, err)
 		}
-		releaseErr := c.bus.pipelineObligations.Release(context.WithoutCancel(ctx), c.claim)
+		releaseErr := c.bus.pipelineObligations.Release(forkcancelcapture.WithoutCancel(ctx), c.claim)
 		if errors.Is(releaseErr, runtimepipelineobligation.ErrStaleClaim) {
 			releaseErr = nil
 		}

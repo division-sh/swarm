@@ -19,6 +19,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	"github.com/google/uuid"
 )
 
@@ -129,7 +130,7 @@ func withProviderTurnAuthority(ctx context.Context, session *Session) (context.C
 	if err := authority.Validate(); err != nil {
 		return ctx, managedcapabilities.Authority{}, err
 	}
-	return context.WithValue(ctx, providerTurnAuthorityKey{}, authority), authority, nil
+	return forkcancelcapture.RecordValue(ctx, context.WithValue(ctx, providerTurnAuthorityKey{}, authority)), authority, nil
 }
 
 func providerTurnAuthorityID(ctx context.Context, actorIdentity runtimeagentidentity.Identity, executionKind managedcapabilities.ExecutionKind, executionID, runID, sessionID string, turnOrdinal int) (string, error) {

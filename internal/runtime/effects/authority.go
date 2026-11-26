@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
 	"github.com/google/uuid"
 )
@@ -782,10 +783,10 @@ func WithExecutionMode(ctx context.Context, mode ExecutionMode) context.Context 
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	ctx = context.WithValue(ctx, executionModeContextKey{}, mode)
+	ctx = forkcancelcapture.RecordValue(ctx, context.WithValue(ctx, executionModeContextKey{}, mode))
 	if authority, ok := AuthorityFromContext(ctx); ok {
 		authority.ExecutionMode = mode
-		ctx = context.WithValue(ctx, authorityContextKey{}, authority)
+		ctx = forkcancelcapture.RecordValue(ctx, context.WithValue(ctx, authorityContextKey{}, authority))
 	}
 	return ctx
 }
@@ -802,7 +803,7 @@ func WithAuthority(ctx context.Context, authority Authority) context.Context {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return context.WithValue(ctx, authorityContextKey{}, authority.clonePreparation())
+	return forkcancelcapture.RecordValue(ctx, context.WithValue(ctx, authorityContextKey{}, authority.clonePreparation()))
 }
 
 func AuthorityFromContext(ctx context.Context) (Authority, bool) {

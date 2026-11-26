@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 )
 
 const wakeupCallbackTimeout = 10 * time.Second
@@ -201,6 +202,7 @@ func (l *Lifecycle) Admit(ctx context.Context, command AdmissionCommand) (admitt
 	if l == nil {
 		return AdmissionResult{}, errors.New("generic schedule lifecycle is required")
 	}
+	l.bindForkCancelCapture(ctx)
 	if err := l.posture.Admit(command.ExecutionMode, "generic schedule admission"); err != nil {
 		return AdmissionResult{}, err
 	}
@@ -226,7 +228,7 @@ func (l *Lifecycle) Admit(ctx context.Context, command AdmissionCommand) (admitt
 	if err := result.Validate(); err != nil {
 		return result, errors.Join(commitErr, err)
 	}
-	if err := l.reconcileImmediately(context.WithoutCancel(ctx), result.Activation.ID); err != nil {
+	if err := l.reconcileImmediately(forkcancelcapture.WithoutCancel(ctx), result.Activation.ID); err != nil {
 		l.log(ctx, "reconcile_after_admission", result.Activation.ID, err)
 		if queued, recoveryErr := l.queueProjectionRecovery(ctx, result.Activation.ID, err); !queued {
 			return result, errors.Join(commitErr, recoveryErr)
@@ -248,7 +250,7 @@ func (l *Lifecycle) Cancel(ctx context.Context, command CancelCommand) (CancelRe
 	}
 	result := commit.Result
 	if result.Activation.ID != "" {
-		if reconcileErr := l.ReconcileWakeup(context.WithoutCancel(ctx), result.Activation.ID); reconcileErr != nil {
+		if reconcileErr := l.ReconcileWakeup(forkcancelcapture.WithoutCancel(ctx), result.Activation.ID); reconcileErr != nil {
 			l.log(ctx, "reconcile_after_cancel", result.Activation.ID, reconcileErr)
 			if queued, recoveryErr := l.queueProjectionRecovery(ctx, result.Activation.ID, reconcileErr); !queued {
 				return result, errors.Join(err, recoveryErr)
@@ -333,7 +335,7 @@ func (l *Lifecycle) ReconcileWakeup(ctx context.Context, activationID string) (o
 		return nil
 	}
 	defer l.callbackWG.Done()
-	ctx = context.WithValue(ctx, lifecycleCallbackContextKey{}, l)
+	ctx = forkcancelcapture.RecordValue(ctx, context.WithValue(ctx, lifecycleCallbackContextKey{}, l))
 	activation, found, err := l.store.LoadGenericScheduleActivation(ctx, activationID)
 	if err != nil {
 		return err
@@ -344,7 +346,7 @@ func (l *Lifecycle) ReconcileWakeup(ctx context.Context, activationID string) (o
 			if wakeErr != nil {
 				return wakeErr
 			}
-			return l.retireExactWakeup(context.WithoutCancel(ctx), wakeup)
+			return l.retireExactWakeup(forkcancelcapture.WithoutCancel(ctx), wakeup)
 		}
 		return nil
 	}
@@ -368,7 +370,7 @@ func (l *Lifecycle) ReconcileWakeup(ctx context.Context, activationID string) (o
 		return err
 	}
 	if err := l.scheduler.RegisterGenericScheduleWakeup(ctx, wakeup, activation.Command.OwnerKind); err != nil {
-		return errors.Join(err, l.releaseWakeup(context.WithoutCancel(ctx), wakeup))
+		return errors.Join(err, l.releaseWakeup(forkcancelcapture.WithoutCancel(ctx), wakeup))
 	}
 	return nil
 }
@@ -402,9 +404,10 @@ func (l *Lifecycle) handleWakeup(ctx context.Context, wakeup Wakeup) {
 		return
 	}
 	defer l.callbackWG.Done()
-	callbackCtx, cancel := context.WithTimeout(ctx, wakeupCallbackTimeout)
+	l.bindForkCancelCapture(ctx)
+	callbackCtx, cancel := forkcancelcapture.WithTimeout(ctx, wakeupCallbackTimeout)
 	defer cancel()
-	callbackCtx = context.WithValue(callbackCtx, lifecycleCallbackContextKey{}, l)
+	callbackCtx = forkcancelcapture.RecordValue(callbackCtx, context.WithValue(callbackCtx, lifecycleCallbackContextKey{}, l))
 	result, err := l.fire(callbackCtx, wakeup)
 	if err != nil {
 		l.log(callbackCtx, "fire", wakeup.ActivationID(), err)
@@ -416,14 +419,14 @@ func (l *Lifecycle) handleWakeup(ctx context.Context, wakeup Wakeup) {
 		return
 	}
 	if result.Validate() != nil {
-		if retireErr := l.retireExactWakeup(context.WithoutCancel(callbackCtx), wakeup); retireErr != nil {
+		if retireErr := l.retireExactWakeup(forkcancelcapture.WithoutCancel(callbackCtx), wakeup); retireErr != nil {
 			l.log(callbackCtx, "retire_invalid_committed_wakeup", wakeup.ActivationID(), retireErr)
 			l.startTerminalRetirementRecovery(wakeup)
 		}
 		return
 	}
 	if result.Next.ID != "" {
-		if reconcileErr := l.ReconcileWakeup(context.WithoutCancel(callbackCtx), result.Next.ID); reconcileErr != nil {
+		if reconcileErr := l.ReconcileWakeup(forkcancelcapture.WithoutCancel(callbackCtx), result.Next.ID); reconcileErr != nil {
 			l.log(callbackCtx, "reconcile_after_fire", result.Next.ID, reconcileErr)
 			if queued, recoveryErr := l.queueProjectionRecovery(callbackCtx, result.Next.ID, reconcileErr); !queued {
 				l.log(callbackCtx, "recovery_refused", result.Next.ID, recoveryErr)
@@ -432,7 +435,7 @@ func (l *Lifecycle) handleWakeup(ctx context.Context, wakeup Wakeup) {
 		return
 	}
 	if result.Outcome == CommitTerminal || result.Outcome == CommitStaleCancelled {
-		if retireErr := l.retireExactWakeup(context.WithoutCancel(callbackCtx), wakeup); retireErr != nil {
+		if retireErr := l.retireExactWakeup(forkcancelcapture.WithoutCancel(callbackCtx), wakeup); retireErr != nil {
 			l.log(callbackCtx, "retire_terminal_wakeup", wakeup.ActivationID(), retireErr)
 			l.startTerminalRetirementRecovery(wakeup)
 		}
@@ -499,29 +502,29 @@ func (l *Lifecycle) fire(ctx context.Context, wakeup Wakeup) (outcome CommitResu
 		return CommitResult{Outcome: CommitRetry}, err
 	}
 	if len(plans) != 1 {
-		releaseErr := l.planner.ReleaseEnginePublications(context.WithoutCancel(ctx), plans)
+		releaseErr := l.planner.ReleaseEnginePublications(forkcancelcapture.WithoutCancel(ctx), plans)
 		return CommitResult{Outcome: CommitRetry}, errors.Join(fmt.Errorf("generic schedule publication planner returned %d plans", len(plans)), releaseErr)
 	}
 	result, err := l.store.CommitGenericScheduleOccurrence(ctx, CommitCommand{
 		Activation: activation, Occurrence: occurrence, Publication: plans[0],
 	})
 	if result.Outcome == "" || result.Outcome == CommitRetry {
-		return CommitResult{Outcome: CommitRetry}, errors.Join(err, fmt.Errorf("generic schedule occurrence has no acknowledged result"), result.Validate(), l.planner.ReleaseEnginePublications(context.WithoutCancel(ctx), plans))
+		return CommitResult{Outcome: CommitRetry}, errors.Join(err, fmt.Errorf("generic schedule occurrence has no acknowledged result"), result.Validate(), l.planner.ReleaseEnginePublications(forkcancelcapture.WithoutCancel(ctx), plans))
 	}
 	if validationErr := result.Validate(); validationErr != nil {
-		return result, errors.Join(err, validationErr, l.planner.ReleaseEnginePublications(context.WithoutCancel(ctx), plans))
+		return result, errors.Join(err, validationErr, l.planner.ReleaseEnginePublications(forkcancelcapture.WithoutCancel(ctx), plans))
 	}
 	if result.Outcome != CommitCommitted {
-		return result, errors.Join(err, l.planner.ReleaseEnginePublications(context.WithoutCancel(ctx), plans))
+		return result, errors.Join(err, l.planner.ReleaseEnginePublications(forkcancelcapture.WithoutCancel(ctx), plans))
 	}
 	if result.PublicationAlreadyCommitted {
-		return result, errors.Join(err, l.planner.ReleaseEnginePublications(context.WithoutCancel(ctx), plans))
+		return result, errors.Join(err, l.planner.ReleaseEnginePublications(forkcancelcapture.WithoutCancel(ctx), plans))
 	}
 	// Publication is already durable. Finalization/dispatch failures are logged
 	// for downstream recovery and never cause a synchronous occurrence resend.
 	publicationCtx := ctx
 	if activation.Command.OwnerKind == OwnerInstance {
-		publicationCtx = context.WithoutCancel(ctx)
+		publicationCtx = forkcancelcapture.WithoutCancel(ctx)
 	}
 	if finalizeErr := l.planner.FinalizeEnginePublications(publicationCtx, []runtimeengine.CommittedDurablePublication{result.Publication}); finalizeErr != nil {
 		err = errors.Join(err, finalizeErr)
@@ -766,10 +769,11 @@ func (l *Lifecycle) Stop(ctx context.Context) error {
 	if ctx.Value(lifecycleCallbackContextKey{}) == l {
 		return errLifecycleCallbackStop
 	}
+	l.bindForkCancelCapture(ctx)
 	l.mu.Lock()
 	if !l.stop {
 		l.stop = true
-		l.cancel()
+		forkcancelcapture.Owner(l).WrapPlain("generic schedule lifecycle stop", l.ctx, l.cancel)()
 	}
 	l.mu.Unlock()
 	done := make(chan struct{})
@@ -787,6 +791,13 @@ func (l *Lifecycle) Stop(ctx context.Context) error {
 		return err
 	}
 	return l.releaseOwnedClaims(ctx)
+}
+
+func (l *Lifecycle) bindForkCancelCapture(ctx context.Context) {
+	if trace := forkcancelcapture.Resolve(ctx, l); trace != nil {
+		trace.Link("generic schedule lifecycle context created at NewLifecycle", l.ctx, context.Background())
+		trace.Bind(l)
+	}
 }
 
 func (l *Lifecycle) log(ctx context.Context, action, activationID string, err error) {

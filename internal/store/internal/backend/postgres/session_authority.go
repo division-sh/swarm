@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	"github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
@@ -130,6 +131,7 @@ func (a *SessionAuthority) fenceLocal() {
 	if a == nil {
 		return
 	}
+	forkcancelcapture.Owner(a).Note("native local fence", a, nil, nil, nil, true)
 	a.fenced.Store(true)
 	a.fenceMu.Lock()
 	owners := make([]func(), 0, len(a.fenceOwners))
@@ -335,7 +337,7 @@ func (a *SessionAuthority) beginTxOptionsWithProof(ctx context.Context, opts *sq
 		}
 	}
 	// Investigation only: the existing owner settles admitted SQL synchronously.
-	beginCtx := context.WithoutCancel(ctx)
+	beginCtx := forkcancelcapture.WithoutCancel(ctx)
 	tx, err := begin(beginCtx, conn)
 	if callerErr := contextError(ctx); callerErr != nil {
 		err = errors.Join(callerErr, err)
@@ -449,7 +451,7 @@ func (a *SessionAuthority) runWithCallerCancellation(ctx context.Context, run fu
 			err = errors.Join(err, callerErr)
 		}
 	}()
-	return run(context.WithoutCancel(ctx))
+	return run(forkcancelcapture.WithoutCancel(ctx))
 }
 
 func (a *SessionAuthority) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
@@ -516,7 +518,7 @@ func (l *AdvisoryLockLease) releaseWithPublicationAdmissionPolicy(ctx context.Co
 		ctx = context.Background()
 	}
 	if !process {
-		ctx = context.WithoutCancel(ctx)
+		ctx = forkcancelcapture.WithoutCancel(ctx)
 	}
 	session := l.session
 	if l.testBeforeBeginOperation != nil {
@@ -544,7 +546,7 @@ func (l *AdvisoryLockLease) releaseWithPublicationAdmissionPolicy(ctx context.Co
 		endOperation()
 		return ctx.Err()
 	}
-	ctx = context.WithoutCancel(ctx)
+	ctx = forkcancelcapture.WithoutCancel(ctx)
 	terminalDiscard := func(releaseErr error) error {
 		discard := session.prepareDiscardExcept(l)
 		actions := l.retireLocked()
@@ -777,7 +779,7 @@ func acquireAdvisoryLockLeaseForPublication(
 		// original context. They must not reenter another session owner.
 		acquired, err = acquire(ctx, authority, lockKey)
 	} else {
-		err = authority.queryRowContext(context.WithoutCancel(ctx), tryAdvisoryLockSQL, lockKey).Scan(&acquired)
+		err = authority.queryRowContext(forkcancelcapture.WithoutCancel(ctx), tryAdvisoryLockSQL, lockKey).Scan(&acquired)
 	}
 	if err != nil {
 		return nil, false, errors.Join(ctx.Err(), fmt.Errorf("acquire advisory lock: %w", err))
@@ -788,7 +790,7 @@ func acquireAdvisoryLockLeaseForPublication(
 	}
 	if callerErr := ctx.Err(); callerErr != nil {
 		var unlocked bool
-		unlockErr := authority.queryRowContext(context.WithoutCancel(ctx), unlockAdvisoryLockSQL, lockKey).Scan(&unlocked)
+		unlockErr := authority.queryRowContext(forkcancelcapture.WithoutCancel(ctx), unlockAdvisoryLockSQL, lockKey).Scan(&unlocked)
 		if unlockErr == nil && !unlocked {
 			unlockErr = errors.New("canceled PostgreSQL advisory acquisition did not hold its lock")
 		}
@@ -894,9 +896,12 @@ func runAuthorityTransactionWithProof(
 	// The session is already pinned; this includes waiting for its operation
 	// ownership but no new connection-pool acquisition.
 	probe.RecordAdmission(0, 0, time.Since(beginStarted))
+	trace := forkcancelcapture.Resolve(ctx, session)
 	if err != nil {
+		trace.Note("native transaction begin failure", session, nil, ctx, err, true)
 		return false, err
 	}
+	defer trace.Bind(tx)()
 	probe.Begun()
 	orderingCtx, releaseOrdering := authoractivity.BindTransaction(ctx, ctx, tx, authoractivity.DialectPostgres)
 	defer releaseOrdering()
@@ -909,6 +914,7 @@ func runAuthorityTransactionWithProof(
 			cleanupStarted := time.Now()
 			probe.RollbackAttempted()
 			rolledBack, cleanupErr := rollbackSessionTransactionOutcome(tx, session, probe)
+			noteForkCancelRollback(trace, tx, session, ctx, rolledBack, err, cleanupErr)
 			probe.RecordCleanup(time.Since(cleanupStarted))
 			if cleanupErr != nil {
 				slog.Error("postgres retained transaction cleanup failed", "error", cleanupErr)
@@ -926,8 +932,11 @@ func runAuthorityTransactionWithProof(
 			return err
 		}
 		defer retireAdmission()
-		return fn(operationCtx, tx)
+		err = fn(operationCtx, tx)
+		noteForkCancelSQLContext(trace, tx, operationCtx, ctx, err)
+		return err
 	}); runErr != nil {
+		trace.Note("native transaction operation failure before rollback", tx, session, ctx, runErr, true)
 		serializationConflict = (opts == nil || !opts.ReadOnly) && exactSerializationConflict(runErr)
 		return false, runErr
 	}
@@ -944,6 +953,7 @@ func runAuthorityTransactionWithProof(
 	}
 	releaseOrdering()
 	if commitErr != nil {
+		trace.Note("native commit failure before disposal", tx, session, ctx, commitErr, true)
 		probe.CommitFailed()
 		cleanupStarted := time.Now()
 		// Fence possession before endTx releases operationMu. A successor must
@@ -961,6 +971,19 @@ func runAuthorityTransactionWithProof(
 	probe.RecordCleanup(time.Since(cleanupStarted))
 	tx = nil
 	return committed, endErr
+}
+
+func noteForkCancelRollback(trace *forkcancelcapture.Capture, tx *sql.Tx, session *SessionAuthority, ctx context.Context, rolledBack bool, err, cleanupErr error) {
+	if err != nil || cleanupErr != nil {
+		trace.Note(fmt.Sprintf("native rollback/discard return clean=%t", rolledBack), tx, session, ctx, cleanupErr, false)
+	}
+}
+
+func noteForkCancelSQLContext(trace *forkcancelcapture.Capture, tx *sql.Tx, operationCtx, ctx context.Context, err error) {
+	if err != nil {
+		trace.Note("native SQL context (caller cancellation removed here), source caller context", operationCtx, ctx, operationCtx, err, false)
+		trace.Note("native SQL context is the logical transaction", tx, operationCtx, operationCtx, nil, false)
+	}
 }
 
 func (l *AdvisoryLockLease) RunTransaction(
@@ -1045,6 +1068,13 @@ func rollbackSessionTransactionOutcome(tx *sql.Tx, session *SessionAuthority, pr
 		return false, errors.New("PostgreSQL session transaction is missing")
 	}
 	rollbackErr := tx.Rollback()
+	trace := forkcancelcapture.Owner(tx)
+	if trace == nil {
+		trace = forkcancelcapture.Owner(session)
+	}
+	if rollbackErr != nil {
+		trace.Note("native raw rollback return", tx, session, nil, rollbackErr, true)
+	}
 	probe.OrderingRolledBack(rollbackErr)
 	settledElsewhere := rollbackErr == sql.ErrTxDone
 	if settledElsewhere {
@@ -1057,6 +1087,9 @@ func rollbackSessionTransactionOutcome(tx *sql.Tx, session *SessionAuthority, pr
 	endErr := session.endTx(tx)
 	if endErr != nil {
 		discardErr = errors.Join(discardErr, session.forceDiscard())
+	}
+	if discardErr != nil {
+		trace.Note("native discard return", tx, session, nil, discardErr, true)
 	}
 	cleanRollback := rollbackErr == nil && !settledElsewhere && endErr == nil && discardErr == nil && !session.fenced.Load()
 	return cleanRollback, errors.Join(rollbackErr, endErr, wrapAdvisoryDiscardError(discardErr))
@@ -1132,6 +1165,7 @@ func (l *AdvisoryLockLease) ProveCurrentWithRead(ctx context.Context, deadline t
 			err = read(sqlCtx, tx)
 		}
 		if err != nil {
+			forkcancelcapture.Owner(session).Note("possession proof native read/lock failure before fence", tx, session, sqlCtx, err, true)
 			session.fenceLocal()
 		}
 		return err
@@ -1169,6 +1203,7 @@ func newLocalProofDecision(ctx context.Context, session *SessionAuthority, deadl
 			defer d.mu.Unlock()
 			if !d.finished && ctx.Err() == nil {
 				d.expired = true
+				forkcancelcapture.Owner(session).Note("possession budget expiry timer before fence", session, nil, ctx, nil, true)
 				session.fenceLocal()
 			}
 		})
@@ -1184,6 +1219,7 @@ func (d *localProofDecision) finish() {
 	}
 	if d.deadline > 0 && !d.finished && !time.Now().Before(d.expiresAt) && d.ctx.Err() == nil {
 		d.expired = true
+		forkcancelcapture.Owner(d.session).Note("possession budget expiry at settlement before fence", d.session, nil, d.ctx, nil, true)
 		d.session.fenceLocal()
 	}
 	d.finished = true
@@ -1237,7 +1273,7 @@ func (l *AdvisoryLockLease) proveCurrent(ctx context.Context, deadline time.Dura
 	if err != nil {
 		return err
 	}
-	queryCtx := context.WithoutCancel(ctx)
+	queryCtx := forkcancelcapture.WithoutCancel(ctx)
 	var held bool
 	var proofErr error
 	if prove != nil {
@@ -1250,6 +1286,7 @@ func (l *AdvisoryLockLease) proveCurrent(ctx context.Context, deadline time.Dura
 		err = errors.Join(err, errors.New("retained PostgreSQL session no longer owns its advisory lock"))
 	}
 	if proofErr != nil || !held {
+		forkcancelcapture.Owner(session).Note("advisory possession proof failure before fence", session, nil, queryCtx, err, true)
 		session.fenceLocal()
 	}
 	// Validity fences physical reuse only. It neither establishes cancellation
@@ -1262,6 +1299,7 @@ func (l *AdvisoryLockLease) proveCurrent(ctx context.Context, deadline time.Dura
 		return nil
 	})
 	if validityErr != nil {
+		forkcancelcapture.Owner(session).Note("advisory proof session validity failure before fence", session, nil, queryCtx, validityErr, true)
 		session.fenceLocal()
 		if validityErr != sql.ErrConnDone {
 			err = errors.Join(err, validityErr)

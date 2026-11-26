@@ -12,6 +12,7 @@ import (
 	runtimedeliverycontinuation "github.com/division-sh/swarm/internal/runtime/deliverycontinuation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
@@ -123,7 +124,7 @@ func (rt *Runtime) admitManagedExecution(ctx context.Context, authority runtimes
 		}
 		if activationErr != nil && rt.Logger != nil {
 			handleRuntimeLogPersistenceError("delivery-continuation", "authority_activation_postcommit_failed", rt.Logger.Warn(
-				context.WithoutCancel(ctx), "delivery-continuation", "authority_activation_postcommit_failed", nil, activationErr,
+				forkcancelcapture.WithoutCancel(ctx), "delivery-continuation", "authority_activation_postcommit_failed", nil, activationErr,
 			))
 		}
 		coordinator, err := runtimedeliverycontinuation.New(

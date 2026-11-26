@@ -24,6 +24,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	"github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/mcp"
@@ -807,7 +808,7 @@ func (p *PreparedSelectedFork) cleanupContext() (context.Context, error) {
 	if p == nil || p.operation == nil || p.operation.preparation == nil || p.processOwner == nil {
 		return nil, errors.New("selected cleanup requires its retained preparation original")
 	}
-	ctx := context.WithoutCancel(p.operation.preparation.Context())
+	ctx := forkcancelcapture.WithoutCancel(p.operation.preparation.Context())
 	if !startupownership.HasMutationAuthority(ctx) {
 		return startupownership.WithProcessMutationAuthority(ctx, p.processOwner)
 	}

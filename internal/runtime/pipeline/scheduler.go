@@ -9,6 +9,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 )
 
@@ -250,9 +251,9 @@ func (s *Scheduler) registerProjection(ctx context.Context, projection scheduled
 		var lease *worklifetime.Lease
 		var err error
 		if standing {
-			lease, err = owner.BeginStanding(context.WithoutCancel(ctx))
+			lease, err = owner.BeginStanding(forkcancelcapture.WithoutCancel(ctx))
 		} else {
-			lease, err = owner.Begin(context.WithoutCancel(ctx))
+			lease, err = owner.Begin(forkcancelcapture.WithoutCancel(ctx))
 		}
 		if err != nil {
 			return fmt.Errorf("admit scheduled task: %w", err)

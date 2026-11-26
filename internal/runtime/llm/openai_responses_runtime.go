@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 )
@@ -223,7 +224,7 @@ func (r *OpenAIResponsesRuntime) continueSession(ctx context.Context, s *Session
 	if resolved.Enabled() {
 		defer func() { retErr = releaseCompletedSessionLease(ctx, r.sessions, lease, s.AgentID, r.events, retErr) }()
 		var cancelLease context.CancelFunc
-		ctx, cancelLease = context.WithCancel(ctx)
+		ctx, cancelLease = forkcancelcapture.WithCancel(ctx)
 		defer cancelLease()
 		stopLeaseHeartbeat := sessions.StartLeaseHeartbeatWithErrorHandler(ctx, r.sessions, lease, func(heartbeatErr error) {
 			cancelLease()
@@ -400,7 +401,7 @@ func (r *OpenAIResponsesRuntime) continueSession(ctx context.Context, s *Session
 	if !settled.Committed {
 		return nil, unacknowledgedCompletionError(settlementErr)
 	}
-	handoffCtx := context.WithoutCancel(ctx)
+	handoffCtx := forkcancelcapture.WithoutCancel(ctx)
 	if settled.NoCurrentProjection() {
 		return nil, settlementErr
 	}

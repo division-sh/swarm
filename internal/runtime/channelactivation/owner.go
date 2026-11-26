@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/packs"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 )
 
 type Operation struct {
@@ -59,7 +60,7 @@ func WithExecutionLease(ctx context.Context, lease *Lease) context.Context {
 	if !lease.live() {
 		return ctx
 	}
-	return context.WithValue(ctx, executionLeaseContextKey{}, lease)
+	return forkcancelcapture.RecordValue(ctx, context.WithValue(ctx, executionLeaseContextKey{}, lease))
 }
 
 func ExecutionLeaseFromContext(ctx context.Context) (*Lease, bool) {
@@ -76,7 +77,7 @@ func WithoutExecutionLease(ctx context.Context) context.Context {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return context.WithValue(ctx, executionLeaseContextKey{}, (*Lease)(nil))
+	return forkcancelcapture.RecordValue(ctx, context.WithValue(ctx, executionLeaseContextKey{}, (*Lease)(nil)))
 }
 
 func newOwnedLease(owner *Owner, current *snapshot, operation Operation) *Lease {
@@ -327,14 +328,14 @@ func (o *Owner) replaceContext(ctx context.Context, publication channelonboardin
 		o.changed.Wait()
 	}
 	if err := ctx.Err(); err != nil {
-		o.accepting = admit == nil || predecessor == nil || admit(context.WithoutCancel(ctx), predecessor.publication) == nil
+		o.accepting = admit == nil || predecessor == nil || admit(forkcancelcapture.WithoutCancel(ctx), predecessor.publication) == nil
 		o.changed.Broadcast()
 		o.mu.Unlock()
 		return fmt.Errorf("fence predecessor channel activations: %w", err)
 	}
 	if admit != nil {
 		if err := admit(ctx, publication); err != nil {
-			o.accepting = predecessor == nil || admit(context.WithoutCancel(ctx), predecessor.publication) == nil
+			o.accepting = predecessor == nil || admit(forkcancelcapture.WithoutCancel(ctx), predecessor.publication) == nil
 			o.changed.Broadcast()
 			o.mu.Unlock()
 			return err

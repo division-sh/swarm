@@ -25,6 +25,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 )
@@ -131,7 +132,7 @@ func newWorkflowTimerLifecycle(store *workflowInstanceStore, source semanticview
 	if !posture.Valid() {
 		panic("pipeline: workflow timer lifecycle requires a valid execution posture")
 	}
-	recoveryCtx, cancel := context.WithCancel(context.Background())
+	recoveryCtx, cancel := forkcancelcapture.WithCancel(context.Background())
 	lifecycle := &WorkflowTimerLifecycle{
 		storeOwner:            store,
 		source:                source,
@@ -1137,7 +1138,7 @@ func (l *WorkflowTimerLifecycle) fireWakeup(ctx context.Context, wakeup Workflow
 		return WorkflowTimerFireRetry, false, err
 	}
 	if len(plans) != 1 {
-		releaseErr := l.publication.ReleaseEnginePublications(context.WithoutCancel(ctx), plans)
+		releaseErr := l.publication.ReleaseEnginePublications(forkcancelcapture.WithoutCancel(ctx), plans)
 		return WorkflowTimerFireRetry, false, errors.Join(fmt.Errorf("workflow timer publication planner returned %d plans", len(plans)), releaseErr)
 	}
 	committed, err := store.timerOccurrences.CommitWorkflowTimerOccurrence(ctx, WorkflowTimerOccurrenceCommand{
@@ -1147,7 +1148,7 @@ func (l *WorkflowTimerLifecycle) fireWakeup(ctx context.Context, wakeup Workflow
 		Publication: plans[0],
 	})
 	if committed.Outcome == "" {
-		err = errors.Join(err, fmt.Errorf("workflow timer occurrence has no acknowledged result"), committed.Validate(), l.publication.ReleaseEnginePublications(context.WithoutCancel(ctx), plans))
+		err = errors.Join(err, fmt.Errorf("workflow timer occurrence has no acknowledged result"), committed.Validate(), l.publication.ReleaseEnginePublications(forkcancelcapture.WithoutCancel(ctx), plans))
 		recoveryCtx := ctx
 		if registerErr := l.reconcileWakeupImmediately(recoveryCtx, occurrence.Activation); registerErr != nil {
 			l.logFailure(recoveryCtx, "workflow_timer_register_failed", occurrence.Activation, registerErr)
@@ -1157,10 +1158,10 @@ func (l *WorkflowTimerLifecycle) fireWakeup(ctx context.Context, wakeup Workflow
 		return WorkflowTimerFireRetry, false, err
 	}
 	if committed.Outcome == WorkflowTimerOccurrenceTerminal {
-		return WorkflowTimerFireTerminal, false, errors.Join(err, l.publication.ReleaseEnginePublications(context.WithoutCancel(ctx), plans))
+		return WorkflowTimerFireTerminal, false, errors.Join(err, l.publication.ReleaseEnginePublications(forkcancelcapture.WithoutCancel(ctx), plans))
 	}
 	if validationErr := committed.Validate(); validationErr != nil {
-		return WorkflowTimerFireTerminal, false, errors.Join(err, validationErr, l.publication.ReleaseEnginePublications(context.WithoutCancel(ctx), plans))
+		return WorkflowTimerFireTerminal, false, errors.Join(err, validationErr, l.publication.ReleaseEnginePublications(forkcancelcapture.WithoutCancel(ctx), plans))
 	}
 	if finalizeErr := l.publication.FinalizeEnginePublications(ctx, []runtimeengine.CommittedDurablePublication{committed.Publication}); finalizeErr != nil {
 		err = errors.Join(err, finalizeErr)
@@ -1509,7 +1510,7 @@ func (l *WorkflowTimerLifecycle) startRecovery(ctx context.Context, key string, 
 		l.projectionMu.Unlock()
 		return false
 	}
-	recoveryCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+	recoveryCtx, cancel := forkcancelcapture.WithCancel(forkcancelcapture.WithoutCancel(ctx))
 	stop := context.AfterFunc(l.recoveryCtx, cancel)
 	lease, err := l.workOwner.Begin(recoveryCtx)
 	if err != nil {

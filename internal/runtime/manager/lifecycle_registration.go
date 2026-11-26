@@ -6,6 +6,7 @@ import (
 	"time"
 
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -32,7 +33,7 @@ func (c *agentLifecycleCoordinator) resumeAgentRegistrationLocked(ctx context.Co
 	if c.outcomeReader == nil {
 		return true, errors.New("agent registration requires its immutable outcome owner")
 	}
-	readCtx := context.WithoutCancel(ctx)
+	readCtx := forkcancelcapture.WithoutCancel(ctx)
 	outcome, found, err := c.outcomeReader.ReadAgentLifecycleOutcome(readCtx, pending.request)
 	if err != nil {
 		return true, err
@@ -74,7 +75,7 @@ func (c *agentLifecycleCoordinator) resumeAgentRegistrationLocked(ctx context.Co
 
 func (c *agentLifecycleCoordinator) publishRegisteredExecutionLocked(rec PersistedAgent, agent Agent, admission semanticview.FlowOwnedAgentSubscriptionAdmission, view AgentLifecycleState, readinessOwner **agentLifecycleCell) {
 	identity := view.Identity
-	generationCtx, cancelGeneration := context.WithCancel(c.context())
+	generationCtx, cancelGeneration := forkcancelcapture.WithCancel(c.context())
 	startedAt := rec.StartedAt
 	if startedAt.IsZero() {
 		startedAt = time.Now()

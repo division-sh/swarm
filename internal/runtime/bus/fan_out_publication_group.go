@@ -11,6 +11,7 @@ import (
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
@@ -132,7 +133,7 @@ func (eb *EventBus) finishFanOutPublicationPreparation(group runtimepipelineobli
 			err = group.RecordPrepared(members[i].context, plan.prepared.publicationClaim.Claim(), plan)
 		}
 		if err != nil {
-			results[i].Err = errors.Join(err, eb.ReleaseEnginePublications(context.WithoutCancel(members[i].context), []runtimeengine.DurablePublicationPlan{plan}))
+			results[i].Err = errors.Join(err, eb.ReleaseEnginePublications(forkcancelcapture.WithoutCancel(members[i].context), []runtimeengine.DurablePublicationPlan{plan}))
 			results[i].Publication = nil
 		} else {
 			results[i].Publication = plan
@@ -153,7 +154,7 @@ func (eb *EventBus) prepareFanOutPublicationMembers(ctx context.Context, request
 		}
 		plans, err := eb.prepareEnginePublicationsWithMember(ctx, []runtimeengine.EmitIntent{requests[i].Intent}, runtimepipeline.PreparedWorkflowPublicationState{}, &members[i])
 		if err == nil && len(plans) != 1 {
-			err = errors.Join(errors.New("fan-out publication requires exactly one plan"), eb.ReleaseEnginePublications(context.WithoutCancel(ctx), plans))
+			err = errors.Join(errors.New("fan-out publication requires exactly one plan"), eb.ReleaseEnginePublications(forkcancelcapture.WithoutCancel(ctx), plans))
 		}
 		if err != nil {
 			results[i].Err = err
@@ -372,7 +373,7 @@ func (d engineDispatcher) dispatchFanOutOperation(ctx context.Context, operation
 	retained := false
 	defer func() {
 		if !retained {
-			err = errors.Join(err, claim.Release(context.WithoutCancel(ctx)))
+			err = errors.Join(err, claim.Release(forkcancelcapture.WithoutCancel(ctx)))
 		}
 	}()
 	if operation.outcome == EventAppendExactDuplicate || operation.targetFailure {
@@ -552,7 +553,7 @@ func (s *fanOutPublicationSettlement) flushLocked() error {
 	if err != nil {
 		// Observation can diagnose uncertain satisfaction, but never becomes
 		// a synthetic committed result or permission to retry this segment.
-		observation, readErr := s.group.ReadPublicationSettlement(context.WithoutCancel(s.ctx), s.members)
+		observation, readErr := s.group.ReadPublicationSettlement(forkcancelcapture.WithoutCancel(s.ctx), s.members)
 		for _, row := range observation.Rows {
 			if row.State == runtimepipelineobligation.PublicationSettlementConflict {
 				readErr = errors.Join(readErr, fmt.Errorf("publication %s settlement conflict: %s", row.Claim.EventID(), row.Reason))

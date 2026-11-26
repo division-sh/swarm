@@ -16,6 +16,7 @@ import (
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -35,14 +36,14 @@ func withConnectRoutePlanPreview(ctx context.Context) context.Context {
 	if preview, _ := ctx.Value(connectRoutePlanPreviewRoutesKey{}).(*connectRoutePlanPreviewRoutes); preview != nil {
 		return ctx
 	}
-	return context.WithValue(ctx, connectRoutePlanPreviewRoutesKey{}, &connectRoutePlanPreviewRoutes{})
+	return forkcancelcapture.RecordValue(ctx, context.WithValue(ctx, connectRoutePlanPreviewRoutesKey{}, &connectRoutePlanPreviewRoutes{}))
 }
 
 func withClosedPublicationPlanning(ctx context.Context) context.Context {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return context.WithValue(ctx, closedPublicationPlanningKey{}, true)
+	return forkcancelcapture.RecordValue(ctx, context.WithValue(ctx, closedPublicationPlanningKey{}, true))
 }
 
 type connectRoutePlanResolver struct {
@@ -244,7 +245,7 @@ func (r connectRoutePlanResolver) remainingMatchedPlanErrors(ctx context.Context
 			preview.selected[flow] = append([]runtimeflowidentity.Instance(nil), instances...)
 		}
 	}
-	ctx = context.WithValue(ctx, connectRoutePlanPreviewRoutesKey{}, preview)
+	ctx = forkcancelcapture.RecordValue(ctx, context.WithValue(ctx, connectRoutePlanPreviewRoutesKey{}, preview))
 	state.out = connectRoutePlanDispatch{ExtraDetail: make(map[string]any)}
 	var failures error
 	for _, plan := range remaining {

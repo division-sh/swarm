@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"strings"
 	"time"
@@ -137,7 +138,7 @@ func (am *AgentManager) reconcileDeclaredDynamicFlowRuntimeReadiness(
 	// The caller may stop waiting, but the accepted attempt must settle its
 	// retirement. Begin retains the exact Manager/standing/fork occurrence;
 	// cancellation of those owners, rather than the waiter, controls execution.
-	lease, err := am.beginWork(context.WithoutCancel(admission.ctx), "declared readiness attempt")
+	lease, err := am.beginWork(forkcancelcapture.WithoutCancel(admission.ctx), "declared readiness attempt")
 	if err != nil {
 		return err
 	}
@@ -222,7 +223,7 @@ func (am *AgentManager) completeDeclaredDynamicFlowReadiness(admission dynamicFl
 			return
 		}
 		current.ctx = runtimeauthoractivity.WithScope(current.ctx, scope)
-		current.ctx = context.WithValue(current.ctx, readinessRetirementWaitersKey{}, attempt)
+		current.ctx = forkcancelcapture.RecordValue(current.ctx, context.WithValue(current.ctx, readinessRetirementWaitersKey{}, attempt))
 		attemptErr := am.reconcileDynamicFlowRuntimeReadinessOnce(current)
 		am.dynamicFlowReadinessMu.Lock()
 		if attempt.successorRequired && lease.Context().Err() == nil {

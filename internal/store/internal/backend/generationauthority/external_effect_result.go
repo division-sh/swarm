@@ -10,6 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	runtimeownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 )
@@ -35,7 +36,7 @@ func PrepareExternalEffectResult(ctx context.Context, result effects.Settlement,
 	if err != nil {
 		return nil, err
 	}
-	return context.WithValue(ctx, externalEffectResultKey{}, &externalEffectResult{request: result, authority: authority, original: original, originalErr: originalErr}), nil
+	return forkcancelcapture.RecordValue(ctx, context.WithValue(ctx, externalEffectResultKey{}, &externalEffectResult{request: result, authority: authority, original: original, originalErr: originalErr})), nil
 }
 
 // ExternalEffectResultRetryContext is called only after the native retry owner
@@ -54,10 +55,10 @@ func ExternalEffectResultRetryContext(parent, failed context.Context, tx *sql.Tx
 	if !scope.active || scope.tx != tx {
 		return nil, errors.New("external effect retry requires its exact native transaction")
 	}
-	return context.WithValue(parent, externalEffectResultKey{}, &externalEffectResult{
+	return forkcancelcapture.RecordValue(parent, context.WithValue(parent, externalEffectResultKey{}, &externalEffectResult{
 		request: result.request, authority: result.authority,
 		original: result.original, originalErr: result.originalErr,
-	}), nil
+	})), nil
 }
 
 func admitExternalEffectResultTx(ctx context.Context, tx *sql.Tx, sqlite bool, result *externalEffectResult) error {

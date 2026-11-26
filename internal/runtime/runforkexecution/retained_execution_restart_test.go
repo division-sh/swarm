@@ -74,7 +74,7 @@ func TestIssue642RetainedForkCrashRestartBothStores(t *testing.T) {
 					t.Setenv(publishedJoinFlowEnv, "orders")
 					checkpointCut = "retained_join_after_activation"
 				}
-				checkpoint := killSelectedForkAtCheckpoint(t, backend, dsn, checkpointCut)
+				checkpoint := killSelectedForkAtObservedActivationCheckpoint(t, backend, dsn, checkpointCut)
 				operations := selected.(interface {
 					LoadForkOperation(context.Context, string, string, string) (runfork.ForkOperationRecord, bool, error)
 				})
@@ -127,7 +127,9 @@ func TestIssue642RetainedForkCrashRestartBothStores(t *testing.T) {
 				if restoreFailure == nil {
 					ordinary, contexts = ordinaryForkRuntimeFixture(t, ctx, selected, owner, loaded, executionposture.MockOnly)
 				}
-				recovered, err := owner.RecoverSelectedForkContexts(ctx, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.MockOnly), SelectedForkRecoveryEnvironment{
+				recoveryCtx, recoveryTrace := armSelectedForkActivation(ctx, backend, capability)
+				defer recoveryTrace.Close()
+				recovered, err := owner.RecoverSelectedForkContexts(recoveryCtx, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.MockOnly), SelectedForkRecoveryEnvironment{
 					SourceLoader: loader, AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability},
 					LiveContexts: contexts, LiveRuns: selected.(runlifecycle.LiveRunReader),
 					AcquireLiveRuntime: func(ctx context.Context, reference sourceartifact.RootAdmissionReference) (*rootruntime.RuntimeContextUse, error) {
@@ -146,6 +148,8 @@ func TestIssue642RetainedForkCrashRestartBothStores(t *testing.T) {
 				if err != nil || len(recovered) != 1 || recovered[0].RunID != checkpoint.ForkRun || recovered[0].Disposition != expectedRecovery {
 					diagnostic, diagnosticErr := storetest.ReadServedRunDebugSummary(context.WithoutCancel(ctx), selected, checkpoint.ForkRun)
 					t.Logf("PRE_ACK_RECOVERY_NATIVE_STATE %s err=%v", diagnostic, diagnosticErr)
+					logPostgresForkActivationFailure(t, backend, capability)
+					logSelectedForkActivationTrace(t, recoveryTrace, ctx, err)
 					t.Fatalf("retained recovery failed: %+v %v", recovered, err)
 				}
 				wait, cancel := context.WithTimeout(context.Background(), 15*time.Second)

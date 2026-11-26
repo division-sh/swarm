@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 )
@@ -106,14 +107,14 @@ func (pc *PipelineCoordinator) claimAndServeFanOutTurn(ctx context.Context, owne
 	}
 	if err != nil {
 		// A returned claim is acknowledged ownership even when cleanup failed.
-		settlement, releaseErr := owner.ReleaseFanOutClaim(context.WithoutCancel(ctx), claim)
+		settlement, releaseErr := owner.ReleaseFanOutClaim(forkcancelcapture.WithoutCancel(ctx), claim)
 		if settlement.Acknowledged {
 			return fanOutTurnReleased, errors.Join(err, releaseErr)
 		}
 		return fanOutTurnAwaitScan, errors.Join(err, releaseErr)
 	}
 	if candidate != nil && (intent.Request.Key != *candidate || claim.Key != *candidate) {
-		settlement, releaseErr := owner.ReleaseFanOutClaim(context.WithoutCancel(ctx), claim)
+		settlement, releaseErr := owner.ReleaseFanOutClaim(forkcancelcapture.WithoutCancel(ctx), claim)
 		if settlement.Acknowledged {
 			return fanOutTurnReleased, errors.Join(errors.New("fan-out claim differs from the selected candidate"), releaseErr)
 		}
@@ -123,7 +124,7 @@ func (pc *PipelineCoordinator) claimAndServeFanOutTurn(ctx context.Context, owne
 	release := true
 	defer func() {
 		if release {
-			settlement, err := owner.ReleaseFanOutClaim(context.WithoutCancel(ctx), claim)
+			settlement, err := owner.ReleaseFanOutClaim(forkcancelcapture.WithoutCancel(ctx), claim)
 			if settlement.Acknowledged && disposition == fanOutTurnAwaitScan {
 				disposition = fanOutTurnReleased
 			}
@@ -133,10 +134,10 @@ func (pc *PipelineCoordinator) claimAndServeFanOutTurn(ctx context.Context, owne
 		}
 	}()
 	blockClaim := func(stage string, ordinal int, cause error, plans []runtimeengine.DurablePublicationPlan) (fanOutTurnDisposition, error) {
-		releaseErr := plannerReleaseFanOutPlans(context.WithoutCancel(ctx), pc.bus, plans)
+		releaseErr := plannerReleaseFanOutPlans(forkcancelcapture.WithoutCancel(ctx), pc.bus, plans)
 		cause = fanOutBlockedTurnCause(stage, ordinal, intent, cause)
 		failure := runtimefailures.Normalize(cause, "runtime.fan_out", stage)
-		settlement, blockErr := owner.BlockFanOutClaim(context.WithoutCancel(ctx), FanOutBlockRequest{Claim: claim, Now: time.Now().UTC(), Failure: failure})
+		settlement, blockErr := owner.BlockFanOutClaim(forkcancelcapture.WithoutCancel(ctx), FanOutBlockRequest{Claim: claim, Now: time.Now().UTC(), Failure: failure})
 		if settlement.Acknowledged {
 			release = false
 			return fanOutTurnBlocked, errors.Join(cause, releaseErr, blockErr)
@@ -148,7 +149,7 @@ func (pc *PipelineCoordinator) claimAndServeFanOutTurn(ctx context.Context, owne
 	evaluationCtx = runtimecorrelation.WithRunID(evaluationCtx, intent.Request.Key.RunID)
 	input, group, groupErr := owner.BeginFanOutEvaluation(evaluationCtx, claim, func(input FanOutEvaluationInput) error { return input.Validate(intent) })
 	if group != nil {
-		defer func() { turnErr = errors.Join(turnErr, group.Close(context.WithoutCancel(evaluationCtx))) }()
+		defer func() { turnErr = errors.Join(turnErr, group.Close(forkcancelcapture.WithoutCancel(evaluationCtx))) }()
 	}
 	var loadErr *FanOutEvaluationLoadError
 	if errors.As(groupErr, &loadErr) {
@@ -157,7 +158,7 @@ func (pc *PipelineCoordinator) claimAndServeFanOutTurn(ctx context.Context, owne
 			return fanOutTurnYielded, groupErr
 		case FanOutReadRetry:
 			cause := runtimefailures.Wrap(runtimefailures.ClassDependencyUnavailable, "fan_out_read_retryable", "runtime.fan_out", loadErr.Stage, map[string]any{"stage": loadErr.Stage}, groupErr)
-			settlement, retryErr := owner.ReleaseFanOutRetryable(context.WithoutCancel(ctx), FanOutRetryableRelease{
+			settlement, retryErr := owner.ReleaseFanOutRetryable(forkcancelcapture.WithoutCancel(ctx), FanOutRetryableRelease{
 				Claim: claim, Now: time.Now().UTC(), ReadEvaluation: true,
 				Failure: runtimefailures.Normalize(cause, "runtime.fan_out", loadErr.Stage),
 			})
@@ -239,7 +240,7 @@ func (pc *PipelineCoordinator) claimAndServeFanOutTurn(ctx context.Context, owne
 			failure, disposition := fanOutPrecommitFailure(evalErr)
 			switch disposition {
 			case fanOutFailureYield:
-				return fanOutTurnYielded, errors.Join(evalErr, planner.ReleaseEnginePublications(context.WithoutCancel(workCtx), prepared))
+				return fanOutTurnYielded, errors.Join(evalErr, planner.ReleaseEnginePublications(forkcancelcapture.WithoutCancel(workCtx), prepared))
 			case fanOutFailureRetry:
 				retryReleased, retryErr := releaseFanOutPrecommitRetry(workCtx, owner, planner, claim, prepared, evalErr, turnStarted)
 				if retryReleased {
@@ -293,7 +294,7 @@ func (pc *PipelineCoordinator) claimAndServeFanOutTurn(ctx context.Context, owne
 			failure, disposition := fanOutPrecommitFailure(prepareErr)
 			switch disposition {
 			case fanOutFailureYield:
-				return fanOutTurnYielded, errors.Join(prepareErr, planner.ReleaseEnginePublications(context.WithoutCancel(workCtx), prepared))
+				return fanOutTurnYielded, errors.Join(prepareErr, planner.ReleaseEnginePublications(forkcancelcapture.WithoutCancel(workCtx), prepared))
 			case fanOutFailureRetry:
 				retryReleased, retryErr := releaseFanOutPrecommitRetry(workCtx, owner, planner, claim, prepared, prepareErr, turnStarted)
 				if retryReleased {
@@ -335,7 +336,7 @@ func (pc *PipelineCoordinator) claimAndServeFanOutTurn(ctx context.Context, owne
 		}
 	}
 	if len(committed.Publications) > 0 {
-		if err := planner.DispatchFanOutPublications(context.WithoutCancel(workCtx), group, committed.Publications); err != nil {
+		if err := planner.DispatchFanOutPublications(forkcancelcapture.WithoutCancel(workCtx), group, committed.Publications); err != nil {
 			return fanOutTurnCommitted, errors.Join(committed.PostCommitFailure, err)
 		}
 	}
@@ -369,8 +370,8 @@ func releaseFanOutPrecommitRetry(
 	cause error,
 	started time.Time,
 ) (bool, error) {
-	releasePlansErr := planner.ReleaseEnginePublications(context.WithoutCancel(ctx), plans)
-	settlement, releaseClaimErr := owner.ReleaseFanOutRetryable(context.WithoutCancel(ctx), FanOutRetryableRelease{
+	releasePlansErr := planner.ReleaseEnginePublications(forkcancelcapture.WithoutCancel(ctx), plans)
+	settlement, releaseClaimErr := owner.ReleaseFanOutRetryable(forkcancelcapture.WithoutCancel(ctx), FanOutRetryableRelease{
 		Claim: claim, Now: time.Now().UTC(), ObservedDuration: time.Since(started),
 		Failure: runtimefailures.Normalize(cause, "runtime.fan_out", "prepare_chunk"),
 	})
@@ -447,7 +448,7 @@ func (pc *PipelineCoordinator) commitFanOutRange(
 		return CommittedFanOutChunk{}, fanOutTurnUncertain, err
 	}
 	if failure.Retryable {
-		settlement, releaseErr := owner.ReleaseFanOutRetryable(context.WithoutCancel(ctx), FanOutRetryableRelease{
+		settlement, releaseErr := owner.ReleaseFanOutRetryable(forkcancelcapture.WithoutCancel(ctx), FanOutRetryableRelease{
 			Claim: claim, Now: time.Now().UTC(), ObservedDuration: time.Since(started),
 			Failure: failure,
 		})
@@ -472,7 +473,7 @@ func (pc *PipelineCoordinator) blockFanOutCommit(ctx context.Context, owner FanO
 		}, cause)
 	}
 	failure := runtimefailures.Normalize(cause, "runtime.fan_out", "blocked_commit")
-	settlement, blockErr := owner.BlockFanOutClaim(context.WithoutCancel(ctx), FanOutBlockRequest{Claim: claim, Now: now, Failure: failure})
+	settlement, blockErr := owner.BlockFanOutClaim(forkcancelcapture.WithoutCancel(ctx), FanOutBlockRequest{Claim: claim, Now: now, Failure: failure})
 	disposition := fanOutTurnAwaitScan
 	if settlement.Acknowledged {
 		disposition = fanOutTurnBlocked
@@ -487,7 +488,7 @@ func releaseFanOutOutcomePlans(ctx context.Context, planner EnginePublicationPla
 			plans = append(plans, outcome.Publication)
 		}
 	}
-	return planner.ReleaseEnginePublications(context.WithoutCancel(ctx), plans)
+	return planner.ReleaseEnginePublications(forkcancelcapture.WithoutCancel(ctx), plans)
 }
 
 type fanOutFailureDisposition uint8

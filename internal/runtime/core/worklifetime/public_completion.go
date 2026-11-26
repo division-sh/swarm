@@ -3,6 +3,8 @@ package worklifetime
 import (
 	"context"
 	"errors"
+
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 )
 
 const PublicCompletionLimit = 128
@@ -31,7 +33,7 @@ func BeginPublicCompletion(ctx context.Context, owner Occurrence) (*Lease, error
 	if process == nil {
 		return nil, errors.New("public completion requires its occurrence's process owner")
 	}
-	accepted := WithProcess(context.WithoutCancel(ctx), process)
+	accepted := WithProcess(forkcancelcapture.WithoutCancel(ctx), process)
 	reservation, err := process.occurrence.gate.beginOwned(accepted, true, nil, true, false)
 	if err != nil {
 		return nil, err

@@ -8,6 +8,7 @@ import (
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 )
 
 func (eb *EventBus) beginPublicCompletion(ctx context.Context) (context.Context, *worklifetime.Lease, func(), error) {
@@ -23,7 +24,7 @@ func (eb *EventBus) beginPublicCompletion(ctx context.Context) (context.Context,
 	}
 	// Preparation/COMMIT observes both the caller and exact retirement. Only
 	// acknowledged consequences use the independent accepted lease context.
-	ctx, cancel := context.WithCancelCause(ctx)
+	ctx, cancel := forkcancelcapture.WithCancelCause(ctx)
 	bridgeDone := make(chan struct{})
 	stop := context.AfterFunc(lease.Context(), func() {
 		defer close(bridgeDone)
@@ -41,7 +42,7 @@ func (eb *EventBus) beginPublicCompletion(ctx context.Context) (context.Context,
 	ctx = worklifetime.WithOccurrence(worklifetime.CarryAcceptedLease(ctx, lease.Context()), owner)
 	process, _ := worklifetime.ProcessFromContext(lease.Context())
 	ctx = worklifetime.WithProcess(ctx, process)
-	ctx = context.WithValue(ctx, runtimeWorkAdmissionContextKey{}, runtimeWorkAdmission{owner: owner, context: ctx})
+	ctx = forkcancelcapture.RecordValue(ctx, context.WithValue(ctx, runtimeWorkAdmissionContextKey{}, runtimeWorkAdmission{owner: owner, context: ctx}))
 	return ctx, lease, finishPrecommit, nil
 }
 

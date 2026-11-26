@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 )
@@ -38,7 +39,7 @@ func (adapter contextCompactionAdapter) retryRejectedContext(ctx context.Context
 	envelope := runtimefailures.FromError(failure, "llm-context", "provider_rejected_context")
 	// A confirmed invalid request produced no model turn or spend. Retire its
 	// physical attempt before a single fresh, normally admitted request.
-	if err := dispatch.handle.Settle(context.WithoutCancel(ctx), runtimeeffects.StateTerminalFailure, &envelope.Failure, map[string]any{"context_window_rejected": true, "response_fingerprint": runtimeeffects.Fingerprint(raw)}); err != nil {
+	if err := dispatch.handle.Settle(forkcancelcapture.WithoutCancel(ctx), runtimeeffects.StateTerminalFailure, &envelope.Failure, map[string]any{"context_window_rejected": true, "response_fingerprint": runtimeeffects.Fingerprint(raw)}); err != nil {
 		return nil, true, errors.Join(failure, err)
 	}
 	if err := ctx.Err(); err != nil {
