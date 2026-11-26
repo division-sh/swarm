@@ -176,6 +176,7 @@ func (b *Backend) runTransactionOutcome(ctx context.Context, opts *sql.TxOptions
 	defer func() { probe.Finish(err) }()
 	defer func() {
 		cleanupStarted := time.Now()
+		ownerCtxErrAtCleanupEntry := ctx.Err()
 		released := true
 		var cleanupErr error
 		rolledBack := false
@@ -217,7 +218,9 @@ func (b *Backend) runTransactionOutcome(ctx context.Context, opts *sql.TxOptions
 			*readReleased[0] = released && closeErr == nil
 		}
 		if cleanupErr != nil {
-			slog.Error("postgres transaction cleanup failed", "error", cleanupErr)
+			slog.Error("postgres transaction cleanup failed", "error", cleanupErr,
+				"owner_context_error_at_cleanup_entry", ownerCtxErrAtCleanupEntry,
+				"owner_context_error_at_log", ctx.Err())
 			err = errors.Join(err, cleanupErr)
 		}
 		if serializationConflict && rolledBack && cleanupErr == nil && ctx.Err() == nil {
