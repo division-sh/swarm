@@ -317,19 +317,13 @@ func (c *Coordinator) BeginRetirement() {
 		return
 	}
 	c.mu.Lock()
-	cancel := c.beginRetirementLocked()
+	retired := c.retired
+	c.closeAdmissionLocked()
+	cancel := c.cancel
 	c.mu.Unlock()
-	if cancel != nil {
+	if cancel != nil && !retired {
 		cancel()
 	}
-}
-
-func (c *Coordinator) beginRetirementLocked() context.CancelFunc {
-	if c.retired {
-		return nil
-	}
-	c.closeAdmissionLocked()
-	return c.cancel
 }
 
 // SelectedScanStamp marks the start of the caller's selected-work quiet check.
@@ -347,8 +341,13 @@ func (c *Coordinator) SealQuietSelectedScans(stamp uint64) bool {
 		c.mu.Unlock()
 		return false
 	}
+	if c.retired {
+		c.mu.Unlock()
+		return true
+	}
 	c.selectedScansSealed = true
-	cancel := c.beginRetirementLocked()
+	c.closeAdmissionLocked()
+	cancel := c.cancel
 	c.mu.Unlock()
 	if cancel != nil {
 		cancel()
