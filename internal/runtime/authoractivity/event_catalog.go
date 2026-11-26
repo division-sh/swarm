@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 )
 
 type StoryDisposition string
@@ -117,10 +119,10 @@ func WithResolvedEventDescriptor(ctx context.Context, scope Scope, descriptor Ev
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return context.WithValue(ctx, resolvedEventDescriptorContextKey{}, resolvedEventDescriptorFact{
+	return forkcancelcapture.RecordValue(ctx, context.WithValue(ctx, resolvedEventDescriptorContextKey{}, resolvedEventDescriptorFact{
 		scope:      scope,
 		descriptor: descriptor,
-	}), nil
+	})), nil
 }
 
 // WithoutResolvedEventDescriptor starts a new event-publication context. A
@@ -130,7 +132,7 @@ func WithoutResolvedEventDescriptor(ctx context.Context) context.Context {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return context.WithValue(ctx, resolvedEventDescriptorContextKey{}, resolvedEventDescriptorFact{})
+	return forkcancelcapture.RecordValue(ctx, context.WithValue(ctx, resolvedEventDescriptorContextKey{}, resolvedEventDescriptorFact{}))
 }
 
 func ResolvedEventDescriptorFromContext(ctx context.Context, scope Scope, eventType string) (EventDescriptor, bool, error) {

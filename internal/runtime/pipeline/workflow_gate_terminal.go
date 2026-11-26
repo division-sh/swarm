@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
 )
 
@@ -170,7 +171,7 @@ func (pc *PipelineCoordinator) commitWorkflowTerminationAttempt(
 			return WorkflowInstance{}, err
 		}
 		if len(publications) != len(prepared.Emissions) {
-			releaseErr := planner.ReleaseEnginePublications(context.WithoutCancel(ctx), publications)
+			releaseErr := planner.ReleaseEnginePublications(forkcancelcapture.WithoutCancel(ctx), publications)
 			return WorkflowInstance{}, errors.Join(fmt.Errorf("workflow termination planner returned %d plans for %d emissions", len(publications), len(prepared.Emissions)), releaseErr)
 		}
 	}
@@ -181,7 +182,7 @@ func (pc *PipelineCoordinator) commitWorkflowTerminationAttempt(
 	committed, err := pc.workflowStore.engineMutations.CommitWorkflowEngineMutation(ctx, command)
 	if err != nil && committed.PostCommit.FlowDeactivation == nil {
 		if planner, ok := pc.bus.(EnginePublicationPlanner); ok {
-			err = errors.Join(err, planner.ReleaseEnginePublications(context.WithoutCancel(ctx), publications))
+			err = errors.Join(err, planner.ReleaseEnginePublications(forkcancelcapture.WithoutCancel(ctx), publications))
 		}
 		return WorkflowInstance{}, err
 	}
@@ -202,7 +203,7 @@ func (pc *PipelineCoordinator) commitWorkflowTerminationAttempt(
 		if dispatcher == nil {
 			postCommitErr = errors.Join(postCommitErr, fmt.Errorf("workflow termination requires the post-commit dispatcher"))
 		} else {
-			postCommitErr = errors.Join(postCommitErr, dispatcher.DispatchPostCommit(context.WithoutCancel(ctx), prepared.Emissions))
+			postCommitErr = errors.Join(postCommitErr, dispatcher.DispatchPostCommit(forkcancelcapture.WithoutCancel(ctx), prepared.Emissions))
 		}
 	}
 	persisted, found, err := pc.workflowStore.Load(ctx, flowIdentity)

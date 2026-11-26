@@ -182,15 +182,20 @@ func TestIssue642PreparedArrivalTimeoutContinuesExactDeliveryBothStores(t *testi
 			if err != nil {
 				t.Fatal(err)
 			}
-			result, err := ExecuteSelectedContractRunFork(sourceCtx, SelectedContractExecutionRequest{
+			activationCtx, activationTrace := armSelectedForkActivation(sourceCtx, backend, owner.ports.contexts.capability)
+			defer activationTrace.Close()
+			result, err := ExecuteSelectedContractRunFork(activationCtx, SelectedContractExecutionRequest{
 				SourceRunID: sourceRun, At: marker, Owner: owner, ForkOperation: &operation,
 				LiveRuntime: liveRuntime, LiveContexts: liveContexts, LiveRuns: selected.(runlifecycle.LiveRunReader),
 				SourceLoader: loader, ContractSelection: selection,
 				AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: owner.ports.contexts.capability},
 			})
 			if err != nil || !result.Activation.Activated {
+				logPostgresForkActivationFailure(t, backend, owner.ports.contexts.capability)
+				logSelectedForkActivationTrace(t, activationTrace, sourceCtx, err)
 				t.Fatalf("selected prepared arrival activation must succeed: %+v err=%v", result, err)
 			}
+			activationTrace.Close()
 			child := result.Materialization.ForkRunID
 			operations := selected.(interface {
 				LoadForkOperation(context.Context, string, string, string) (runfork.ForkOperationRecord, bool, error)

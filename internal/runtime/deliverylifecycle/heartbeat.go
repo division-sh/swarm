@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 )
 
 // ClaimHeartbeat retains one exact claim while its handler is executing. Its
@@ -54,7 +55,7 @@ type ClaimSettlementGuard struct {
 // its final selected-store settlement after execution cancellation. The heartbeat
 // lease remains owned until Stop; this context cannot authorize another claim.
 func (g *ClaimSettlementGuard) Context() context.Context {
-	return context.WithoutCancel(g.heartbeat.ctx)
+	return forkcancelcapture.WithoutCancel(g.heartbeat.ctx)
 }
 
 // MarkCommitted records terminal selected-store settlement and releases the
@@ -139,12 +140,15 @@ func startClaimHeartbeatWithRenewal(ctx context.Context, owner worklifetime.Occu
 		_ = workLease.Done()
 		return nil, fmt.Errorf("delivery claim heartbeat interval must be positive and shorter than the claim lease")
 	}
-	heartbeatCtx, cancel := context.WithCancelCause(worklifetime.WithOccurrence(workLease.Context(), owner))
+	heartbeatParent := worklifetime.WithOccurrence(workLease.Context(), owner)
+	heartbeatCtx, cancel := context.WithCancelCause(heartbeatParent)
+	trace := forkcancelcapture.Resolve(heartbeatParent, heartbeatParent)
+	trace.Link("delivery claim heartbeat from admitted lease occurrence", heartbeatCtx, heartbeatParent)
 	h := &ClaimHeartbeat{
-		ctx: heartbeatCtx, cancel: cancel, stop: make(chan struct{}), done: make(chan struct{}), workLease: workLease,
+		ctx: heartbeatCtx, cancel: trace.Wrap("delivery claim heartbeat cancel", heartbeatCtx, cancel), stop: make(chan struct{}), done: make(chan struct{}), workLease: workLease,
 		store: store, claim: claim, startedAt: time.Now(),
 	}
-	h.ctx = WithClaim(context.WithValue(h.ctx, claimHeartbeatContextKey{}, h), claim)
+	h.ctx = WithClaim(forkcancelcapture.RecordValue(h.ctx, context.WithValue(h.ctx, claimHeartbeatContextKey{}, h)), claim)
 	if err != nil {
 		h.recordRenewalDiagnostic("renew delivery claim before execution", err)
 	}
@@ -220,7 +224,7 @@ func (h *ClaimHeartbeat) BeginSettlement() (*ClaimSettlementGuard, error) {
 		h.renewMu.Unlock()
 		return nil, fmt.Errorf("delivery claim heartbeat is already settled")
 	}
-	commit, err := h.store.RenewClaim(context.WithoutCancel(h.ctx), h.claim)
+	commit, err := h.store.RenewClaim(forkcancelcapture.WithoutCancel(h.ctx), h.claim)
 	if !commit.Acknowledged {
 		h.recordRenewalFailure("renew delivery claim before settlement", unacknowledgedRenewalError(err))
 		h.renewMu.Unlock()
@@ -286,7 +290,10 @@ func (h *ClaimHeartbeat) Stop() error {
 	if h == nil {
 		return nil
 	}
-	h.stopOnce.Do(func() { close(h.stop) })
+	h.stopOnce.Do(func() {
+		forkcancelcapture.Resolve(h.ctx, h.ctx).Note("delivery heartbeat stop signal", h.ctx, nil, nil, nil, true)
+		close(h.stop)
+	})
 	<-h.done
 	h.leaseOnce.Do(func() {
 		if err := h.workLease.Done(); err != nil {
@@ -337,7 +344,7 @@ func (h *ClaimHeartbeat) renew(store Store, claim Claim, operation string) bool 
 	}
 	// An already-admitted renewal must settle even when retirement cancels
 	// execution. The selected store still fences the exact claim token.
-	commit, err := store.RenewClaim(context.WithoutCancel(h.ctx), claim)
+	commit, err := store.RenewClaim(forkcancelcapture.WithoutCancel(h.ctx), claim)
 	if !commit.Acknowledged {
 		h.recordRenewalFailure(operation, unacknowledgedRenewalError(err))
 		return false

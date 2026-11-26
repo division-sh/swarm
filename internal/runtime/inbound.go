@@ -23,6 +23,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	"github.com/division-sh/swarm/internal/runtime/publicingress"
@@ -443,7 +444,7 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 		for index := range prepared {
 			manifest, _, _, manifestErr := runtimeinbound.CanonicalRecipientManifest(prepared[index].DeliveryRoutes())
 			if manifestErr != nil {
-				cleanupErr := g.bus.AbandonInboundDeliveryPlan(context.WithoutCancel(pubCtx), batchPlan)
+				cleanupErr := g.bus.AbandonInboundDeliveryPlan(forkcancelcapture.WithoutCancel(pubCtx), batchPlan)
 				writeInboundPublicationError(w, g.logger, requestCtx, provider, target.FlowPath, providerEventID, errors.Join(manifestErr, cleanupErr))
 				return
 			}
@@ -457,7 +458,7 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 			bareCandidate = operatorEvent.BareCandidate
 		}
 		if !validate() {
-			_ = g.bus.AbandonInboundDeliveryPlan(context.WithoutCancel(pubCtx), batchPlan)
+			_ = g.bus.AbandonInboundDeliveryPlan(forkcancelcapture.WithoutCancel(pubCtx), batchPlan)
 			return
 		}
 		commitResult, err = g.store.CommitInboundPublication(pubCtx, runtimeinbound.CommitCommand{
@@ -470,7 +471,7 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 			break
 		}
 		owner := *commitResult.RolledBackConstruction
-		cleanupErr := g.bus.AbandonInboundDeliveryPlan(context.WithoutCancel(pubCtx), batchPlan)
+		cleanupErr := g.bus.AbandonInboundDeliveryPlan(forkcancelcapture.WithoutCancel(pubCtx), batchPlan)
 		if cleanupErr != nil {
 			writeInboundCommitError(w, g.logger, requestCtx, provider, target.FlowPath, providerEventID, errors.Join(err, cleanupErr))
 			return
@@ -492,17 +493,17 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 		if err == nil {
 			err = errors.New("inbound publication commit acknowledgement missing")
 		}
-		err = errors.Join(err, g.bus.AbandonInboundDeliveryPlan(context.WithoutCancel(pubCtx), batchPlan))
+		err = errors.Join(err, g.bus.AbandonInboundDeliveryPlan(forkcancelcapture.WithoutCancel(pubCtx), batchPlan))
 		writeInboundCommitError(w, g.logger, requestCtx, provider, target.FlowPath, providerEventID, err)
 		return
 	}
 	if recordErr := validateInboundCommittedResultRecord(publicationRequest, record); recordErr != nil {
-		err = errors.Join(commitErr, recordErr, g.bus.AbandonInboundDeliveryPlan(context.WithoutCancel(pubCtx), batchPlan))
+		err = errors.Join(commitErr, recordErr, g.bus.AbandonInboundDeliveryPlan(forkcancelcapture.WithoutCancel(pubCtx), batchPlan))
 		writeInboundCommitError(w, g.logger, requestCtx, provider, target.FlowPath, providerEventID, err)
 		return
 	}
 	if !record.Created {
-		commitErr = errors.Join(commitErr, g.bus.AbandonInboundDeliveryPlan(context.WithoutCancel(pubCtx), batchPlan))
+		commitErr = errors.Join(commitErr, g.bus.AbandonInboundDeliveryPlan(forkcancelcapture.WithoutCancel(pubCtx), batchPlan))
 		if commitErr != nil {
 			reportInboundCommittedCleanup(g.logger, requestCtx, provider, target.FlowPath, providerEventID, commitErr)
 		}
@@ -511,13 +512,13 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 	}
 	if target.storeOnly {
 		if len(prepared) != len(record.Events) {
-			_ = g.bus.AbandonInboundDeliveryPlan(context.WithoutCancel(pubCtx), batchPlan)
+			_ = g.bus.AbandonInboundDeliveryPlan(forkcancelcapture.WithoutCancel(pubCtx), batchPlan)
 			http.Error(w, "committed inbound publication does not match prepared batch", http.StatusServiceUnavailable)
 			return
 		}
 		for index, event := range record.Events {
 			if prepared[index].Event.ID() != event.EventID || string(prepared[index].Event.Type()) != event.EventName {
-				_ = g.bus.AbandonInboundDeliveryPlan(context.WithoutCancel(pubCtx), batchPlan)
+				_ = g.bus.AbandonInboundDeliveryPlan(forkcancelcapture.WithoutCancel(pubCtx), batchPlan)
 				http.Error(w, "committed inbound publication does not match prepared batch", http.StatusServiceUnavailable)
 				return
 			}
@@ -535,11 +536,11 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 	}
 	handoffCtx := pubCtx
 	if commitErr != nil {
-		handoffCtx = context.WithoutCancel(pubCtx)
+		handoffCtx = forkcancelcapture.WithoutCancel(pubCtx)
 	}
 	prepared, err = g.bus.ApplyInboundDeliveryCommit(handoffCtx, batchPlan, commitResult.Publications)
 	if err != nil {
-		_ = g.bus.AbandonInboundDeliveryPlan(context.WithoutCancel(pubCtx), batchPlan)
+		_ = g.bus.AbandonInboundDeliveryPlan(forkcancelcapture.WithoutCancel(pubCtx), batchPlan)
 		err = errors.Join(commitErr, err)
 		if g.logger != nil {
 			handleRuntimeLogPersistenceError("inbound-gateway", "invalid_commit_evidence", g.logger.Error(requestCtx, "inbound-gateway", "invalid_commit_evidence", map[string]any{
@@ -564,7 +565,7 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 			if err := g.bus.DispatchPreparedPublishAsync(handoffCtx, item); err != nil {
 				err = errors.Join(commitErr, err)
 				for _, pending := range prepared[index+1:] {
-					err = errors.Join(err, g.bus.AbandonPreparedPublish(context.WithoutCancel(pubCtx), pending))
+					err = errors.Join(err, g.bus.AbandonPreparedPublish(forkcancelcapture.WithoutCancel(pubCtx), pending))
 				}
 				if g.logger != nil {
 					handleRuntimeLogPersistenceError("inbound-gateway", "dispatch_failed", g.logger.Error(requestCtx, "inbound-gateway", "dispatch_failed", map[string]any{
@@ -580,7 +581,7 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 			if err := g.bus.DispatchPreparedPublish(handoffCtx, item); err != nil {
 				err = errors.Join(commitErr, err)
 				for _, pending := range prepared[index+1:] {
-					err = errors.Join(err, g.bus.AbandonPreparedPublish(context.WithoutCancel(pubCtx), pending))
+					err = errors.Join(err, g.bus.AbandonPreparedPublish(forkcancelcapture.WithoutCancel(pubCtx), pending))
 				}
 				if g.logger != nil {
 					handleRuntimeLogPersistenceError("inbound-gateway", "dispatch_failed", g.logger.Error(requestCtx, "inbound-gateway", "dispatch_failed", map[string]any{
@@ -667,7 +668,7 @@ func (g *InboundGateway) prepareInboundDeliveryBatch(ctx context.Context, batch 
 			diagnostic.emit()
 		}
 	}()
-	ctx = context.WithValue(ctx, inboundPayloadDiagnosticKey{}, &diagnostic)
+	ctx = forkcancelcapture.RecordValue(ctx, context.WithValue(ctx, inboundPayloadDiagnosticKey{}, &diagnostic))
 	if storeOnly {
 		return g.bus.PrepareStoredInboundDeliveryBatch(ctx, batch)
 	}

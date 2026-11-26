@@ -27,6 +27,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	runtimeeventschema "github.com/division-sh/swarm/internal/runtime/eventschema"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
@@ -1039,7 +1040,7 @@ func (am *AgentManager) deactivateFlowInstanceOwned(lease *worklifetime.Lease, r
 			result = errors.Join(result, lease.Done())
 		}
 	}()
-	ctx := context.WithoutCancel(lease.Context())
+	ctx := forkcancelcapture.WithoutCancel(lease.Context())
 	if am.workflowInstances == nil {
 		return fmt.Errorf("workflow instance store is required")
 	}
@@ -1156,7 +1157,7 @@ func (am *AgentManager) applyTerminalFlowInstanceSideEffects(lease *worklifetime
 	if set == nil {
 		return false, nil
 	}
-	commitErr := errors.Join(priorErr, err, am.lifecycle.commitTerminalFlow(context.WithoutCancel(lease.Context()), set))
+	commitErr := errors.Join(priorErr, err, am.lifecycle.commitTerminalFlow(forkcancelcapture.WithoutCancel(lease.Context()), set))
 	am.launchTerminalFlowCompletion(lease, set, commitErr)
 	return true, commitErr
 }

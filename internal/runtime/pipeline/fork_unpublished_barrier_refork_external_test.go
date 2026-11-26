@@ -184,9 +184,11 @@ func verifyUnpublishedTransferredBarrierRefork(t *testing.T, latePublication boo
 			if childProbe.resume != nil {
 				acknowledged := make(chan forkEngineAcknowledgment, 1)
 				done := make(chan struct{})
+				activationCtx, activationTrace := armForkEngineActivation(phase, backend, capability)
+				defer activationTrace.Close()
 				go func() {
 					defer close(done)
-					result, err := family.Execute(phase, request)
+					result, err := family.Execute(activationCtx, request)
 					acknowledged <- forkEngineAcknowledgment{result: result, err: err}
 				}()
 				t.Cleanup(func() {
@@ -205,6 +207,8 @@ func verifyUnpublishedTransferredBarrierRefork(t *testing.T, latePublication boo
 				select {
 				case observed = <-childProbe.claim:
 				case ack := <-acknowledged:
+					logPostgresForkEngineActivationFailure(t, backend, capability)
+					logForkEngineActivationTrace(t, activationTrace, "pending barrier fork returned before checkpoint", phase, ack.err)
 					t.Fatalf("pending barrier returned before its crash cut: child=%s err=%v", ack.result.Materialization.ForkRunID, ack.err)
 				case <-phase.Done():
 					t.Fatal(phase.Err())
@@ -246,10 +250,15 @@ func verifyUnpublishedTransferredBarrierRefork(t *testing.T, latePublication boo
 				}
 				parentProbe := &publishedBarrierClaimProbe{Probe: lifecycleprobe.New(), owner: producer.Key(), claim: make(chan forkEngineObservation, 1), completed: make(chan string, 1)}
 				parentRequest.AgentRuntime.AgentManagerOptions = manager.AgentManagerOptions{TestLifecycleProbe: parentProbe}
-				parentResult, err := family.Execute(phase, parentRequest)
+				parentCtx, parentTrace := armForkEngineActivation(phase, backend, capability)
+				defer parentTrace.Close()
+				parentResult, err := family.Execute(parentCtx, parentRequest)
 				if err != nil || !parentResult.Activation.Activated || parentResult.Materialization.ForkRunID != parent.ForkRunID {
+					logPostgresForkEngineActivationFailure(t, backend, capability)
+					logForkEngineActivationTrace(t, parentTrace, "late parent activation refused", phase, err)
 					t.Fatalf("late parent's exact selected barrier execution: %+v error=%v", parentResult, err)
 				}
+				parentTrace.Close()
 				if _, err := parentProbe.Wait(phase, lifecycleprobe.Signal{Kind: lifecycleprobe.DeliveryStatusChanged, EventID: occurrence.Publication.EventID, SubscriberID: producer.Key(), SubscriberType: "node", Status: "delivered"}); err != nil {
 					t.Fatal(err)
 				}
@@ -272,15 +281,25 @@ func verifyUnpublishedTransferredBarrierRefork(t *testing.T, latePublication boo
 					t.Fatal(err)
 				}
 				childRun := child.Materialization.ForkRunID
-				child, err = family.Execute(phase, request)
+				childCtx, childTrace := armForkEngineActivation(phase, backend, capability)
+				defer childTrace.Close()
+				child, err = family.Execute(childCtx, request)
 				if err != nil || !child.Activation.Activated || child.Activation.SourceFrozen || child.Materialization.ForkRunID != childRun {
+					logPostgresForkEngineActivationFailure(t, backend, capability)
+					logForkEngineActivationTrace(t, childTrace, "late-source child activation refused", phase, err)
 					t.Fatalf("late-source child must execute its exact retained branch: %+v error=%v", child, err)
 				}
+				childTrace.Close()
 			} else {
-				child, err = family.Execute(phase, request)
+				childCtx, childTrace := armForkEngineActivation(phase, backend, capability)
+				defer childTrace.Close()
+				child, err = family.Execute(childCtx, request)
 				if err != nil || !child.Activation.Activated {
+					logPostgresForkEngineActivationFailure(t, backend, capability)
+					logForkEngineActivationTrace(t, childTrace, "pending barrier activation refused", phase, err)
 					t.Fatalf("continue pending barrier: %+v error=%v", child, err)
 				}
+				childTrace.Close()
 			}
 			id := activityidentity.ForkLineageEventID(child.Materialization.ForkRunID, occurrence.Publication.EventID)
 			if _, err := childProbe.Wait(phase, lifecycleprobe.Signal{Kind: lifecycleprobe.DeliveryStatusChanged, EventID: id, SubscriberID: producer.Key(), SubscriberType: "node", Status: "delivered"}); err != nil {

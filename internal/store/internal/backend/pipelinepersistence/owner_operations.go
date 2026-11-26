@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
@@ -591,13 +592,13 @@ func (s *postgresPipelineObligationStore) ClaimEvent(ctx context.Context, eventI
 	}
 	if err := s.retainRecoveryTransition(claim, done); err != nil {
 		done()
-		return runtimepipelineobligation.ClaimedWork{}, errors.Join(err, s.Release(context.WithoutCancel(ctx), claim))
+		return runtimepipelineobligation.ClaimedWork{}, errors.Join(err, s.Release(forkcancelcapture.WithoutCancel(ctx), claim))
 	}
 	work, err := s.loadPostgresClaimedPipelineWork(ctx, claim)
 	if err != nil {
 		return runtimepipelineobligation.ClaimedWork{}, errors.Join(
 			err,
-			s.Release(context.WithoutCancel(ctx), claim),
+			s.Release(forkcancelcapture.WithoutCancel(ctx), claim),
 		)
 	}
 	return work, nil
@@ -622,13 +623,13 @@ func (s *sqlitePipelineObligationStore) ClaimEvent(ctx context.Context, eventID 
 	}
 	if err := s.retainRecoveryTransition(claim, done); err != nil {
 		done()
-		return runtimepipelineobligation.ClaimedWork{}, errors.Join(err, s.Release(context.WithoutCancel(ctx), claim))
+		return runtimepipelineobligation.ClaimedWork{}, errors.Join(err, s.Release(forkcancelcapture.WithoutCancel(ctx), claim))
 	}
 	work, err := s.loadSQLiteClaimedPipelineWork(ctx, claim)
 	if err != nil {
 		return runtimepipelineobligation.ClaimedWork{}, errors.Join(
 			err,
-			s.Release(context.WithoutCancel(ctx), claim),
+			s.Release(forkcancelcapture.WithoutCancel(ctx), claim),
 		)
 	}
 	return work, nil
@@ -775,7 +776,7 @@ func (s *postgresPipelineObligationStore) ClaimBatch(ctx context.Context, scan r
 	})
 	state.mu.Unlock()
 	if err != nil {
-		err = errors.Join(err, s.CloseScan(context.WithoutCancel(ctx), scan))
+		err = errors.Join(err, s.CloseScan(forkcancelcapture.WithoutCancel(ctx), scan))
 	}
 	return batch, err
 }
@@ -809,7 +810,7 @@ func (s *sqlitePipelineObligationStore) ClaimBatch(ctx context.Context, scan run
 	})
 	state.mu.Unlock()
 	if err != nil {
-		err = errors.Join(err, s.CloseScan(context.WithoutCancel(ctx), scan))
+		err = errors.Join(err, s.CloseScan(forkcancelcapture.WithoutCancel(ctx), scan))
 	}
 	return batch, err
 }
@@ -832,7 +833,7 @@ func claimPipelineBatch(
 		if err == nil {
 			return
 		}
-		releaseCtx := context.WithoutCancel(ctx)
+		releaseCtx := forkcancelcapture.WithoutCancel(ctx)
 		for _, claim := range acquired {
 			releaseErr := backend.release(releaseCtx, claim)
 			if !errors.Is(releaseErr, runtimepipelineobligation.ErrStaleClaim) {
@@ -904,7 +905,7 @@ func claimPipelineBatch(
 				done()
 			} else if retainErr := backend.retain(claim, done); retainErr != nil {
 				done()
-				return batch, errors.Join(retainErr, backend.release(context.WithoutCancel(ctx), claim))
+				return batch, errors.Join(retainErr, backend.release(forkcancelcapture.WithoutCancel(ctx), claim))
 			}
 			if errors.Is(err, runtimepipelineobligation.ErrBusy) {
 				if runtimepipelineobligation.StartupRecoveryDiagnosticsEnabled(ctx) {
@@ -925,7 +926,7 @@ func claimPipelineBatch(
 			}
 			work, err := backend.load(ctx, claim)
 			if errors.Is(err, runtimepipelineobligation.ErrIneligible) {
-				if releaseErr := backend.release(context.WithoutCancel(ctx), claim); releaseErr != nil {
+				if releaseErr := backend.release(forkcancelcapture.WithoutCancel(ctx), claim); releaseErr != nil {
 					return batch, errors.Join(err, releaseErr)
 				}
 				continue
@@ -991,7 +992,7 @@ func (s *postgresPipelineObligationStore) CloseScan(ctx context.Context, scan ru
 		claims = append(claims, claim)
 	}
 	registry.mu.Unlock()
-	releaseCtx := context.WithoutCancel(ctx)
+	releaseCtx := forkcancelcapture.WithoutCancel(ctx)
 	var releaseErr error
 	for _, claim := range claims {
 		if err := s.releasePostgresPipelineClaim(releaseCtx, claim); err != nil &&
@@ -1384,9 +1385,9 @@ func (s *PipelinePostgresOwner) claimPostgresPipelineEventInGroup(ctx context.Co
 	}
 	releaseUnissued := func() error {
 		if group != nil {
-			return group.preparationAdmission.ReleaseLease(context.WithoutCancel(ctx), lease)
+			return group.preparationAdmission.ReleaseLease(forkcancelcapture.WithoutCancel(ctx), lease)
 		}
-		return lease.Release(context.WithoutCancel(ctx))
+		return lease.Release(forkcancelcapture.WithoutCancel(ctx))
 	}
 	claim, err = registry.issuer.Issue(eventID, purpose)
 	if err != nil {
@@ -1422,7 +1423,7 @@ func (s *PipelinePostgresOwner) claimPostgresPipelineEventInGroup(ctx context.Co
 	if releaseErr := releaseReservation(); releaseErr != nil {
 		return runtimepipelineobligation.Claim{}, errors.Join(
 			releaseErr,
-			s.releasePostgresPipelineClaim(context.WithoutCancel(ctx), claim),
+			s.releasePostgresPipelineClaim(forkcancelcapture.WithoutCancel(ctx), claim),
 		)
 	}
 	if purpose == runtimepipelineobligation.PurposePublication {
@@ -1436,10 +1437,10 @@ func (s *PipelinePostgresOwner) claimPostgresPipelineEventInGroup(ctx context.Co
 		return err
 	})
 	if err != nil {
-		return runtimepipelineobligation.Claim{}, errors.Join(err, s.releasePostgresPipelineClaim(context.WithoutCancel(ctx), claim))
+		return runtimepipelineobligation.Claim{}, errors.Join(err, s.releasePostgresPipelineClaim(forkcancelcapture.WithoutCancel(ctx), claim))
 	}
 	if !eligible {
-		return runtimepipelineobligation.Claim{}, errors.Join(runtimepipelineobligation.ErrIneligible, s.releasePostgresPipelineClaim(context.WithoutCancel(ctx), claim))
+		return runtimepipelineobligation.Claim{}, errors.Join(runtimepipelineobligation.ErrIneligible, s.releasePostgresPipelineClaim(forkcancelcapture.WithoutCancel(ctx), claim))
 	}
 	if runtimepipelineobligation.StartupRecoveryDiagnosticsEnabled(ctx) {
 		slog.InfoContext(ctx, "startup pipeline claim acquired", "backend", "postgres", "event_id", eventID, "purpose", purpose, "claim_id", token)
@@ -3042,9 +3043,9 @@ func (s *PipelinePostgresOwner) releasePostgresPipelineClaimLocked(ctx context.C
 	}
 	var releaseErr error
 	if group := state.operationMu.group; group != nil && group.preparationAdmission != nil {
-		releaseErr = group.preparationAdmission.ReleaseLease(context.WithoutCancel(ctx), state.postgresLease)
+		releaseErr = group.preparationAdmission.ReleaseLease(forkcancelcapture.WithoutCancel(ctx), state.postgresLease)
 	} else {
-		releaseErr = state.postgresLease.ReleaseTerminal(context.WithoutCancel(ctx))
+		releaseErr = state.postgresLease.ReleaseTerminal(forkcancelcapture.WithoutCancel(ctx))
 	}
 	state.postgresLease = nil
 	return releaseErr

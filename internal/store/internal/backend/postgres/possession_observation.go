@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/lib/pq"
+
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 )
 
 const possessionObservationCleanupLimit = 5 * time.Second
@@ -49,14 +51,14 @@ func (b *Backend) observeAdvisoryLock(ctx context.Context, key string, dialer *o
 	ambiguous := true
 	defer func() {
 		resultErr = errors.Join(resultErr, stop(), observationContextError(ctx))
-		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), possessionObservationCleanupLimit)
+		cleanup, cancel := forkcancelcapture.WithTimeout(forkcancelcapture.WithoutCancel(ctx), possessionObservationCleanupLimit)
 		defer cancel()
 		finish, bindErr := dialer.bind(cleanup)
 		resultErr = errors.Join(resultErr, bindErr)
 		if session != nil {
 			if available && !ambiguous && resultErr == nil {
 				var unlocked bool
-				unlockErr := session.QueryRowContext(context.WithoutCancel(cleanup), unlockAdvisoryLockSQL, key).Scan(&unlocked)
+				unlockErr := session.QueryRowContext(forkcancelcapture.WithoutCancel(cleanup), unlockAdvisoryLockSQL, key).Scan(&unlocked)
 				if unlockErr == nil && !unlocked {
 					unlockErr = errors.New("PostgreSQL possession observation did not release its exact lock")
 				}
@@ -81,7 +83,7 @@ func (b *Backend) observeAdvisoryLock(ctx context.Context, key string, dialer *o
 	// lib/pq cancellation itself performs native I/O. The observation's socket
 	// deadline/cancellation owner bounds that I/O instead of starting a detached
 	// driver cancellation request whose join cannot be observed.
-	nativeCtx := context.WithoutCancel(ctx)
+	nativeCtx := forkcancelcapture.WithoutCancel(ctx)
 	conn, err := db.Conn(nativeCtx)
 	if err != nil {
 		return false, err
@@ -187,7 +189,7 @@ func (d *observationDialer) Dial(network, address string) (net.Conn, error) {
 }
 
 func (d *observationDialer) DialTimeout(network, address string, timeout time.Duration) (net.Conn, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	ctx, cancel := forkcancelcapture.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	return d.DialContext(ctx, network, address)
 }
@@ -198,7 +200,7 @@ func (d *observationDialer) DialContext(request context.Context, network, addres
 	d.mu.Unlock()
 	if deadline, ok := request.Deadline(); ok {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithDeadline(ctx, deadline)
+		ctx, cancel = forkcancelcapture.WithDeadline(ctx, deadline)
 		defer cancel()
 	}
 	dial := d.dial

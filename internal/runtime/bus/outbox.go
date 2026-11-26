@@ -15,6 +15,7 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 )
@@ -193,7 +194,7 @@ func (eb *EventBus) prepareEnginePublicationsWithMember(ctx context.Context, int
 	}
 	plans := make([]runtimeengine.DurablePublicationPlan, 0, len(intents))
 	release := func() {
-		_ = eb.ReleaseEnginePublications(context.WithoutCancel(ctx), plans)
+		_ = eb.ReleaseEnginePublications(forkcancelcapture.WithoutCancel(ctx), plans)
 	}
 	for _, original := range intents {
 		intent := original
@@ -253,7 +254,7 @@ func (eb *EventBus) prepareEnginePublicationsWithMember(ctx context.Context, int
 			// A declared create conflict rejects the handler's mutation, just as
 			// the selected-store constructor does when the conflict races commit.
 			failure := runtimefailures.New(runtimefailures.ClassConflictingDuplicate, "flow_instance_already_exists", "eventbus", "prepare_engine_publication", nil)
-			return nil, errors.Join(failure, prepared.publicationClaim.Release(context.WithoutCancel(preparedCtx)), eb.ReleaseEnginePublications(context.WithoutCancel(ctx), plans))
+			return nil, errors.Join(failure, prepared.publicationClaim.Release(forkcancelcapture.WithoutCancel(preparedCtx)), eb.ReleaseEnginePublications(forkcancelcapture.WithoutCancel(ctx), plans))
 		}
 		// Post-commit dispatch must consume the same canonical route facts that
 		// the selected store committed, not the pre-projection engine event.
@@ -261,13 +262,13 @@ func (eb *EventBus) prepareEnginePublicationsWithMember(ctx context.Context, int
 		command.prospective = prospective
 		plan := EnginePublicationPlan{prepared: prepared, command: command, intent: intent, admittedSource: admitted}
 		if err := plan.ValidateDurablePublicationPlan(); err != nil {
-			_ = prepared.publicationClaim.Release(context.WithoutCancel(preparedCtx))
+			_ = prepared.publicationClaim.Release(forkcancelcapture.WithoutCancel(preparedCtx))
 			release()
 			return nil, err
 		}
 		if member != nil && member.instances == nil {
 			if err := member.group.RecordPrepared(preparedCtx, prepared.publicationClaim.Claim(), plan); err != nil {
-				err = errors.Join(err, prepared.publicationClaim.Release(context.WithoutCancel(preparedCtx)))
+				err = errors.Join(err, prepared.publicationClaim.Release(forkcancelcapture.WithoutCancel(preparedCtx)))
 				release()
 				return nil, err
 			}
@@ -313,7 +314,7 @@ func (eb *EventBus) finalizeOneEnginePublication(ctx context.Context, committed 
 			err = errors.Join(err, fmt.Errorf("finalize committed publication %s panic: %v", committed.CommittedDurablePublicationEventID(), recovered))
 		}
 		if err != nil && !staged && claim != nil {
-			err = errors.Join(err, claim.Release(context.WithoutCancel(ctx)))
+			err = errors.Join(err, claim.Release(forkcancelcapture.WithoutCancel(ctx)))
 		}
 	}()
 	if err := committed.ValidateCommittedDurablePublication(); err != nil {
@@ -323,7 +324,7 @@ func (eb *EventBus) finalizeOneEnginePublication(ctx context.Context, committed 
 	if consequences.prerequisiteErr != nil {
 		eb.stageCommittedOutboxOperationWithFinalization(committed.plan.intent, committed.plan.admittedSource.Event(), committed.committed.AppendOutcome, claim, committed.committed.DeliveryHandoffs, committed.plan.prepared.targetFailure, consequences.prerequisiteErr, committed.plan.command.Commit.Disposition)
 		staged = true
-		return errors.Join(err, claim.Release(context.WithoutCancel(ctx)))
+		return errors.Join(err, claim.Release(forkcancelcapture.WithoutCancel(ctx)))
 	}
 	if !consequences.bound {
 		return err
@@ -332,7 +333,7 @@ func (eb *EventBus) finalizeOneEnginePublication(ctx context.Context, committed 
 		blockErr := errors.Join(err, errors.New("committed publication prerequisites did not finish"))
 		eb.stageCommittedOutboxOperationWithFinalization(committed.plan.intent, committed.plan.admittedSource.Event(), committed.committed.AppendOutcome, claim, committed.committed.DeliveryHandoffs, committed.plan.prepared.targetFailure, blockErr, committed.plan.command.Commit.Disposition)
 		staged = true
-		return errors.Join(blockErr, claim.Release(context.WithoutCancel(ctx)))
+		return errors.Join(blockErr, claim.Release(forkcancelcapture.WithoutCancel(ctx)))
 	}
 	eb.stageCommittedAgentOutboxOperation(committed, consequences.prepared.agentHandoff)
 	staged = true
@@ -439,7 +440,7 @@ func (d engineDispatcher) DispatchPostCommit(ctx context.Context, intents []runt
 	}
 	defer func() {
 		if recovered := recover(); recovered != nil {
-			err = errors.Join(err, fmt.Errorf("dispatch committed publication batch panic: %v", recovered), d.releaseUndispatchedPostCommit(context.WithoutCancel(ctx), intents))
+			err = errors.Join(err, fmt.Errorf("dispatch committed publication batch panic: %v", recovered), d.releaseUndispatchedPostCommit(forkcancelcapture.WithoutCancel(ctx), intents))
 		}
 	}()
 	if err := d.flushCommittedPublicationPredecessor(ctx, intents); err != nil {
@@ -448,7 +449,7 @@ func (d engineDispatcher) DispatchPostCommit(ctx context.Context, intents []runt
 	ctx, lease, err := d.bus.beginRuntimeWork(ctx)
 	if err != nil {
 		if errors.Is(err, worklifetime.ErrAdmissionFenced) || errors.Is(err, worklifetime.ErrRetired) {
-			return errors.Join(err, d.releaseUndispatchedPostCommit(context.WithoutCancel(ctx), intents))
+			return errors.Join(err, d.releaseUndispatchedPostCommit(forkcancelcapture.WithoutCancel(ctx), intents))
 		}
 		return err
 	}
@@ -466,7 +467,7 @@ func (d engineDispatcher) releaseUndispatchedPostCommit(ctx context.Context, int
 	var result error
 	for _, intent := range intents {
 		if strings.TrimSpace(string(intent.Event.Type())) != "" {
-			result = errors.Join(result, d.releaseUnadmittedPostCommit(context.WithoutCancel(ctx), intent.Event))
+			result = errors.Join(result, d.releaseUnadmittedPostCommit(forkcancelcapture.WithoutCancel(ctx), intent.Event))
 		}
 	}
 	return result
@@ -478,7 +479,7 @@ func (d engineDispatcher) flushCommittedPublicationPredecessor(ctx context.Conte
 			err = errors.Join(err, fmt.Errorf("committed publication predecessor panic: %v", recovered))
 		}
 		if err != nil {
-			err = errors.Join(err, d.releaseUndispatchedPostCommit(context.WithoutCancel(ctx), intents))
+			err = errors.Join(err, d.releaseUndispatchedPostCommit(forkcancelcapture.WithoutCancel(ctx), intents))
 		}
 	}()
 	return flushEnclosingPublicationSettlement(ctx)
@@ -490,7 +491,7 @@ func (d engineDispatcher) dispatchOnePostCommit(ctx context.Context, intent runt
 	}
 	defer func() {
 		if recovered := recover(); recovered != nil {
-			err = errors.Join(err, fmt.Errorf("dispatch committed publication %s panic: %v", intent.Event.ID(), recovered), d.releaseUnadmittedPostCommit(context.WithoutCancel(ctx), intent.Event))
+			err = errors.Join(err, fmt.Errorf("dispatch committed publication %s panic: %v", intent.Event.ID(), recovered), d.releaseUnadmittedPostCommit(forkcancelcapture.WithoutCancel(ctx), intent.Event))
 		}
 	}()
 	var admitted events.AdmittedEvent
@@ -502,7 +503,7 @@ func (d engineDispatcher) dispatchOnePostCommit(ctx context.Context, intent runt
 	}
 	if err != nil {
 		if ctx.Err() != nil {
-			err = errors.Join(err, d.releaseUnadmittedPostCommit(context.WithoutCancel(ctx), intent.Event))
+			err = errors.Join(err, d.releaseUnadmittedPostCommit(forkcancelcapture.WithoutCancel(ctx), intent.Event))
 		}
 		return err
 	}
@@ -640,7 +641,7 @@ func (d engineDispatcher) dispatchPendingOutboxOperation(ctx context.Context, fa
 		if recovered := recover(); recovered != nil {
 			err = errors.Join(err, fmt.Errorf("dispatch committed publication %s panic: %v", fallback.Event.ID(), recovered))
 			if !result.handled {
-				err = errors.Join(err, d.releaseUnadmittedPostCommit(context.WithoutCancel(ctx), fallback.Event))
+				err = errors.Join(err, d.releaseUnadmittedPostCommit(forkcancelcapture.WithoutCancel(ctx), fallback.Event))
 			}
 		}
 	}()
@@ -657,7 +658,7 @@ func (d engineDispatcher) dispatchPendingOutboxOperation(ctx context.Context, fa
 	}
 	result.handled = true
 	defer func() {
-		err = errors.Join(err, operation.publicationClaim.Release(context.WithoutCancel(ctx)))
+		err = errors.Join(err, operation.publicationClaim.Release(forkcancelcapture.WithoutCancel(ctx)))
 	}()
 	if operation.finalizationErr != nil {
 		return result, fmt.Errorf("committed publication %s has incomplete prerequisites: %w", fallback.Event.ID(), operation.finalizationErr)
@@ -708,7 +709,7 @@ func (d engineDispatcher) dispatchAndRecord(ctx context.Context, intent runtimee
 		claimOpen = true
 		defer func() {
 			if claimOpen {
-				err = errors.Join(err, d.bus.pipelineObligations.Release(context.WithoutCancel(ctx), recoveryClaim))
+				err = errors.Join(err, d.bus.pipelineObligations.Release(forkcancelcapture.WithoutCancel(ctx), recoveryClaim))
 			}
 		}()
 	}

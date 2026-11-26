@@ -17,6 +17,7 @@ import (
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
@@ -366,7 +367,7 @@ func (pc *PipelineCoordinator) CommitDecisionCardMutation(
 	if err != nil {
 		return nil, false, err
 	}
-	defer func() { err = errors.Join(err, lease.Release(context.WithoutCancel(ctx))) }()
+	defer func() { err = errors.Join(err, lease.Release(forkcancelcapture.WithoutCancel(ctx))) }()
 	if completion, replay := lease.Replay(); replay {
 		return append(json.RawMessage(nil), completion.Response...), true, nil
 	}
@@ -416,7 +417,7 @@ func (pc *PipelineCoordinator) commitDecisionCardMutation(ctx context.Context, l
 		committed, err := lease.Commit(ctx, command)
 		if !committed.Acknowledged && failures.IsStateContention(err) {
 			if planner, ok := pc.bus.(EnginePublicationPlanner); ok {
-				if releaseErr := planner.ReleaseEnginePublications(context.WithoutCancel(ctx), plans); releaseErr != nil {
+				if releaseErr := planner.ReleaseEnginePublications(forkcancelcapture.WithoutCancel(ctx), plans); releaseErr != nil {
 					return nil, errors.Join(err, releaseErr)
 				}
 			}
@@ -436,7 +437,7 @@ func (pc *PipelineCoordinator) finishDecisionCardMutation(ctx context.Context, c
 		if planner == nil || len(values) == 0 {
 			return nil
 		}
-		return planner.ReleaseEnginePublications(context.WithoutCancel(ctx), values)
+		return planner.ReleaseEnginePublications(forkcancelcapture.WithoutCancel(ctx), values)
 	}
 	if !committed.Acknowledged {
 		if commitErr == nil {
@@ -469,7 +470,7 @@ func (pc *PipelineCoordinator) finishDecisionCardMutation(ctx context.Context, c
 		if dispatcher == nil {
 			return response, errors.Join(commitErr, validationErr, postCommitErr, fmt.Errorf("decision-card mutation requires the post-commit dispatcher"))
 		}
-		if err := dispatcher.DispatchPostCommit(context.WithoutCancel(ctx), []runtimeengine.EmitIntent{committed.Publication.CommittedDurablePublicationIntent()}); err != nil {
+		if err := dispatcher.DispatchPostCommit(forkcancelcapture.WithoutCancel(ctx), []runtimeengine.EmitIntent{committed.Publication.CommittedDurablePublicationIntent()}); err != nil {
 			return response, errors.Join(commitErr, validationErr, postCommitErr, err)
 		}
 		return response, errors.Join(commitErr, validationErr, postCommitErr)
@@ -626,7 +627,7 @@ func (pc *PipelineCoordinator) prepareDecisionCardMutation(
 		return DecisionCardMutationCommand{}, nil, err
 	}
 	if len(plans) != len(intents) {
-		releaseErr := planner.ReleaseEnginePublications(context.WithoutCancel(ctx), plans)
+		releaseErr := planner.ReleaseEnginePublications(forkcancelcapture.WithoutCancel(ctx), plans)
 		return DecisionCardMutationCommand{}, nil, errors.Join(fmt.Errorf("decision-card publication planner returned %d plans for %d events", len(plans), len(intents)), releaseErr)
 	}
 	command.Publication = plans[0]
@@ -634,7 +635,7 @@ func (pc *PipelineCoordinator) prepareDecisionCardMutation(
 		command.ForcedDeferralPublication = plans[1]
 	}
 	if err := command.Validate(); err != nil {
-		return DecisionCardMutationCommand{}, nil, errors.Join(err, planner.ReleaseEnginePublications(context.WithoutCancel(ctx), plans))
+		return DecisionCardMutationCommand{}, nil, errors.Join(err, planner.ReleaseEnginePublications(forkcancelcapture.WithoutCancel(ctx), plans))
 	}
 	return command, plans, nil
 }

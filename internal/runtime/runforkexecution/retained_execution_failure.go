@@ -3,6 +3,8 @@ package runforkexecution
 import (
 	"context"
 	"errors"
+
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 )
 
 type selectedForkExecutionFailure struct {
@@ -25,7 +27,7 @@ func (p *PreparedSelectedFork) settleExecutionFailure() error {
 	if pending == nil {
 		return nil
 	}
-	ctx := pending.container.failureDispositionContext(context.WithoutCancel(p.operation.preparation.Context()))
+	ctx := pending.container.failureDispositionContext(forkcancelcapture.WithoutCancel(p.operation.preparation.Context()))
 	if p.operation.stopOwnsDisposition() {
 		// The accepted stop owns the child's terminal outcome, not this executor.
 		acknowledged, err := pending.container.Fail(ctx, context.Canceled)

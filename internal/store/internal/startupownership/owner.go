@@ -15,6 +15,7 @@ import (
 	runtimechanneldelivery "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
@@ -152,7 +153,7 @@ func (s *StartupPostgresOwner) AcquireProcessCapability(ctx context.Context, req
 		return nil, errors.Join(err, releaseErr)
 	}
 	if err := contextError(ctx); err != nil {
-		return nil, errors.Join(err, capability.Release(context.WithoutCancel(ctx)))
+		return nil, errors.Join(err, capability.Release(forkcancelcapture.WithoutCancel(ctx)))
 	}
 	s.bindProcess(capability)
 	return capability, nil
@@ -209,7 +210,7 @@ func (s *StartupSQLiteOwner) AcquireProcessCapability(ctx context.Context, req r
 		return nil, cleanup(err)
 	}
 	if err := contextError(ctx); err != nil {
-		return nil, errors.Join(err, capability.Release(context.WithoutCancel(ctx)))
+		return nil, errors.Join(err, capability.Release(forkcancelcapture.WithoutCancel(ctx)))
 	}
 	s.bindProcess(capability)
 	return capability, nil
@@ -234,6 +235,17 @@ func (s *postgresSession) Authority() (runtimestartupownership.Authority, error)
 		return runtimestartupownership.Authority{}, errors.New("PostgreSQL process capability is released")
 	}
 	return s.authority, nil
+}
+
+func (s *postgresSession) BindForkCancelCapture(trace *forkcancelcapture.Capture) {
+	trace.Bind(s)
+	session := s.lease.Session()
+	if session == nil {
+		trace.Missing("retained PostgreSQL session unavailable at capture bind", s)
+		return
+	}
+	trace.Bind(session)
+	trace.Note("retained session to native session", session, s, nil, nil, false)
 }
 
 func (s *postgresSession) mutationContext(ctx context.Context, changing bool) (context.Context, error) {
@@ -298,6 +310,7 @@ func (s *postgresSession) InstallTerminalOwner(owner runtimestartupownership.Ses
 		return errors.New("install PostgreSQL process capability terminal callback")
 	}
 	return s.lease.InstallLocalFenceOwner(func() {
+		forkcancelcapture.Owner(s).Note("installed local fence callback", owner, s, nil, nil, true)
 		owner.SelectedStoreSessionTerminal(runtimestartupownership.TerminalResult{Cause: runtimestartupownership.TerminalOwnershipUnprovable})
 	})
 }
@@ -306,6 +319,7 @@ func (s *postgresSession) terminal(owner runtimestartupownership.SessionTerminal
 	if s == nil || owner == nil {
 		return
 	}
+	forkcancelcapture.Owner(s).Note("native process session disposal callback", owner, s, nil, nil, true)
 	if s.lease.ReleasedCleanly() {
 		return
 	}
@@ -554,7 +568,7 @@ func (s *sqliteSession) MonitorProveCurrent(ctx context.Context, deadline time.D
 	if deadline <= 0 {
 		return errors.New("SQLite possession monitor deadline must be positive")
 	}
-	probeCtx, cancel := context.WithTimeout(ctx, deadline)
+	probeCtx, cancel := forkcancelcapture.WithTimeout(ctx, deadline)
 	defer cancel()
 	err := s.proveCurrent(probeCtx, false)
 	if err != nil && ctx.Err() == nil {
@@ -752,7 +766,7 @@ func boundedTerminalResult(deadline time.Duration, load func(context.Context) ru
 	if deadline <= 0 || load == nil {
 		return runtimestartupownership.TerminalResult{Cause: runtimestartupownership.TerminalOwnershipUnprovable}
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), deadline)
+	ctx, cancel := forkcancelcapture.WithTimeout(context.Background(), deadline)
 	defer cancel()
 	result := load(ctx)
 	if ctx.Err() != nil {

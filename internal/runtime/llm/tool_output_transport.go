@@ -8,6 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 )
 
 type toolOutputCallKey struct{}
@@ -40,7 +41,7 @@ func ToolOutputCallFromContext(ctx context.Context) (ToolOutputCall, bool) {
 }
 
 func (c ToolOutputCall) WithContext(ctx context.Context) context.Context {
-	return context.WithValue(ctx, toolOutputCallKey{}, c)
+	return forkcancelcapture.RecordValue(ctx, context.WithValue(ctx, toolOutputCallKey{}, c))
 }
 
 func (c ToolOutputCall) Authorize(name string, input any, occurrence string) (ToolOutputEventIdentity, error) {

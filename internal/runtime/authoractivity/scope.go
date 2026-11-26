@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
+
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 )
 
 type scopeContextKey struct{}
@@ -15,7 +17,7 @@ func WithScope(ctx context.Context, scope Scope) context.Context {
 	scope.Kind = ScopeKind(strings.TrimSpace(string(scope.Kind)))
 	scope.RuntimeInstanceID = strings.TrimSpace(scope.RuntimeInstanceID)
 	scope.BundleHash = strings.TrimSpace(scope.BundleHash)
-	return context.WithValue(ctx, scopeContextKey{}, scope)
+	return forkcancelcapture.RecordValue(ctx, context.WithValue(ctx, scopeContextKey{}, scope))
 }
 
 func ScopeFromContext(ctx context.Context) (Scope, bool) {

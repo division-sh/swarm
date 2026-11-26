@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	"github.com/google/uuid"
 )
 
@@ -91,7 +92,7 @@ func (p *processCapability) IssueSelectedForkGenerationGrant(ctx context.Context
 	if parent.owner != p {
 		return nil, errors.New("selected-fork grant requires its exact issuing parent process")
 	}
-	issuingParent = context.WithValue(issuingParent, mutationAuthorityContextKey{}, parent)
+	issuingParent = forkcancelcapture.RecordValue(issuingParent, context.WithValue(issuingParent, mutationAuthorityContextKey{}, parent))
 	process, err := p.session.Authority()
 	if err != nil {
 		return nil, err

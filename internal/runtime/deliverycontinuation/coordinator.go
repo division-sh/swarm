@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 )
 
 const (
@@ -209,7 +210,7 @@ func (c *Coordinator) Start(ctx context.Context) error {
 		return errors.New("delivery continuation coordinator cannot be started")
 	}
 	// Retirement owns cancellation even while the standing lease is being acquired.
-	startCtx, cancel := context.WithCancel(ctx)
+	startCtx, cancel := forkcancelcapture.WithCancel(ctx)
 	c.started, c.cancel = true, cancel
 	c.mu.Unlock()
 
@@ -922,7 +923,7 @@ func (c *Coordinator) scan(ctx context.Context, exhaustive bool) (delay time.Dur
 			return 0, false, nil
 		}
 		beforeScan := c.heldEntries()
-		page, err := c.store.ScanDeliveryContinuations(context.WithoutCancel(ctx), c.authority, cursor, scanPageSize)
+		page, err := c.store.ScanDeliveryContinuations(forkcancelcapture.WithoutCancel(ctx), c.authority, cursor, scanPageSize)
 		if err != nil {
 			return 0, false, err
 		}
@@ -1076,7 +1077,7 @@ func (c *Coordinator) reconcileHeld(ctx context.Context, seen map[string]struct{
 		if err := c.scanStopError(ctx); err != nil {
 			return 0, false, err
 		}
-		observations, err := c.store.ObserveDeliveryContinuations(context.WithoutCancel(ctx), c.authority, batch)
+		observations, err := c.store.ObserveDeliveryContinuations(forkcancelcapture.WithoutCancel(ctx), c.authority, batch)
 		if err != nil {
 			return 0, false, err
 		}

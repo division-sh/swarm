@@ -7,6 +7,7 @@ import (
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 )
 
 type CompletionOriginKind string
@@ -99,7 +100,7 @@ func WithDirectiveCompletionOrigin(ctx context.Context, origin runtimeagentcontr
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return context.WithValue(ctx, directiveCompletionOriginKey{}, origin.Normalize())
+	return forkcancelcapture.RecordValue(ctx, context.WithValue(ctx, directiveCompletionOriginKey{}, origin.Normalize()))
 }
 
 func directiveCompletionOriginFromContext(ctx context.Context) (runtimeagentcontrol.DirectiveExecutionOrigin, bool) {

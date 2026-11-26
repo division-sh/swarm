@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/lib/pq"
+
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 )
 
 // OpenForInspection owns a single-purpose read pool. Runtime pools and their
@@ -35,7 +37,7 @@ func (b *Backend) withInspectionIO(ctx context.Context, operation func(context.C
 		return errors.New("PostgreSQL inspection transport already has an active observation")
 	}
 	defer b.inspectionIOActive.Store(false)
-	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	ctx, cancel := forkcancelcapture.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	if err := ctx.Err(); err != nil {
 		return err
@@ -55,7 +57,7 @@ func (b *Backend) withInspectionIO(ctx context.Context, operation func(context.C
 	settle := func() error {
 		once.Do(func() {
 			phaseErr = errors.Join(stop(), observationContextError(ctx))
-			cleanup, cancelCleanup = context.WithTimeout(context.WithoutCancel(ctx), possessionObservationCleanupLimit)
+			cleanup, cancelCleanup = forkcancelcapture.WithTimeout(forkcancelcapture.WithoutCancel(ctx), possessionObservationCleanupLimit)
 			var bindErr error
 			finish, bindErr = b.inspectionDialer.bind(cleanup)
 			phaseErr = errors.Join(phaseErr, bindErr)
@@ -83,7 +85,7 @@ func (b *Backend) withInspectionIO(ctx context.Context, operation func(context.C
 		err = errors.Join(err, observationErr, cleanupErr, b.inspectionDialer.phaseError(), observationContextError(cleanup))
 		cancelCleanup()
 	}()
-	return operation(context.WithoutCancel(ctx), settle)
+	return operation(forkcancelcapture.WithoutCancel(ctx), settle)
 }
 
 func (b *Backend) disposeInspectionIO() error {

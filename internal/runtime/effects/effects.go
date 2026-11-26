@@ -24,6 +24,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
 	"github.com/google/uuid"
 )
@@ -91,7 +92,7 @@ func WithLifecycleToken(ctx context.Context, token LifecycleToken) context.Conte
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return context.WithValue(ctx, lifecycleTokenKey{}, token)
+	return forkcancelcapture.RecordValue(ctx, context.WithValue(ctx, lifecycleTokenKey{}, token))
 }
 
 func LifecycleTokenFromContext(ctx context.Context) (LifecycleToken, bool) {
@@ -109,7 +110,7 @@ func WithDifferentOwner(ctx context.Context, owner DifferentOwner) context.Conte
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return context.WithValue(ctx, differentOwnerKey{}, DifferentOwner(strings.TrimSpace(string(owner))))
+	return forkcancelcapture.RecordValue(ctx, context.WithValue(ctx, differentOwnerKey{}, DifferentOwner(strings.TrimSpace(string(owner)))))
 }
 
 func DifferentOwnerFromContext(ctx context.Context) (DifferentOwner, bool) {
@@ -135,7 +136,7 @@ func WithLogicalOperationIdentity(ctx context.Context, identity string) context.
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return context.WithValue(ctx, logicalOperationIdentityKey{}, strings.TrimSpace(identity))
+	return forkcancelcapture.RecordValue(ctx, context.WithValue(ctx, logicalOperationIdentityKey{}, strings.TrimSpace(identity)))
 }
 
 func LogicalOperationIdentityFromContext(ctx context.Context) (string, bool) {
@@ -329,7 +330,7 @@ type SessionGrant struct {
 type sessionGrantContextKey struct{}
 
 func WithSessionGrant(ctx context.Context, grant SessionGrant) context.Context {
-	return context.WithValue(ctx, sessionGrantContextKey{}, grant)
+	return forkcancelcapture.RecordValue(ctx, context.WithValue(ctx, sessionGrantContextKey{}, grant))
 }
 
 func sessionGrantFromContext(ctx context.Context) SessionGrant {
@@ -659,7 +660,7 @@ func WithController(ctx context.Context, controller *Controller) context.Context
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return context.WithValue(ctx, controllerContextKey{}, controller)
+	return forkcancelcapture.RecordValue(ctx, context.WithValue(ctx, controllerContextKey{}, controller))
 }
 
 func ControllerFromContext(ctx context.Context) (*Controller, bool) {
@@ -699,7 +700,7 @@ func (c *Controller) RecoverCompletionContinuation(ctx context.Context, sessionI
 	if err != nil {
 		return nil, false, err
 	}
-	attempt, found, err := c.completionContinuationStore.RecoverCompletionContinuation(context.WithoutCancel(ctx), CompletionContinuationRequest{
+	attempt, found, err := c.completionContinuationStore.RecoverCompletionContinuation(forkcancelcapture.WithoutCancel(ctx), CompletionContinuationRequest{
 		Authority: authority, Origin: origin, ExecutionAuthorityID: admission.ExecutionAuthorityID,
 		SessionID: strings.TrimSpace(sessionID), Memory: memory,
 	})
@@ -735,7 +736,7 @@ func ProjectionCurrent(ctx context.Context) (bool, error) {
 		if !hasController {
 			return false, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_effect_controller_missing", "external-effects", "check_generation", map[string]any{"authority_kind": authority.Kind, "authority_id": authority.ID})
 		}
-		return controller.store.IsExternalEffectAuthorityCurrent(context.WithoutCancel(ctx), authority)
+		return controller.store.IsExternalEffectAuthorityCurrent(forkcancelcapture.WithoutCancel(ctx), authority)
 	}
 	token, hasToken := LifecycleTokenFromContext(ctx)
 	if !hasToken {
@@ -748,7 +749,7 @@ func ProjectionCurrent(ctx context.Context) (bool, error) {
 	if !ok {
 		return false, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_effect_controller_missing", "external-effects", "check_generation", map[string]any{"agent_id": token.AgentID})
 	}
-	return controller.IsCurrent(context.WithoutCancel(ctx), token)
+	return controller.IsCurrent(forkcancelcapture.WithoutCancel(ctx), token)
 }
 
 func Fingerprint(raw []byte) string {
@@ -1438,7 +1439,7 @@ func (h *Handle) SettleCompletion(ctx context.Context, settlement CompletionSett
 	if err := settlement.Validate(h.attempt); err != nil {
 		return CompletionSettlementResult{}, runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "completion_settlement_invalid", "llm-completion-authority", "settle_completion", map[string]any{"validation_error": err.Error()}, err)
 	}
-	result, err := store.SettleCompletion(context.WithoutCancel(ctx), h.attempt, settlement)
+	result, err := store.SettleCompletion(forkcancelcapture.WithoutCancel(ctx), h.attempt, settlement)
 	if result.Committed && !result.Disposition.Valid() {
 		return CompletionSettlementResult{}, runtimefailures.New(runtimefailures.ClassSchemaInvalid, "completion_settlement_disposition_invalid", "llm-completion-authority", "settle_completion", map[string]any{"attempt_id": h.attempt.AttemptID, "disposition": result.Disposition})
 	}
@@ -1461,7 +1462,7 @@ func (h *Handle) SettleCompletion(ctx context.Context, settlement CompletionSett
 		}
 	}
 	if result.Committed && result.SpendRecorded && h.controller.completionSpendProjector != nil {
-		h.controller.completionSpendProjector.ProjectCommittedCompletionSpend(context.WithoutCancel(ctx), CompletionSpendProjection{
+		h.controller.completionSpendProjector.ProjectCommittedCompletionSpend(forkcancelcapture.WithoutCancel(ctx), CompletionSpendProjection{
 			AttemptID: result.AttemptID,
 			EntityID:  result.EntityID,
 		})
@@ -1483,14 +1484,14 @@ func (h *Handle) ProjectCompletionConversation(ctx context.Context, projection C
 		projection.GrantID = h.attempt.SessionGrantID
 		projection.LockOwner = h.attempt.SessionLockOwner
 	}
-	return reportPostCommitMutation(h.controller.completionContinuationStore.ProjectCompletionConversation(context.WithoutCancel(ctx), h.attempt, projection))
+	return reportPostCommitMutation(h.controller.completionContinuationStore.ProjectCompletionConversation(forkcancelcapture.WithoutCancel(ctx), h.attempt, projection))
 }
 
 func (h *Handle) ConsumeCompletionResponse(ctx context.Context, successor, terminalResult *agentframe.ToolContinuation) error {
 	if h == nil || h.controller == nil || h.controller.completionContinuationStore == nil {
 		return runtimefailures.New(runtimefailures.ClassDependencyUnavailable, "completion_continuation_store_missing", "external-effects", "consume_completion", nil)
 	}
-	return reportPostCommitMutation(h.controller.completionContinuationStore.ConsumeCompletionResponse(context.WithoutCancel(ctx), h.attempt, successor, terminalResult))
+	return reportPostCommitMutation(h.controller.completionContinuationStore.ConsumeCompletionResponse(forkcancelcapture.WithoutCancel(ctx), h.attempt, successor, terminalResult))
 }
 
 func (h *Handle) Fail(ctx context.Context, state State, class runtimefailures.Class, code, component, operation string, attributes map[string]any, cause error) error {
@@ -1726,14 +1727,14 @@ func (c *Controller) MarkLaunched(ctx context.Context, attempt Attempt) (Externa
 	if c == nil || c.store == nil || attempt.AttemptID == "" {
 		return ExternalAttemptLaunch{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_effect_controller_missing", "external-effects", "launch_attempt", nil)
 	}
-	return c.store.MarkExternalAttemptLaunched(context.WithoutCancel(ctx), attempt, time.Now().UTC())
+	return c.store.MarkExternalAttemptLaunched(forkcancelcapture.WithoutCancel(ctx), attempt, time.Now().UTC())
 }
 
 func (c *Controller) MarkResponseObserved(ctx context.Context, attempt Attempt, evidence map[string]any) error {
 	if c == nil || c.store == nil || attempt.AttemptID == "" {
 		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_effect_controller_missing", "external-effects", "observe_response", nil)
 	}
-	return c.store.MarkExternalAttemptResponseObserved(context.WithoutCancel(ctx), attempt, evidence, time.Now().UTC())
+	return c.store.MarkExternalAttemptResponseObserved(forkcancelcapture.WithoutCancel(ctx), attempt, evidence, time.Now().UTC())
 }
 
 func (c *Controller) Settle(ctx context.Context, settlement Settlement) error {
@@ -1746,7 +1747,7 @@ func (c *Controller) Settle(ctx context.Context, settlement Settlement) error {
 	if settlement.State != StateSettled && settlement.State != StateTerminalFailure && settlement.State != StateOutcomeUncertain {
 		return fmt.Errorf("unsupported external effect settlement state %q", settlement.State)
 	}
-	return c.store.SettleExternalAttempt(context.WithoutCancel(ctx), settlement)
+	return c.store.SettleExternalAttempt(forkcancelcapture.WithoutCancel(ctx), settlement)
 }
 
 func EvidenceJSON(evidence map[string]any) json.RawMessage {

@@ -14,6 +14,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	semanticview "github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/google/uuid"
@@ -346,7 +347,7 @@ func (am *AgentManager) retireRemovedStaticTopology(
 	if targetEpoch <= 0 {
 		targetEpoch = 1
 	}
-	result, err := am.lifecycle.commitLifecycleTransition(context.WithoutCancel(ctx), store, AgentLifecycleTransition{
+	result, err := am.lifecycle.commitLifecycleTransition(forkcancelcapture.WithoutCancel(ctx), store, AgentLifecycleTransition{
 		OperationID: operationID, OperationKind: operationKind, RequestHash: requestHash,
 		Identity: identity, AgentID: identity.AgentID(), Trigger: operationKind,
 		ExpectedEpoch: current.LifecycleEpoch, ExpectedGeneration: current.LifecycleGeneration,
@@ -865,7 +866,7 @@ func (p *PreparedDurableTopologySourceSetRebind) Commit(ctx context.Context, sto
 			DiagnosticOrigin: p.manager.lifecycle.diagnosticOrigin,
 		}
 	}
-	flowResults, attempts, err := p.rebindFlowReadiness(context.WithoutCancel(ctx), store, requests, targetBinding)
+	flowResults, attempts, err := p.rebindFlowReadiness(forkcancelcapture.WithoutCancel(ctx), store, requests, targetBinding)
 	if err != nil {
 		return err
 	}
@@ -873,7 +874,7 @@ func (p *PreparedDurableTopologySourceSetRebind) Commit(ctx context.Context, sto
 		result, flow := flowResults[index]
 		var commitErr error
 		if !flow {
-			result, commitErr = p.manager.lifecycle.commitLifecycleTransition(context.WithoutCancel(ctx), store, requests[index])
+			result, commitErr = p.manager.lifecycle.commitLifecycleTransition(forkcancelcapture.WithoutCancel(ctx), store, requests[index])
 		}
 		if commitErr != nil {
 			return fmt.Errorf("rebind durable topology for %s: %w", item.identity.Description(), commitErr)
@@ -883,7 +884,7 @@ func (p *PreparedDurableTopologySourceSetRebind) Commit(ctx context.Context, sto
 			result.RunMode != item.runMode || !result.Topology.Equal(item.targetTopology) || !result.ProcessBinding.Equal(targetBinding) {
 			return fmt.Errorf("rebind durable topology for %s returned conflicting lifecycle evidence", item.identity.Description())
 		}
-		view, err := p.manager.lifecycle.committedAgentView(context.WithoutCancel(ctx), result)
+		view, err := p.manager.lifecycle.committedAgentView(forkcancelcapture.WithoutCancel(ctx), result)
 		if err != nil {
 			return fmt.Errorf("observe rebound durable row for %s: %w", item.identity.Description(), err)
 		}
@@ -1199,7 +1200,7 @@ func (am *AgentManager) commitStaticTopologyReconciliation(ctx context.Context, 
 		string(targetPhase), configRevision,
 	}, "\x00"))).String()
 	requestHash := lifecycleRequestHashForIdentity(identity, admission, operationKind, configRevision, string(targetPhase))
-	_, err = am.lifecycle.commitLifecycleTransition(context.WithoutCancel(ctx), store, AgentLifecycleTransition{
+	_, err = am.lifecycle.commitLifecycleTransition(forkcancelcapture.WithoutCancel(ctx), store, AgentLifecycleTransition{
 		OperationID: operationID, OperationKind: operationKind, RequestHash: requestHash,
 		Identity: identity, AgentID: identity.AgentID(), Trigger: "source_reconcile",
 		ExpectedEpoch: expectedEpoch, ExpectedGeneration: expectedGeneration, ExpectedPhase: expectedPhase,

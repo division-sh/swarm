@@ -17,6 +17,7 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/eventschema"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/mockperformance"
 	"github.com/division-sh/swarm/internal/runtime/pythonmodule"
@@ -175,7 +176,7 @@ func (r *MockRuntime) continueSession(ctx context.Context, session *Session, mes
 			retErr = releaseCompletedSessionLease(ctx, r.sessions, lease, session.AgentID, r.events, retErr)
 		}()
 		var cancelLease context.CancelFunc
-		ctx, cancelLease = context.WithCancel(ctx)
+		ctx, cancelLease = forkcancelcapture.WithCancel(ctx)
 		defer cancelLease()
 		heartbeatCtx := ctx
 		stopHeartbeat := sessions.StartLeaseHeartbeatWithErrorHandler(ctx, r.sessions, lease, func(heartbeatErr error) {
@@ -257,7 +258,7 @@ func (r *MockRuntime) continueSession(ctx context.Context, session *Session, mes
 	if !settled.Committed {
 		return nil, unacknowledgedCompletionError(settlementErr)
 	}
-	handoffCtx := context.WithoutCancel(ctx)
+	handoffCtx := forkcancelcapture.WithoutCancel(ctx)
 	if settled.NoCurrentProjection() {
 		return nil, settlementErr
 	}

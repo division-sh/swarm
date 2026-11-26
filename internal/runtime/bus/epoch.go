@@ -3,6 +3,8 @@ package bus
 import (
 	"context"
 	"sync/atomic"
+
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 )
 
 type runtimeEpochContextKey struct{}
@@ -21,7 +23,7 @@ func WithRuntimeEpoch(ctx context.Context, epoch int64) context.Context {
 	if epoch <= 0 {
 		epoch = CurrentRuntimeEpoch()
 	}
-	return context.WithValue(ctx, runtimeEpochContextKey{}, epoch)
+	return forkcancelcapture.RecordValue(ctx, context.WithValue(ctx, runtimeEpochContextKey{}, epoch))
 }
 
 func RuntimeEpochFromContext(ctx context.Context) (int64, bool) {

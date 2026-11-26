@@ -3,6 +3,8 @@ package runtime
 import (
 	"context"
 	"sync"
+
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 )
 
 type shutdownAdmission struct {
@@ -79,7 +81,7 @@ func (a *shutdownAdmission) BeginContext(parent context.Context) (context.Contex
 	}
 	a.nextID++
 	id := a.nextID
-	ctx, cancel := context.WithCancel(parent)
+	ctx, cancel := forkcancelcapture.WithCancel(parent)
 	a.active[id] = cancel
 	a.mu.Unlock()
 

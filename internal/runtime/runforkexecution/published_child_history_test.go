@@ -35,7 +35,7 @@ func TestIssue642PublishedChildRemainsHistoricallyPlannableBothStores(t *testing
 				s, _ := storetest.StartPostgresRuntimeStoreWithReopen(t, dsn)
 				selected = s
 			}
-			checkpoint := killSelectedForkAtCheckpoint(t, backend, dsn, "retained_join_event_committed")
+			checkpoint := killSelectedForkAtObservedActivationCheckpoint(t, backend, dsn, "retained_join_event_committed")
 			source, err := selected.PlanRunFork(t.Context(), runfork.RunForkPlanRequest{SourceRunID: checkpoint.SourceRun})
 			if err != nil || len(source.JoinSchedules) != 1 {
 				t.Fatalf("source control: joins=%d err=%v", len(source.JoinSchedules), err)
@@ -65,7 +65,7 @@ func TestIssue642PublishedChildHistoricalClosureBothStores(t *testing.T) {
 					selected = s
 					construct = func() SelectedContractExecutionOwner { return newSelectedContractExecutionOwnerForTest(t, s) }
 				}
-				checkpoint := killSelectedForkAtCheckpoint(t, backend, dsn, cut)
+				checkpoint := killSelectedForkAtObservedActivationCheckpoint(t, backend, dsn, cut)
 				lifecycle := selected.(SelectedContractForkLifecycle)
 				source, err := lifecycle.PlanRunFork(t.Context(), runfork.RunForkPlanRequest{SourceRunID: checkpoint.SourceRun})
 				if err != nil || len(source.JoinSchedules) != 1 {
@@ -108,7 +108,9 @@ func TestIssue642PublishedChildHistoricalClosureBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				ordinary, contexts := ordinaryForkRuntimeFixture(t, ctx, selected, owner, loaded, executionposture.MockOnly)
-				recovered, err := owner.RecoverSelectedForkContexts(ctx, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.MockOnly), SelectedForkRecoveryEnvironment{
+				recoveryCtx, recoveryTrace := armSelectedForkActivation(ctx, backend, capability)
+				defer recoveryTrace.Close()
+				recovered, err := owner.RecoverSelectedForkContexts(recoveryCtx, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.MockOnly), SelectedForkRecoveryEnvironment{
 					SourceLoader: loader, AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability},
 					LiveContexts: contexts, LiveRuns: selected.(runlifecycle.LiveRunReader),
 					AcquireLiveRuntime: func(ctx context.Context, reference sourceartifact.RootAdmissionReference) (*rootruntime.RuntimeContextUse, error) {
@@ -121,9 +123,12 @@ func TestIssue642PublishedChildHistoricalClosureBothStores(t *testing.T) {
 					wantRecovery = runfork.SelectedForkRecoveryResume
 				}
 				if err != nil || len(recovered) != 1 || recovered[0].RunID != checkpoint.ForkRun || recovered[0].Disposition != wantRecovery {
+					logPostgresForkActivationFailure(t, backend, capability)
+					logSelectedForkActivationTrace(t, recoveryTrace, ctx, err)
 					t.Fatalf("recover exact transferred work: %+v err=%v", recovered, err)
 				}
 				waitPublishedChildCompletion(t, selected, owner, process, baseline, checkpoint.ForkRun)
+				recoveryTrace.Close()
 				again, err := lifecycle.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: checkpoint.ForkRun, AtStart: true})
 				if err != nil || !reflect.DeepEqual(start.Entities, again.Entities) || !reflect.DeepEqual(start.TransferredJoins, again.TransferredJoins) {
 					t.Fatalf("restart/settlement changed the old prepublication cut: %v", err)
@@ -156,14 +161,19 @@ func TestIssue642PublishedChildHistoricalClosureBothStores(t *testing.T) {
 				selection := runfork.RunForkContractSelection{Mode: "selected_contracts"}
 				operation := runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "published-descendant", IdempotencyKey: "child-cut", TransportHash: "descendant-transport",
 					SourceRunID: checkpoint.ForkRun, ForkEventID: id, TargetBundleHash: availability.BundleHash, TargetRootReference: target.Admission().Reference(), ContractSelection: selection}
-				result, err := ExecuteSelectedContractRunFork(targetCtx, SelectedContractExecutionRequest{SourceRunID: checkpoint.ForkRun, At: id,
+				activationCtx, activationTrace := armSelectedForkActivation(targetCtx, backend, capability)
+				defer activationTrace.Close()
+				result, err := ExecuteSelectedContractRunFork(activationCtx, SelectedContractExecutionRequest{SourceRunID: checkpoint.ForkRun, At: id,
 					ExpectedBundleHash: availability.BundleHash,
 					Owner:              owner, ForkOperation: &operation, SourceLoader: loader, ContractSelection: selection,
 					LiveRuntime: ordinary, LiveContexts: contexts, LiveRuns: selected.(runlifecycle.LiveRunReader),
 					AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability}})
 				if err != nil || !result.Activation.Activated {
+					logPostgresForkActivationFailure(t, backend, capability)
+					logSelectedForkActivationTrace(t, activationTrace, targetCtx, err)
 					t.Fatalf("child-as-source exact owed delivery: %+v err=%v", result, err)
 				}
+				activationTrace.Close()
 				grandchild := result.Materialization.ForkRunID
 				waitPublishedChildCompletion(t, selected, owner, process, baseline, grandchild)
 				grandEvent := storetest.LoadCanonicalEventRecord(t, ctx, selected, activityidentity.ForkLineageEventID(grandchild, id))

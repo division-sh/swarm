@@ -22,12 +22,14 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 	"github.com/google/uuid"
@@ -40,6 +42,38 @@ type forkBarrierCompletionProbe struct {
 	claimOnce, completeOnce sync.Once
 	mu                      sync.Mutex
 	history                 []lifecycleprobe.Signal
+}
+
+func logPostgresForkEngineActivationFailure(t *testing.T, backend string, capability startupownership.ProcessCapability) {
+	t.Helper()
+	if backend != "postgres" {
+		return
+	}
+	readAt := time.Now().UTC().Format(time.RFC3339Nano)
+	select {
+	case <-capability.Done():
+		terminal, available := capability.TerminalResult()
+		t.Logf("the capability's terminal state as read by the test: read_at=%s done_closed=true terminal_result=%+v terminal_result_available=%t; Done also closes on a clean release; read_at is when the test looked", readAt, terminal, available)
+	default:
+		t.Logf("the capability's terminal state as read by the test: read_at=%s done_closed=false; Done also closes on a clean release; read_at is when the test looked", readAt)
+	}
+}
+
+func armForkEngineActivation(ctx context.Context, backend string, capability startupownership.ProcessCapability) (context.Context, *forkcancelcapture.Capture) {
+	if backend != "postgres" {
+		return ctx, nil
+	}
+	traceCtx, trace := forkcancelcapture.Start(ctx)
+	startupownership.BindForkCancelCapture(capability, trace)
+	return traceCtx, trace
+}
+
+func logForkEngineActivationTrace(t *testing.T, trace *forkcancelcapture.Capture, label string, ctx context.Context, err error) {
+	t.Helper()
+	if trace != nil {
+		trace.Note(label, nil, nil, ctx, err, false)
+		t.Logf("fork cancellation diagnostic:\n%s", trace.Output())
+	}
 }
 
 func (p *forkBarrierCompletionProbe) NotifyLifecycle(ctx context.Context, signal lifecycleprobe.Signal) {
@@ -193,10 +227,15 @@ func TestIssue642FanOutBarrierFrontierBothStores(t *testing.T) {
 					SourceRunID: runID, ForkEventID: cutID, TargetBundleHash: executionRequest.ExpectedBundleHash,
 					TargetRootReference: rooted.Admission().Reference(), ContractSelection: executionRequest.ContractSelection,
 				}
-				result, err := family.Execute(phase, forkEngineLiveRequest(t, rt, selected, executionRequest))
+				activationCtx, activationTrace := armForkEngineActivation(phase, backend, capability)
+				defer activationTrace.Close()
+				result, err := family.Execute(activationCtx, forkEngineLiveRequest(t, rt, selected, executionRequest))
 				if err != nil || !result.Activation.Activated || result.ForkLocalRuntimeContainer == nil {
+					logPostgresForkEngineActivationFailure(t, backend, capability)
+					logForkEngineActivationTrace(t, activationTrace, "barrier executor refused", phase, err)
 					t.Fatalf("barrier child did not acknowledge activation: %+v err=%v", result, err)
 				}
+				activationTrace.Close()
 				proof := result.ForkLocalRuntimeContainer
 				defer func() {
 					cleanup, stop := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)

@@ -48,6 +48,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
@@ -1823,7 +1824,7 @@ func (rt *Runtime) prepareStartLocked(ctx context.Context, checked *StartupSourc
 	if rt.shutdownAdmissionClosed() {
 		return nil, fmt.Errorf("runtime shutdown already started")
 	}
-	startCtx, cancelStart := context.WithCancel(ctx)
+	startCtx, cancelStart := forkcancelcapture.WithCancel(ctx)
 	startInstalled := false
 	defer func() {
 		if !startInstalled {
@@ -2334,7 +2335,7 @@ func (rt *Runtime) drainIngressForContextWithdrawal(opts ShutdownOptions) (Shutd
 			return ShutdownOptions{}, err
 		}
 	}
-	drainCtx, cancel := context.WithTimeout(context.Background(), grace)
+	drainCtx, cancel := forkcancelcapture.WithTimeout(context.Background(), grace)
 	defer cancel()
 	err = rt.drainAdmittedIngress(drainCtx, grace)
 	deadline, _ := drainCtx.Deadline()
@@ -2394,7 +2395,7 @@ func (rt *Runtime) stopWithGraceLocked(grace time.Duration) error {
 			return err
 		}
 	}
-	drainCtx, cancelDrain := context.WithTimeout(context.Background(), grace)
+	drainCtx, cancelDrain := forkcancelcapture.WithTimeout(context.Background(), grace)
 	defer cancelDrain()
 	return rt.finishStopLocked(drainCtx, rt.drainStopLocked(drainCtx, grace, false))
 }
@@ -2510,7 +2511,7 @@ func (rt *Runtime) finishStopLocked(drainCtx context.Context, shutdownErr error)
 	if grant != nil {
 		// All producers and entered publications have joined; this is cleanup,
 		// not a fresh execution budget or another attempt at accepted work.
-		retireErr := grant.Retire(context.WithoutCancel(drainCtx))
+		retireErr := grant.Retire(forkcancelcapture.WithoutCancel(drainCtx))
 		if retireErr != nil {
 			shutdownErr = errors.Join(shutdownErr, retireErr)
 		}

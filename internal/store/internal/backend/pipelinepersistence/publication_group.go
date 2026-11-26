@@ -14,6 +14,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
@@ -266,7 +267,7 @@ func (g *publicationGroup) ClaimBatch(ctx context.Context, requests []pipelineob
 			if err != nil {
 				g.preparationFailed = true
 				for _, member := range g.members {
-					err = errors.Join(err, g.releaseMember(context.WithoutCancel(ctx), member))
+					err = errors.Join(err, g.releaseMember(forkcancelcapture.WithoutCancel(ctx), member))
 				}
 				return err
 			}
@@ -287,7 +288,7 @@ func (g *publicationGroup) ClaimBatch(ctx context.Context, requests []pipelineob
 	if err != nil {
 		g.preparationFailed = true
 		for _, member := range g.members {
-			err = errors.Join(err, g.releaseMember(context.WithoutCancel(ctx), member))
+			err = errors.Join(err, g.releaseMember(forkcancelcapture.WithoutCancel(ctx), member))
 		}
 		return nil, err
 	}
@@ -378,9 +379,9 @@ func (g *publicationGroup) cleanupAcquiredClaim(ctx context.Context, claim pipel
 		r.mu.Unlock()
 		if state != nil && state.operationMu.group == g && state.postgresLease != nil {
 			if g.preparationAdmission != nil {
-				return g.preparationAdmission.ReleaseLease(context.WithoutCancel(ctx), state.postgresLease)
+				return g.preparationAdmission.ReleaseLease(forkcancelcapture.WithoutCancel(ctx), state.postgresLease)
 			}
-			return state.postgresLease.ReleaseTerminal(context.WithoutCancel(ctx))
+			return state.postgresLease.ReleaseTerminal(forkcancelcapture.WithoutCancel(ctx))
 		}
 	} else {
 		state, _ = g.sqlite.sqlitePipelineClaimState(claim)
@@ -526,7 +527,7 @@ func (g *publicationGroup) Close(ctx context.Context) error {
 	g.closed = true
 	var err error
 	for _, member := range g.members {
-		err = errors.Join(err, g.releaseMember(context.WithoutCancel(ctx), member))
+		err = errors.Join(err, g.releaseMember(forkcancelcapture.WithoutCancel(ctx), member))
 	}
 	if g.releaseSession != nil {
 		err = errors.Join(err, g.releaseSession())
@@ -831,7 +832,7 @@ func (g *publicationGroup) Settle(ctx context.Context, requests []pipelineobliga
 		out.Results = append(out.Results, pipelineobligation.PublicationSettlementResult{Claim: member.claim, Outcome: pipelineobligation.CommittedSettlement(dispositions[member.ordinal].Successful())})
 		if g.postgres != nil {
 			if lease := member.state.postgresLease; lease != nil {
-				err = errors.Join(err, lease.ReleaseTerminal(context.WithoutCancel(ctx)))
+				err = errors.Join(err, lease.ReleaseTerminal(forkcancelcapture.WithoutCancel(ctx)))
 				member.state.postgresLease = nil
 			}
 		} else {

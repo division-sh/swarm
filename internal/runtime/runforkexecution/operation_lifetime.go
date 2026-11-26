@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 )
 
 // selectedContractOperation keeps the process responsible for preparation and
@@ -42,15 +43,22 @@ func beginSelectedContractOperation(ctx context.Context) (*selectedContractOpera
 	}
 	// Client cancellation governs pre-commit work. Once committed, the process
 	// owns disposition even if the client has stopped waiting.
-	lease, err := process.Begin(context.WithoutCancel(ctx))
+	lease, err := process.Begin(forkcancelcapture.WithoutCancel(ctx))
 	if err != nil {
 		return nil, fmt.Errorf("admit selected-contract operation: %w", err)
 	}
 	preparing, cancel := context.WithCancelCause(ctx)
 	owned, cancelOwned := context.WithCancelCause(lease.Context())
+	trace := forkcancelcapture.From(ctx)
+	lease.BindForkCancelCapture("process preparation")
+	trace.Link("preparation from request", preparing, ctx)
+	trace.Link("owned operation from process lease", owned, lease.Context())
+	cancel = trace.Wrap("preparation", preparing, cancel)
+	cancelOwned = trace.Wrap("owned operation", owned, cancelOwned)
 	bridgeDone := make(chan struct{})
 	stop := context.AfterFunc(lease.Context(), func() {
 		defer close(bridgeDone)
+		trace.Note("process lease to preparation bridge", preparing, lease.Context(), lease.Context(), nil, true)
 		cancel(context.Cause(lease.Context()))
 	})
 	stopAndJoin := func() {
@@ -59,8 +67,10 @@ func beginSelectedContractOperation(ctx context.Context) (*selectedContractOpera
 		}
 	}
 	op := &selectedContractOperation{process: process, preparation: lease, cancel: cancel, cancelOwned: cancelOwned, stop: stopAndJoin}
-	op.preparing = context.WithValue(preparing, selectedOperationContextKey{}, op)
-	op.owned = context.WithValue(owned, selectedOperationContextKey{}, op)
+	op.preparing = forkcancelcapture.RecordValue(preparing, context.WithValue(preparing, selectedOperationContextKey{}, op))
+	op.owned = forkcancelcapture.RecordValue(owned, context.WithValue(owned, selectedOperationContextKey{}, op))
+	trace.Note("preparation operation context", op.preparing, preparing, op.preparing, nil, false)
+	trace.Note("retained operation context", op.owned, owned, op.owned, nil, false)
 	op.grantIssuance = op.owned
 	return op, nil
 }
@@ -99,6 +109,9 @@ func (o *selectedContractOperation) Bind(identity worklifetime.SelectedForkIdent
 	// This lease owns orchestration, not dispatched work. Quiescence must be
 	// able to join transient execution without waiting for its own caller.
 	o.use, err = selected.BeginStanding(o.owned)
+	if o.use != nil {
+		o.use.BindForkCancelCapture("selected orchestration")
+	}
 	return err
 }
 

@@ -10,6 +10,7 @@ import (
 	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	"github.com/division-sh/swarm/internal/runtime/channelnative"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	"github.com/division-sh/swarm/internal/store/internal/backend/channeldelivery"
 )
 
@@ -17,7 +18,7 @@ type channelDeliveryLaunchCheckKey struct{}
 
 // Tag only the authority check inside the native launch transaction.
 func channelDeliveryLaunchCheckContext(ctx context.Context) context.Context {
-	return context.WithValue(ctx, channelDeliveryLaunchCheckKey{}, true)
+	return forkcancelcapture.RecordValue(ctx, context.WithValue(ctx, channelDeliveryLaunchCheckKey{}, true))
 }
 
 // A delivery send owns no run or agent. The principal lock serializes default

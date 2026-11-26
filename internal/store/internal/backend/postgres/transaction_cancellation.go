@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	runtimeownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 )
 
@@ -31,7 +32,7 @@ func cancellationBeforeMutationAdmission(ctx context.Context, err error) error {
 	if err != context.Canceled || ctx == nil || ctx.Err() != context.Canceled {
 		return err
 	}
-	if _, authorityErr := runtimeownership.CaptureMutationAuthority(context.WithoutCancel(ctx)); authorityErr != nil {
+	if _, authorityErr := runtimeownership.CaptureMutationAuthority(forkcancelcapture.WithoutCancel(ctx)); authorityErr != nil {
 		return errors.Join(err, authorityErr)
 	}
 	return &cleanTransactionCancellation{cause: err, beforeAttempt: true}

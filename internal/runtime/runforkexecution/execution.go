@@ -17,6 +17,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	"github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -382,7 +383,7 @@ func (p *PreparedSelectedFork) cleanupExecutionFailure(ctx context.Context, stor
 	}
 	if operation != nil {
 		failure := runfork.ForkOperationFailure{Code: "selected_execution_failed", Reason: cause.Error()}
-		if err := p.settleConstructionFailure(context.WithoutCancel(ctx), store, forkRunID, failure, false); err != nil {
+		if err := p.settleConstructionFailure(forkcancelcapture.WithoutCancel(ctx), store, forkRunID, failure, false); err != nil {
 			return errors.Join(cause, fmt.Errorf("retain failed selected-contract fork %s: %w", forkRunID, err))
 		}
 		return cause

@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 	runtimesharedjson "github.com/division-sh/swarm/internal/runtime/sharedjson"
 )
 
@@ -48,7 +49,7 @@ func withWorkflowNodeDeliveryRoute(ctx context.Context, route events.DeliveryRou
 	route = route.Normalized()
 	ctx = events.WithDeliveryContext(ctx, route.Context)
 	ctx = runtimedelivery.WithRoute(ctx, route)
-	return context.WithValue(ctx, workflowNodeDeliveryRouteKey{}, route)
+	return forkcancelcapture.RecordValue(ctx, context.WithValue(ctx, workflowNodeDeliveryRouteKey{}, route))
 }
 
 func workflowNodeDeliveryRoute(ctx context.Context) (events.DeliveryRoute, bool) {
@@ -68,7 +69,7 @@ func withPipelineFlowScope(ctx context.Context, flowID string) context.Context {
 		return nil
 	}
 	flowID = strings.TrimSpace(flowID)
-	return context.WithValue(ctx, pipelineFlowScopeKey{}, flowID)
+	return forkcancelcapture.RecordValue(ctx, context.WithValue(ctx, pipelineFlowScopeKey{}, flowID))
 }
 
 func pipelineFlowScope(ctx context.Context) string {

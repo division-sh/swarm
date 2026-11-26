@@ -8,6 +8,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/forkcancelcapture"
 )
 
 func (am *AgentManager) prepareCanceledTurn(ctx context.Context, turn effects.TurnExecutionResult, recovered bool) (effects.CanceledTurnStore, effects.TurnTimeoutReactionOwner, effects.CanceledTurnCommand, error) {
@@ -41,13 +42,13 @@ func (am *AgentManager) prepareCanceledTurn(ctx context.Context, turn effects.Tu
 	}
 	if err != nil {
 		if plan != nil {
-			err = errors.Join(err, publication.ReleaseTurnTimeoutReaction(context.WithoutCancel(ctx), plan))
+			err = errors.Join(err, publication.ReleaseTurnTimeoutReaction(forkcancelcapture.WithoutCancel(ctx), plan))
 		}
 		return nil, nil, command, err
 	}
 	if plan == nil || plan.ValidateDurablePublicationPlan() != nil || plan.DurablePublicationEventID() != turn.Cancellation.CauseEvent {
 		if plan != nil {
-			return nil, nil, command, errors.Join(errors.New("timeout cancellation received foreign publication evidence"), publication.ReleaseTurnTimeoutReaction(context.WithoutCancel(ctx), plan))
+			return nil, nil, command, errors.Join(errors.New("timeout cancellation received foreign publication evidence"), publication.ReleaseTurnTimeoutReaction(forkcancelcapture.WithoutCancel(ctx), plan))
 		}
 		return nil, nil, command, errors.New("timeout cancellation received no publication evidence")
 	}
@@ -71,7 +72,7 @@ func (am *AgentManager) settleCanceledDelivery(ctx context.Context, event events
 	}
 	if command.Publication != nil {
 		defer func() {
-			err = errors.Join(err, publication.ReleaseTurnTimeoutReaction(context.WithoutCancel(ctx), command.Publication))
+			err = errors.Join(err, publication.ReleaseTurnTimeoutReaction(forkcancelcapture.WithoutCancel(ctx), command.Publication))
 		}()
 	}
 	var guard *deliverylifecycle.ClaimSettlementGuard
@@ -104,7 +105,7 @@ func (am *AgentManager) settleCanceledDelivery(ctx context.Context, event events
 	} else {
 		err = errors.Join(err, am.roles.DeliveryRuntime.ReleaseDeliveryContinuation(claim.DeliveryID()))
 	}
-	postCtx := context.WithoutCancel(ctx)
+	postCtx := forkcancelcapture.WithoutCancel(ctx)
 	am.logDeliveryLifecycle(postCtx, result.Delivery)
 	am.notifyTestDeliveryStatus(postCtx, event, claim.SubscriberID(), result.Delivery.Status)
 	if result.Publication != nil {
@@ -127,7 +128,7 @@ func (am *AgentManager) settleCanceledDirective(ctx context.Context, turn effect
 	}
 	if command.Publication != nil {
 		defer func() {
-			err = errors.Join(err, publication.ReleaseTurnTimeoutReaction(context.WithoutCancel(ctx), command.Publication))
+			err = errors.Join(err, publication.ReleaseTurnTimeoutReaction(forkcancelcapture.WithoutCancel(ctx), command.Publication))
 		}()
 	}
 	result, err = store.CommitCanceledTurn(ctx, command)
@@ -138,7 +139,7 @@ func (am *AgentManager) settleCanceledDirective(ctx context.Context, turn effect
 		return result, err
 	}
 	if result.Publication != nil {
-		err = errors.Join(err, publication.DispatchTurnTimeoutReaction(context.WithoutCancel(ctx), result.Publication))
+		err = errors.Join(err, publication.DispatchTurnTimeoutReaction(forkcancelcapture.WithoutCancel(ctx), result.Publication))
 	}
 	return result, err
 }
@@ -153,7 +154,7 @@ func canceledTurnSettlementContext(ctx context.Context, turn effects.TurnExecuti
 		!observed.Cancellation.RequestedAt.Equal(turn.Cancellation.RequestedAt) {
 		return nil, fmt.Errorf("captured cancellation requires exact committed physical-tail evidence")
 	}
-	return context.WithoutCancel(ctx), nil
+	return forkcancelcapture.WithoutCancel(ctx), nil
 }
 
 func (am *AgentManager) reconcileCanceledTurnsForStartup(ctx context.Context, request effects.RecoveryRequest) error {
@@ -184,7 +185,7 @@ func (am *AgentManager) commitRecoveredCanceledTurn(ctx context.Context, turn ef
 	}
 	if command.Publication != nil {
 		defer func() {
-			err = errors.Join(err, publication.ReleaseTurnTimeoutReaction(context.WithoutCancel(ctx), command.Publication))
+			err = errors.Join(err, publication.ReleaseTurnTimeoutReaction(forkcancelcapture.WithoutCancel(ctx), command.Publication))
 		}()
 	}
 	result, err := store.CommitCanceledTurn(ctx, command)
